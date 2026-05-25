@@ -1,0 +1,1262 @@
+import { _decorator, assetManager, Component, director, instantiate, Label, Node, Prefab, SpriteFrame, tween, UITransform, Vec3 } from 'cc';
+import { Constants } from './config/Constants';
+import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
+import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAllLevels } from './config/LevelJsonLoader';
+import { MahjongItem } from './MahjongItem';
+import { AudioManager, AudioClipNames } from './manager/AudioManager';
+
+interface RuntimeLevelConfig extends LevelPlayConfig {
+    baseDiff: number;
+}
+
+const { ccclass, property } = _decorator;
+
+type GameState = 'ready' | 'playing' | 'win' | 'fail';
+
+interface TileRecord {
+    uid: number;
+    type: string;
+    row: number;
+    col: number;
+    layer: number;
+    node: Node;
+    item: MahjongItem;
+    boardPos: Vec3;
+    collected: boolean;
+    removed: boolean;
+}
+
+interface TargetBox {
+    node: Node;
+    itemNodes: Node[];
+    iconNode: Node | null;
+    unlocked: boolean;
+    refreshing: boolean;
+    // 槽位是否还停在屏幕外：MoveOut 后没找到新目标时置 true，
+    // 等后续 fillEmptyTargetBoxes 补到目标再触发 MoveIn 把它带回原位
+    movedOut: boolean;
+    // 槽位正在播 MoveIn 回原位动画。期间不接受新的匹配——否则 slot 里的牌会按半路位置算飞行目标
+    movingIn: boolean;
+    type: string;
+    progress: number;
+    pending: number;
+    required: number;
+}
+
+@ccclass('GameCtrl')
+export class GameCtrl extends Component {
+    @property(Node)
+    mahjongPnode: Node = null!;
+
+    @property(Node)
+    slotPnode: Node = null!;
+
+    @property(Prefab)
+    mahjongItem: Prefab = null!;
+
+    @property(Label)
+    levelLabel: Label = null!;
+
+    nowLevel = 1;
+
+    // 玩法状态与核心数据
+    private gameState: GameState = 'ready';
+    private config: RuntimeLevelConfig = null!;
+    private levelJson: LevelJson = null!;
+    private taskQueue: string[] = [];
+    private tiles: TileRecord[] = [];
+    private slots: TileRecord[] = [];
+    private actionHistory: TileRecord[] = [];
+    private targetBoxes: TargetBox[] = [];
+
+    private slotNode: Node = null!;
+    private flyLayer: Node = null!;
+    private slotPositions: Vec3[] = [];
+    private slotCapacity = 7;
+    private uidSeed = 1;
+
+    private remainTime = 0;
+    private lastTickSecond = -1;
+    private comboTimes = 0;
+    private lastComboAt = 0;
+    private resolvingMatch = false;
+    private dealingTiles = false;
+    private targetsInitialized = false;
+    private hasStarted = false;
+    // 闲置帮助提示:玩家点牌后开始 10s 计时,期间没新点击就触发一次提示;
+    // 提示动画播放期间(tipsActive=true)点牌不重启计时,等 UI 通知 End 才解除
+    private tipsActive = false;
+    private static readonly IDLE_TIPS_SECONDS = 10;
+
+    // UI 相关 —— targetLabel/statusLabel/comboLabel/toastLabel 已搬到 UIGameLayer，
+    // levelLabel 是 @property 由场景绑定，留在这里直接读写
+
+    // 资源数据
+    private iconIds: string[] = [];
+    private iconFrames: Map<string, SpriteFrame> = new Map();
+
+    start() {
+        director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
+        this.initSceneRefs();
+        this.preloadMahjongFrames(() => {
+            if (this.iconIds.length === 0) {
+                console.warn(`GameCtrl: no mahjong tile frames found in ${Constants.MahjongBoard.ResourceDir}`);
+                return;
+            }
+            const bundle = assetManager.getBundle(Constants.GameBundleName);
+            preloadAllLevels(bundle, () => {
+                if (!hasAnyLevelJson()) {
+                    console.warn('GameCtrl: no level JSON loaded under assets/game/json');
+                    return;
+                }
+                // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
+                director.emit(Constants.eventNames.EventGameUiInit, {
+                    mahjongItem: this.mahjongItem,
+                    iconFrames: this.iconFrames,
+                });
+                this.startLevel(this.nowLevel);
+                this.hasStarted = true;
+            });
+        });
+    }
+
+    // 退到 start 层后再点开始，靠 onEnable 触发整局重开
+    protected onEnable() {
+        if (!this.hasStarted) return;
+        this.startLevel(1);
+    }
+
+    update(deltaTime: number) {
+        if (this.gameState !== 'playing' || !this.config) return;
+
+        if (this.config.levelTime <= 0) return;
+
+        this.remainTime = Math.max(0, this.remainTime - deltaTime);
+        // 倒计时整数秒没变就不刷 HUD，避免 60Hz 重算 filter
+        const currentSecond = Math.ceil(this.remainTime);
+        if (currentSecond !== this.lastTickSecond) {
+            this.lastTickSecond = currentSecond;
+            this.updateHud();
+        }
+        if (this.remainTime <= 0) this.failLevel('时间到');
+    }
+
+    private startLevel(level: number) {
+        this.gameState = 'playing';
+        this.nowLevel = level;
+        this.uidSeed = 1;
+        this.tiles = [];
+        this.slots = [];
+        this.actionHistory = [];
+        this.refreshUndoButtonStatus();
+        this.clearIdleTips();
+
+        const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
+        if (rootSlotNode && this.targetBoxes.length === 0) this.setupTargetSlot(rootSlotNode);
+
+        this.config = this.createLevelConfig(level);
+        this.taskQueue = this.buildTaskQueue(this.levelJson);
+
+        this.resetTargetBoxes();
+        this.comboTimes = 0;
+        this.lastComboAt = 0;
+        this.resolvingMatch = false;
+        this.dealingTiles = false;
+        this.targetsInitialized = false;
+
+        this.slotCapacity = this.config.slotCount || 7;
+        this.remainTime = this.config.levelTime || 300;
+        this.lastTickSecond = -1;
+
+        this.clearBoard();
+        this.generateBoard();
+        this.playDealAnimation();
+        this.updatePlayableStates();
+        this.updateHud();
+        this.showToast('关卡开始', 1);
+    }
+
+    private generateBoard() {
+        if (!this.mahjongPnode || !this.mahjongItem || !this.levelJson) return;
+
+        const positions = this.levelJson.positions || [];
+        if (positions.length === 0) return;
+
+        // 不同关卡 JSON 半格跨度差异很大(level1=10×10,level9=14×16,level10=14×8)。
+        // 这里按 bbox 同时调 pNode 边框大小(更美观,小关不显得旷)和整体缩放(超大关卡兜底)
+        this.fitBoardAndResizePnode(positions);
+
+        const { cx, cy } = this.computeBoardCenter(positions);
+        const halfStepX = Constants.MahjongBoard.TileStepX / 2;
+        const halfStepY = Constants.MahjongBoard.TileStepY / 2;
+
+        const sortedPositions = positions
+            .slice()
+            .sort((a, b) => a.z_layer - b.z_layer || b.y_row - a.y_row || a.x_col - b.x_col);
+
+        for (let i = 0; i < sortedPositions.length; i++) {
+            const p = sortedPositions[i];
+            const type = String(p.tile_id);
+            const x = (p.x_col - cx) * halfStepX;
+            const y = (cy - p.y_row) * halfStepY;
+            const boardPos = new Vec3(x, y, 0);
+
+            const node = instantiate(this.mahjongItem);
+            node.name = `tile_${i}_${type}`;
+            node.layer = this.mahjongPnode.layer;
+            // 初始在屏幕上方，用于进场动画
+            node.setPosition(boardPos.x, boardPos.y + 760, boardPos.z);
+            node.setScale(Constants.MahjongBoard.BoardScale, Constants.MahjongBoard.BoardScale, 1);
+            this.mahjongPnode.addChild(node);
+
+            const item = node.getComponent(MahjongItem) || node.addComponent(MahjongItem);
+            item.setData(type, p.y_row, p.x_col, p.z_layer, this.iconFrames.get(type) || null);
+
+            const tile: TileRecord = {
+                uid: this.uidSeed++,
+                type,
+                row: p.y_row,
+                col: p.x_col,
+                layer: p.z_layer,
+                node,
+                item,
+                boardPos: boardPos.clone(),
+                collected: false,
+                removed: false,
+            };
+            this.tiles.push(tile);
+            node.on(Node.EventType.TOUCH_END, () => this.onTileTap(tile), this);
+        }
+
+        // 重新进行渲染层级排序
+        // 注意：直接对 pNode.children 整体 setSiblingIndex 会把 _shadowLayer_<N>_
+        // 容器挤到末尾，导致所有阴影盖在所有牌身之上（参见下面 onTileUndo 中的同款警告）。
+        // 这里在重排后逐张调用 refreshShadowLayerAttachment，让阴影容器回到它该在的位置。
+        // 当前路径在 tile.start() 之前调用，shadow 容器尚未创建，refresh 是 no-op；
+        // 即便未来调用时机变化，此重排也不会再破坏阴影渲染层次。
+        const sortedTiles = this.tiles
+            .slice()
+            .sort((a, b) => this.compareBoardDisplayOrder(a, b));
+        sortedTiles.forEach((tile, index) => tile.node.setSiblingIndex(index));
+        for (const tile of sortedTiles) {
+            tile.item.refreshShadowLayerAttachment();
+        }
+
+        this.updateBoardTileShadows();
+    }
+
+    // 以 layer 0 实际出现的半格坐标 bbox 中心为基准做平移
+    private computeBoardCenter(positions: LevelJsonPosition[]): { cx: number; cy: number } {
+        let minRow = Infinity, maxRow = -Infinity;
+        let minCol = Infinity, maxCol = -Infinity;
+        for (const p of positions) {
+            if (p.z_layer !== 0) continue;
+            if (p.y_row < minRow) minRow = p.y_row;
+            if (p.y_row > maxRow) maxRow = p.y_row;
+            if (p.x_col < minCol) minCol = p.x_col;
+            if (p.x_col > maxCol) maxCol = p.x_col;
+        }
+        // layer 0 为空时退回到全部位置
+        if (minRow === Infinity) {
+            for (const p of positions) {
+                if (p.y_row < minRow) minRow = p.y_row;
+                if (p.y_row > maxRow) maxRow = p.y_row;
+                if (p.x_col < minCol) minCol = p.x_col;
+                if (p.x_col > maxCol) maxCol = p.x_col;
+            }
+        }
+        return { cx: (minCol + maxCol) / 2, cy: (minRow + maxRow) / 2 };
+    }
+
+    private buildTaskQueue(json: LevelJson | null): string[] {
+        if (!json?.decoded_config?.task?.[0]) return [];
+        return json.decoded_config.task[0].map((id) => String(id));
+    }
+
+    // 棋盘自适应(固定尺寸方案):
+    // pNode 视觉尺寸对所有关卡固定为 IdealPnodeWidth × IdealPnodeHeight,
+    // setScale 让 board+padding 装进 (Ideal - 2×padding) 的可用区域。
+    // 所有关卡边框看起来一致(同一矩形),只有牌大小随关卡变化。
+    // 棋盘 anchor 0.5 居中,小棋盘四周自然形成对称留白。
+    // (Sprite 是 9-slice + CUSTOM sizeMode,父节点 gameLayer 无 Layout,改 contentSize 安全)
+    private fitBoardAndResizePnode(positions: LevelJsonPosition[]) {
+        const ui = this.mahjongPnode.getComponent(UITransform);
+        if (!ui || positions.length === 0) return;
+
+        let minHC = Infinity, maxHC = -Infinity, minHR = Infinity, maxHR = -Infinity;
+        for (const p of positions) {
+            if (p.x_col < minHC) minHC = p.x_col;
+            if (p.x_col > maxHC) maxHC = p.x_col;
+            if (p.y_row < minHR) minHR = p.y_row;
+            if (p.y_row > maxHR) maxHR = p.y_row;
+        }
+
+        const halfStepX = Constants.MahjongBoard.TileStepX / 2;
+        const halfStepY = Constants.MahjongBoard.TileStepY / 2;
+        // 一张牌在 BoardScale 下的视觉占位,作 bbox 端点的留白
+        const tileVisualW = Constants.MahjongBoard.TileStepX * Constants.MahjongBoard.BoardScale;
+        const tileVisualH = Constants.MahjongBoard.TileStepY * Constants.MahjongBoard.BoardScale;
+        const boardW = (maxHC - minHC) * halfStepX + tileVisualW;
+        const boardH = (maxHR - minHR) * halfStepY + tileVisualH;
+
+        const idealW = Constants.MahjongBoard.IdealPnodeWidth;
+        const idealH = Constants.MahjongBoard.IdealPnodeHeight;
+        const padding = Constants.MahjongBoard.BoardPadding;
+        // 棋盘可占用区域 = 视觉尺寸去掉 padding
+        const usableW = idealW - padding * 2;
+        const usableH = idealH - padding * 2;
+
+        // scale 让棋盘装进可用区。小棋盘 ≤1 不放大,只可能缩小;clamp 到下限防糊
+        let scale = Math.min(usableW / boardW, usableH / boardH, 1);
+        scale = Math.max(scale, Constants.MahjongBoard.MinBoardFitRatio);
+
+        this.mahjongPnode.setScale(scale, scale, 1);
+        // pNode 视觉尺寸固定 = ideal,而视觉 = contentSize × scale,所以 contentSize = ideal / scale
+        ui.setContentSize(idealW / scale, idealH / scale);
+
+        console.log(
+            `[BoardFit] level=${this.nowLevel} ` +
+            `halfSpan=(${maxHC - minHC}×${maxHR - minHR}) ` +
+            `boardPx=(${boardW.toFixed(1)}×${boardH.toFixed(1)}) ` +
+            `scale=${scale.toFixed(3)} ` +
+            `boardVisible=(${(boardW * scale).toFixed(1)}×${(boardH * scale).toFixed(1)}) ` +
+            `pNodeVisible=(${idealW}×${idealH})`
+        );
+    }
+
+    // ==========================================
+    // 玩法交互与核心逻辑
+    // ==========================================
+
+    // 闲置 10s 后被 scheduleOnce 调起,随机挑一个引导按钮触发 UI 提示动画。
+    // 用 arrow function 保证 this 绑定 + 引用稳定,这样 unschedule 能按引用命中
+    private triggerHelpTips = () => {
+        if (this.gameState !== 'playing' || this.tipsActive) return;
+        this.tipsActive = true;
+        // 1=解锁槽位按钮,2=换牌按钮,随机选一个
+        const tipsIndex = Math.random() < 0.5 ? 1 : 2;
+        director.emit(Constants.eventNames.EventShowTipsAnimator, tipsIndex);
+    };
+
+    // UI 端玩家点击提示按钮后回传,解锁"动画中不重启计时"的状态;
+    // 下次玩家点牌时 onTileTap 会重新排 10s schedule
+    private onTipsAnimatorEnd = () => {
+        if (!this.tipsActive) return;
+        this.tipsActive = false;
+    };
+
+    // 关卡开始/胜利/失败时统一调用,把待触发的提示取消、把锁解除,避免跨关卡误触
+    private clearIdleTips() {
+        this.unschedule(this.triggerHelpTips);
+        this.tipsActive = false;
+    }
+
+    private onTileTap(tile: TileRecord) {
+        if (this.gameState !== 'playing' || this.dealingTiles || tile.collected || tile.removed || this.isTileBlocked(tile)) {
+            return;
+        }
+
+        // 提示动画播放期间玩家点了牌:中断呼吸动画并解锁计时,然后跟正常点牌一样重排 10s 闲置计时
+        if (this.tipsActive) {
+            this.tipsActive = false;
+            director.emit(Constants.eventNames.EventStopTipsAnimator);
+        }
+        this.unschedule(this.triggerHelpTips);
+        this.scheduleOnce(this.triggerHelpTips, GameCtrl.IDLE_TIPS_SECONDS);
+
+        if (tile.item.playTapFeedback) tile.item.playTapFeedback();
+
+        const targetBox = this.findMatchingTargetBox(tile.type);
+        if (targetBox) {
+            this.moveTileToTarget(tile, targetBox);
+        } else {
+            this.moveTileToSlot(tile);
+        }
+    }
+
+    private moveTileToTarget(tile: TileRecord, box: TargetBox) {
+        if (box.refreshing || box.progress + box.pending >= box.required) {
+            if (this.slots.indexOf(tile) < 0) this.moveTileToSlot(tile);
+            return;
+        }
+
+        box.pending += 1;
+        tile.collected = true;
+        tile.removed = true;
+        tile.node.name = `targetTile_${tile.uid}`;
+
+        const worldPosition = tile.node.worldPosition.clone();
+        const flyLayer = this.ensureFlyLayer();
+        tile.node.setParent(flyLayer);
+        tile.node.setWorldPosition(worldPosition);
+        tile.item.setPlayable(true);
+
+        const targetIndex = this.clamp(box.progress + box.pending, 1, Math.max(1, box.required));
+        const targetCell = box.itemNodes[targetIndex] || box.iconNode;
+        const targetWorldPosition = targetCell ? targetCell.worldPosition.clone() : box.node.worldPosition.clone();
+        const targetFlyPosition = this.worldToLocalPosition(flyLayer, targetWorldPosition);
+        tile.node.setSiblingIndex(flyLayer.children.length - 1);
+        const targetBoxPosition = targetCell ? targetCell.position.clone() : Vec3.ZERO.clone();
+
+        // 牌起飞时就触发抖动:把飞行时长传给 UI,让挤压峰值精准落在落位时刻
+        const flyToBoxDuration = 0.18 + 0.1;
+        director.emit(Constants.eventNames.EventShowSlotShake, this.getTargetBoxSlotID(box), flyToBoxDuration);
+
+        tween(tile.node)
+            .to(flyToBoxDuration, { position: targetFlyPosition, scale: new Vec3(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1) })
+            .call(() => {
+                box.pending = Math.max(0, box.pending - 1);
+                if (box.refreshing || !box.type) {
+                    if (tile.node?.isValid) tile.node.destroy();
+                    return;
+                }
+                const endWorldPosition = tile.node.worldPosition.clone();
+                tile.node.setParent(box.node);
+                tile.node.setWorldPosition(endWorldPosition);
+                tile.node.setPosition(targetBoxPosition);
+                tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
+                // siblingIndex 依 progress 递增即可（这张落下后 progress 就会变成 progress+1）
+                tile.node.setSiblingIndex(160 + box.progress + 1);
+                //屏蔽触摸方法
+                tile.item.disableTileTouch();
+
+                this.onTargetCollected(box);
+            })
+            .start();
+
+        this.updatePlayableStates();
+        this.updateHud();
+    }
+
+    private moveTileToSlot(tile: TileRecord) {
+        tile.collected = true;
+        tile.node.name = `slotTile_${tile.uid}`;
+        this.actionHistory.push(tile);
+        this.refreshUndoButtonStatus();
+
+        const lastSame = this.slots.reduce((last, st, i) => st.type === tile.type ? i : last, -1);
+        this.slots.splice(lastSame >= 0 ? lastSame + 1 : this.slots.length, 0, tile);
+        const isSlotFull = this.slots.length >= Math.max(1, this.slotCapacity - 1);
+
+        const worldPosition = tile.node.worldPosition.clone();
+        const flyLayer = this.ensureFlyLayer();
+        tile.node.setParent(flyLayer);
+        tile.node.setWorldPosition(worldPosition);
+        tile.item.setPlayable(true);
+
+        this.arrangeSlotTiles(isSlotFull ? 0 : 0.16+0.1, tile);
+        this.updatePlayableStates();
+        this.updateHud();
+
+        if (isSlotFull) {
+            this.checkEndState();
+        } else {
+            this.scheduleOnce(() => this.checkEndState(), 0.18);
+        }
+    }
+
+    private arrangeSlotTiles(duration = 0.08, flyingTile: TileRecord | null = null) {
+        // 底部存牌槽的牌比目标槽小 0.05,视觉上略小一圈
+        const slotTileScale = Constants.MahjongBoard.SlotScale - 0.05;
+        for (let i = 0; i < this.slots.length; i++) {
+            const tile = this.slots[i];
+            const target = this.getSlotTargetPosition(i);
+            if (tile === flyingTile || tile.node.parent !== this.slotNode) {
+                const targetWorldPosition = this.localToWorldPosition(this.slotNode, target);
+                const flyLayer = this.ensureFlyLayer();
+                if (tile.node.parent !== flyLayer) {
+                    const worldPosition = tile.node.worldPosition.clone();
+                    tile.node.setParent(flyLayer);
+                    tile.node.setWorldPosition(worldPosition);
+                }
+                const targetFlyPosition = this.worldToLocalPosition(flyLayer, targetWorldPosition);
+                tile.node.setSiblingIndex(flyLayer.children.length - 1);
+
+                // 飞入的麻将牌起飞时就触发底部存牌槽抖动,把飞行时长传过去,
+                // UI 端会让 shake 的挤压峰值贴住实际落位时刻
+                if (tile === flyingTile) {
+                    director.emit(Constants.eventNames.EventShowSlotShake, Constants.slotLayer.BottomSlotBarID, duration);
+                }
+
+                tween(tile.node)
+                    .to(duration, { position: targetFlyPosition, scale: new Vec3(slotTileScale, slotTileScale, 1) })
+                    .call(() => {
+                        if (!tile.node?.isValid || this.slots.indexOf(tile) < 0) return;
+                        const endWorldPosition = tile.node.worldPosition.clone();
+                        tile.node.setParent(this.slotNode);
+                        tile.node.setWorldPosition(endWorldPosition);
+                        tile.node.setPosition(target);
+                        tile.node.setScale(slotTileScale, slotTileScale, 1);
+                        //屏蔽触摸方法
+                        tile.item.disableTileTouch();
+                        tile.node.setSiblingIndex(100 + this.slots.indexOf(tile));
+                    })
+                    .start();
+                continue;
+            }
+
+            tile.node.setSiblingIndex(100 + i);
+            tween(tile.node)
+                .to(duration, { position: target, scale: new Vec3(slotTileScale, slotTileScale, 1) })
+                .start();
+        }
+    }
+
+    private getSlotTargetPosition(index: number): Vec3 {
+        if (index < this.slotPositions.length) return this.slotPositions[index].clone();
+        const gap = this.slotCapacity <= 7 ? 72 : 62;
+        return new Vec3(-((this.slotCapacity - 1) * gap) / 2 + index * gap, 0, 0);
+    }
+
+    // UIGameLayer.slotNodeArr[0] 是底部存牌槽，目标槽 slot1~slot4 从下标 1 开始
+    private getTargetBoxSlotID(box: TargetBox): number {
+        return this.targetBoxes.indexOf(box) + Constants.slotLayer.TargetBoxIndexOffset;
+    }
+
+    private emitRenderSlot(box: TargetBox) {
+        director.emit(Constants.eventNames.EventRenderSlot, {
+            slotID: this.getTargetBoxSlotID(box),
+            unlocked: box.unlocked,
+            type: box.type,
+            progress: box.progress,
+            required: box.required,
+            refreshing: box.refreshing,
+        });
+    }
+
+    private emitClearSlot(box: TargetBox) {
+        director.emit(Constants.eventNames.EventClearSlot, {
+            slotID: this.getTargetBoxSlotID(box),
+        });
+    }
+
+    private onTargetCollected(box: TargetBox) {
+        if (this.gameState !== 'playing') return;
+        box.progress = Math.min(box.required, box.progress + 1);
+
+        if (box.progress >= box.required) {
+            this.updateCombo();
+            // 等抖动峰值过去再触发槽位移出,避免完成那一下还没看清就被移出。
+            // 不提前置 refreshing:progress 已等于 required,findMatchingTargetBox 和 moveTileToTarget
+            // 都靠 progress+pending<required 过滤,期间不会再有牌被分配到这个 box。
+            this.scheduleOnce(() => {
+                this.refreshTargetBoxWithAnimation(box);
+            }, 0.18);
+            this.updatePlayableStates();
+            this.updateHud();
+            return;
+        }
+
+        this.emitRenderSlot(box);
+
+        this.collectStoredTargets();
+        this.fillEmptyTargetBoxes();
+        this.updatePlayableStates();
+        this.updateHud();
+        this.checkEndState();
+    }
+
+    private collectStoredTargets() {
+        if (this.gameState !== 'playing' || this.resolvingMatch) return;
+        const moveList: { tile: TileRecord; box: TargetBox }[] = [];
+        const plannedByBox = new Map<TargetBox, number>();
+
+        for (const tile of this.slots.slice()) {
+            const box = this.findMatchingTargetBox(tile.type);
+            if (!box) continue;
+            const planned = plannedByBox.get(box) || 0;
+            if (box.progress + box.pending + planned >= box.required) continue;
+            plannedByBox.set(box, planned + 1);
+            moveList.push({ tile, box });
+        }
+        if (moveList.length === 0) return;
+
+        this.resolvingMatch = true;
+        for (const entry of moveList) {
+            const index = this.slots.indexOf(entry.tile);
+            if (index >= 0) this.slots.splice(index, 1);
+            this.actionHistory = this.actionHistory.filter((t) => t !== entry.tile);
+            this.moveTileToTarget(entry.tile, entry.box);
+        }
+        this.refreshUndoButtonStatus();
+
+        this.arrangeSlotTiles(0.12+0.1);
+        this.scheduleOnce(() => {
+            this.resolvingMatch = false;
+            this.collectStoredTargets();
+            this.fillEmptyTargetBoxes();
+            this.updateHud();
+            this.checkEndState();
+        }, 0.22);
+    }
+
+    private checkEndState() {
+        if (this.gameState !== 'playing') return;
+        if (this.tiles.every((t) => t.removed)) {
+            return this.winLevel();
+        }
+        if (this.slots.length >= Math.max(1, this.slotCapacity - 1)) {
+            return this.failLevel('槽位满了');
+        }
+
+        this.fillEmptyTargetBoxes();
+        this.lockUnavailableTargetBoxes();
+        if (!this.canStillCompleteTasks()) {
+            this.failLevel('死局，目标牌不足');
+        }
+    }
+
+    private canStillCompleteTasks(): boolean {
+        // 把"已上场目标 + 未来队列"按 type 合并需求量,与棋盘剩余张数对比;
+        // 任一 type 不够就死局。box.required 通常为 3,队列每项也是 3。
+        const demand = new Map<string, number>();
+        for (const box of this.targetBoxes) {
+            if (!box.unlocked || !box.type) continue;
+            const remaining = Math.max(0, box.required - box.progress - box.pending);
+            if (remaining > 0) demand.set(box.type, (demand.get(box.type) || 0) + remaining);
+        }
+        for (const type of this.taskQueue) {
+            demand.set(type, (demand.get(type) || 0) + 3);
+        }
+        if (demand.size === 0) return true;
+
+        const supply = new Map<string, number>();
+        for (const tile of this.tiles) {
+            if (tile.removed) continue;
+            supply.set(tile.type, (supply.get(tile.type) || 0) + 1);
+        }
+        for (const [type, need] of demand) {
+            if ((supply.get(type) || 0) < need) return false;
+        }
+        return true;
+    }
+
+    private winLevel() {
+        this.gameState = 'win';
+        this.clearIdleTips();
+        this.showToast('恭喜过关！');
+        this.scheduleOnce(() => this.startLevel(this.nowLevel + 1), 1.5);
+    }
+
+    private failLevel(reason: string) {
+        if (this.gameState !== 'playing') return;
+        this.gameState = 'fail';
+        this.clearIdleTips();
+        this.showToast(`${reason}，重开本关`);
+        this.scheduleOnce(() => this.startLevel(this.nowLevel), 1.5);
+    }
+
+    // ==========================================
+    // 遮挡判断与表现
+    // ==========================================
+
+    private updatePlayableStates() {
+        this.updateBoardTileShadows();
+        for (const tile of this.tiles) {
+            if (!tile.collected && !tile.removed) {
+                tile.item.setPlayable(!this.isTileBlocked(tile));
+            }
+        }
+    }
+
+    private isTileBlocked(tile: TileRecord): boolean {
+        for (const other of this.tiles) {
+            if (other === tile || other.collected || other.removed || other.layer <= tile.layer) continue;
+            // 判断是否在同层级上方遮挡 (物理碰撞盒检查)
+            if (Math.abs(other.boardPos.x - tile.boardPos.x) < Constants.MahjongBoard.TileStepX * 0.82 &&
+                Math.abs(other.boardPos.y - tile.boardPos.y) < Constants.MahjongBoard.TileStepY * 0.82) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private updateBoardTileShadows() {
+        // 委托给每张牌自己的 updateShadowStatus —— 它会按"同层四方向是否有邻居"判断显示
+        // 这里负责在棋盘状态变化（收牌/撤回）后统一触发邻居重算，避免某张牌的阴影
+        // 因周围被消除/撤回而陈旧
+        for (const tile of this.tiles) {
+            if (tile.collected || tile.removed) continue;
+            tile.item.updateShadowStatus();
+        }
+    }
+
+    private playDealAnimation() {
+        if (this.tiles.length === 0) return;
+        this.dealingTiles = true;
+
+        // ==========================================
+        // 按照原版参数配置飞入动画节奏
+        // ==========================================
+        const startDelayTime = 0.1;      // m_startDelayTime: 开局等待 0.1s 后开始发牌
+        const startAddMoveTime = 0.013;  // m_startAddMoveTime: 每张牌之间的启动间隔错峰
+        const startMoveTime = 0.3;       // m_startMoveTime: 单张牌飞行耗时 0.3s
+
+        // 开局发牌音效:延时到首张牌真正起飞的瞬间再响,避免画面还没动声音就先到
+        this.scheduleOnce(() => {
+            AudioManager.instance.playOneShot(AudioClipNames.game_start);
+        }, startDelayTime);
+
+        // 计算所有麻将落位完成的总耗时
+        const totalDuration = startDelayTime + startMoveTime + (this.tiles.length > 0 ? (this.tiles.length - 1) * startAddMoveTime : 0);
+
+        for (let i = 0; i < this.tiles.length; i++) {
+            const tile = this.tiles[i];
+            // 计算当前这张牌的启动延迟
+            const delay = startDelayTime + i * startAddMoveTime;
+
+            // 【修改点】判断最终位置在左边还是右边，决定初始起飞的 X 坐标
+            // 假设 900 已经足够处于屏幕可见区域之外（你可以根据实际设计分辨率微调这个值，如 800 或 1000）
+            const startX = tile.boardPos.x < 0 ? -900 : 900;
+
+            // 初始状态：放置在屏幕左右两侧，Y 轴保持与目标一致，稍微缩小
+            tile.node.setPosition(startX, tile.boardPos.y, tile.boardPos.z);
+            tile.node.setScale(Constants.MahjongBoard.BoardScale * 0.92, Constants.MahjongBoard.BoardScale * 0.92, 1);
+
+            // 执行横向飞入缓动
+            tween(tile.node)
+                .delay(delay)
+                .to(startMoveTime, {
+                    position: tile.boardPos,
+                    scale: new Vec3(Constants.MahjongBoard.BoardScale, Constants.MahjongBoard.BoardScale, 1)
+                }, {}) // 横向飞入配合 backOut 会有一种发牌“急停撞击”的干脆手感，如果不喜欢可以改为 'quadOut'
+                .start();
+        }
+
+        // 依据精确计算的总耗时，在全部落位后解除遮罩并初始化目标
+        this.scheduleOnce(() => {
+            this.dealingTiles = false;
+            this.updatePlayableStates();
+            this.initializeTargetsAfterDeal();
+        }, totalDuration);
+    }
+
+    // ==========================================
+    // 目标收集系统 (Target Box)
+    // ==========================================
+
+    private initializeTargetsAfterDeal() {
+        if (this.gameState !== 'playing' || this.targetsInitialized) return;
+        this.targetsInitialized = true;
+        this.pickTargets();
+        this.updateHud();
+    }
+
+    private pickTargets() {
+        for (const box of this.targetBoxes) {
+            if (!box.unlocked) { this.emitRenderSlot(box); continue; }
+            this.assignNewTarget(box);
+        }
+        this.fillEmptyTargetBoxes();
+        this.lockUnavailableTargetBoxes();
+        this.collectStoredTargets();
+    }
+
+    private resetTargetBoxes() {
+        if (this.targetBoxes.length === 0) {
+            const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
+            this.setupTargetSlot(rootSlotNode);
+        }
+        const unlockedCount = this.config?.unlockedSlotCount ?? 2;
+        // 1) 先把每个槽位的状态/旧节点清掉
+        for (let i = 0; i < this.targetBoxes.length; i++) {
+            const box = this.targetBoxes[i];
+            this.emitClearSlot(box);
+            box.unlocked = i < unlockedCount;
+            box.type = '';
+            box.progress = 0;
+            box.pending = 0;
+            box.refreshing = false;
+            box.movedOut = false;
+            box.movingIn = false;
+            box.required = 3; // 三消
+        }
+        // 2) UI 层一次性把所有槽位 transform/box_2 复位（包含底部存牌槽）
+        director.emit(Constants.eventNames.EventResetSlots, {
+            targetBoxStates: this.targetBoxes.map(b => ({
+                slotID: this.getTargetBoxSlotID(b),
+                unlocked: b.unlocked,
+            })),
+        });
+        // 3) 渲染初始状态
+        for (const box of this.targetBoxes) {
+            this.emitRenderSlot(box);
+        }
+    }
+
+    // 严格按 task[] 顺序出队:队列空了 box.type='' 返回 false,上层会把槽位标记 movedOut
+    private assignNewTarget(box: TargetBox): boolean {
+        const type = this.taskQueue.shift() || '';
+        this.emitClearSlot(box);
+        box.type = type;
+        box.progress = 0;
+        box.pending = 0;
+        this.emitRenderSlot(box);
+        return !!type;
+    }
+
+    private fillEmptyTargetBoxes() {
+        for (const box of this.targetBoxes) {
+            if (!box.unlocked || box.type || box.refreshing) continue;
+            this.assignNewTarget(box);
+            if (!box.type) continue;
+            // 如果这个槽位之前因为没目标停在屏幕外，现在补到了新目标，把它移入回原位
+            if (box.movedOut) {
+                box.movedOut = false;
+                this.startSlotMoveIn(box);
+            }
+        }
+    }
+
+    // 队列模式下不再"丢弃 type 让下次重新分配",否则会把队列里那一项直接吞掉导致总数错位。
+    // 这里仅作为死局判定的入口之一。
+    private lockUnavailableTargetBoxes() {
+        // no-op
+    }
+
+    private refreshTargetBoxWithAnimation(box: TargetBox) {
+        if (box.refreshing) return;
+        box.refreshing = true;
+        box.pending = 0;
+
+        const slotID = this.getTargetBoxSlotID(box);
+
+        // 触发槽位移出动画：整个槽位带着收集到的麻将牌一起飞出屏幕
+        director.emit(Constants.eventNames.EventShowSlotMoveOut, slotID);
+
+        // MoveOut 动画约 0.6333s，等其结束后再清理旧资源、生成新目标并回弹
+        this.scheduleOnce(() => {
+            // assignNewTarget 内部会清理旧的 collectedNodes 与 previewNode，并生成新预览
+            const assigned = this.assignNewTarget(box);
+
+            if (assigned) {
+                // 有新目标：把槽位从屏幕外带回原位
+                this.startSlotMoveIn(box);
+                box.movedOut = false;
+            } else {
+                // 没新目标可发：让槽位继续停在屏幕外，等后续 fillEmptyTargetBoxes 补上目标时再 MoveIn
+                box.movedOut = true;
+            }
+
+            box.refreshing = false;
+            this.fillEmptyTargetBoxes();
+            this.collectStoredTargets();
+            this.updatePlayableStates();
+            this.updateHud();
+            this.checkEndState();
+        }, Constants.slotAnim.MoveOutWait);
+    }
+
+    private findMatchingTargetBox(type: string): TargetBox | null {
+        return this.targetBoxes.find((b) => b.unlocked && !b.refreshing && !b.movingIn && b.type === type && b.progress + b.pending < b.required) || null;
+    }
+
+    // 触发槽位回到原位的动画。期间标记 movingIn=true,findMatchingTargetBox 会跳过此槽,
+    // 避免 slot 里的牌按半路位置算飞行目标。动画结束后再补一次 collectStoredTargets,
+    // 把等候的牌按已落位的真实坐标飞过去
+    private startSlotMoveIn(box: TargetBox) {
+        box.movingIn = true;
+        director.emit(Constants.eventNames.EventShowSlotMoveIn, this.getTargetBoxSlotID(box));
+        this.scheduleOnce(() => {
+            box.movingIn = false;
+            if (this.gameState !== 'playing') return;
+            this.collectStoredTargets();
+        }, Constants.slotAnim.MoveInWait);
+    }
+
+    // ==========================================
+    // UI 初始化与更新
+    // ==========================================
+
+    private initSceneRefs() {
+        this.mahjongPnode = this.mahjongPnode || this.node.getChildByName('pNode') || this.findChildDeep(this.node, 'pNode')!;
+        this.levelLabel = this.levelLabel || this.node.getChildByName('levelLabel')?.getComponent(Label)!;
+
+        const rootSlotNode = this.node.getChildByName('slotNode') || this.findChildDeep(this.node, 'slotNode');
+        this.slotNode = rootSlotNode?.getChildByName('slot') || rootSlotNode!;
+
+        this.captureSlotPositions();
+        this.setupTargetSlot(rootSlotNode);
+    }
+
+    private ensureFlyLayer(): Node {
+        const parent = this.node.parent || this.node;
+        if (this.flyLayer?.isValid) {
+            if (this.flyLayer.parent !== parent) this.flyLayer.setParent(parent);
+            this.flyLayer.setSiblingIndex(parent.children.length - 1);
+            return this.flyLayer;
+        }
+
+        const node = new Node('flyLayer');
+        node.layer = parent.layer;
+        parent.addChild(node);
+        node.addComponent(UITransform);
+        node.setSiblingIndex(parent.children.length - 1);
+        this.flyLayer = node;
+        return node;
+    }
+
+    private worldToLocalPosition(parent: Node, worldPosition: Vec3): Vec3 {
+        const transform = parent.getComponent(UITransform) || parent.addComponent(UITransform);
+        return transform.convertToNodeSpaceAR(worldPosition);
+    }
+
+    private localToWorldPosition(parent: Node, localPosition: Vec3): Vec3 {
+        const transform = parent.getComponent(UITransform) || parent.addComponent(UITransform);
+        return transform.convertToWorldSpaceAR(localPosition);
+    }
+
+    private captureSlotPositions() {
+        this.slotPositions = [];
+        if (!this.slotNode) return;
+
+        // 按 item1, item2, item3... 编号顺序读取底部存牌槽的锚点节点。
+        // 不依赖 .active —— item 通常只是占位用的隐藏节点，能取到 position 就够了。
+        for (let i = 1; ; i++) {
+            const itemNode = this.slotNode.getChildByName(`item${i}`);
+            if (!itemNode) break;
+            this.slotPositions.push(itemNode.position.clone());
+        }
+        if (this.slotPositions.length > 0) return;
+
+        // 兜底：场景没放 item 锚点，按 UITransform 宽度等分 7 格
+        const transform = this.slotNode.getComponent(UITransform);
+        if (!transform) return;
+
+        const step = transform.contentSize.width / 7;
+        const startX = -transform.contentSize.width * 0.5 + step * 0.5;
+        for (let i = 0; i < 7; i++) this.slotPositions.push(new Vec3(startX + i * step, 0, 0));
+    }
+
+    private setupTargetSlot(rootSlotNode: Node | null) {
+        if (!rootSlotNode) return;
+        this.targetBoxes = [];
+        for (let i = 1; i <= 4; i++) {
+            const node = rootSlotNode.getChildByName(`slot${i}`);
+            if (!node) continue;
+            node.active = true;
+
+            const itemNodes: Node[] = [];
+            for (let j = 1; j <= 4; j++) {
+                const itemNode = node.getChildByName(`item${j}`);
+                if (!itemNode) continue;
+                itemNodes.push(itemNode);
+            }
+
+            this.targetBoxes.push({
+                node,
+                itemNodes,
+                iconNode: itemNodes[0] || null,
+                unlocked: i <= 2,
+                refreshing: false,
+                movedOut: false,
+                movingIn: false,
+                type: '',
+                progress: 0,
+                pending: 0,
+                required: 3,
+            });
+        }
+    }
+
+    // private ensureTargetProgressLabel(parent: Node): Label {
+    //     let node = parent.getChildByName('progressLabel');
+    //     if (!node) {
+    //         node = new Node('progressLabel');
+    //         node.layer = parent.layer;
+    //         parent.addChild(node);
+    //         node.setPosition(0, -46, 0);
+    //     }
+    //     const label = node.getComponent(Label) || node.addComponent(Label);
+    //     label.fontSize = 24;
+    //     label.color = new Color(255, 240, 150, 255);
+    //     return label;
+    // }
+
+    private updateHud() {
+        if (!this.config) return;
+        if (this.levelLabel) this.levelLabel.string = `关卡${this.nowLevel}`;
+
+        const remain = this.tiles.filter((t) => !t.removed).length;
+        const failThreshold = Math.max(1, this.slotCapacity - 1);
+        const hasTimer = this.config.levelTime > 0;
+        const comboActive = this.comboTimes > 1 && this.lastComboAt > 0 && Date.now() - this.lastComboAt <= 5000;
+
+        director.emit(Constants.eventNames.EventHudUpdate, {
+            remain,
+            total: this.tiles.length,
+            slots: this.slots.length,
+            slotCap: failThreshold,
+            hasTimer,
+            timeSec: Math.ceil(this.remainTime),
+            comboTimes: this.comboTimes,
+            comboActive,
+        });
+    }
+
+    private updateCombo() {
+        const now = Date.now();
+        this.comboTimes = (now - this.lastComboAt <= 5000) ? this.comboTimes + 1 : 1;
+        this.lastComboAt = now;
+        // combo 状态已并入 HUD payload，直接刷一次 HUD 就行
+        this.updateHud();
+    }
+
+    private showToast(message: string, seconds = 1.1) {
+        director.emit(Constants.eventNames.EventShowToast, { msg: message, seconds });
+    }
+
+    // ==========================================
+    // 原版地图生成逻辑及工具函数
+    // ==========================================
+
+    private preloadMahjongFrames(done: () => void) {
+        const bundle = assetManager.getBundle('game');
+        this.iconFrames.clear();
+        this.iconIds = [];
+
+        if (!bundle) {
+            console.warn('GameCtrl: game bundle not found');
+            done();
+            return;
+        }
+
+        bundle.loadDir(Constants.MahjongBoard.ResourceDir, SpriteFrame, (err, frames) => {
+            if (err || !frames?.length) {
+                console.warn('GameCtrl: load mahjong frames failed', err);
+                done();
+                return;
+            }
+            for (const frame of frames) {
+                const id = this.normalizeMahjongFrameName(frame.name);
+                if (id) this.iconFrames.set(id, frame);
+            }
+            this.iconIds = Array.from(this.iconFrames.keys()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+            done();
+        });
+    }
+
+    private normalizeMahjongFrameName(name: string): string {
+        if (Constants.MahjongBoard.ExcludedFrames.indexOf(name) >= 0) return '';
+        return /^\d+$/.test(name) ? name : '';
+    }
+
+    private clearBoard() {
+        if (this.mahjongPnode) this.mahjongPnode.removeAllChildren();
+        if (this.flyLayer?.isValid) this.flyLayer.removeAllChildren();
+        if (this.slotNode) {
+            for (const child of this.slotNode.children.slice()) {
+                if (child.name.startsWith('slotTile_')) child.destroy();
+            }
+        }
+    }
+
+    private createLevelConfig(level: number): RuntimeLevelConfig {
+        const json = getLevelJson(level);
+        if (!json) {
+            console.warn(`GameCtrl: no level JSON for level ${level}`);
+        }
+        this.levelJson = json as LevelJson;
+        const play = getLevelPlayConfig(level);
+        const baseDiff = json?.index_config?.base_diff ?? json?.summary?.hard ?? 0;
+        return {
+            ...play,
+            baseDiff,
+        };
+    }
+
+    private compareBoardDisplayOrder(a: TileRecord, b: TileRecord): number {
+        const depthA = a.layer * 100000 + a.row * 1000 + a.col;
+        const depthB = b.layer * 100000 + b.row * 1000 + b.col;
+        if (depthA !== depthB) return depthA - depthB;
+        return a.col - b.col;
+    }
+
+    private findChildDeep(parent: Node | null, name: string): Node | null {
+        if (!parent) return null;
+        const direct = parent.getChildByName(name);
+        if (direct) return direct;
+        for (const child of parent.children) {
+            const found = this.findChildDeep(child, name);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    private createRandom(seed: number): () => number {
+        let value = seed >>> 0;
+        return () => {
+            value += 0x6D2B79F5;
+            let t = value;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    private shuffle<T>(items: T[], random: () => number): T[] {
+        for (let i = items.length - 1; i > 0; i--) {
+            const j = Math.floor(random() * (i + 1));
+            const tmp = items[i];
+            items[i] = items[j];
+            items[j] = tmp;
+        }
+        return items;
+    }
+
+    private clamp(value: number, min: number, max: number): number {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private onBtnUndoClick(event) {
+        AudioManager.instance.playClick();
+        if (this.gameState !== 'playing' || this.resolvingMatch) return;
+
+        let tile: TileRecord | null = null;
+        while (this.actionHistory.length > 0) {
+            const candidate = this.actionHistory.pop()!;
+            if (!candidate.removed && this.slots.indexOf(candidate) >= 0 && candidate.node?.isValid) {
+                tile = candidate;
+                break;
+            }
+        }
+        if (!tile) {
+            this.refreshUndoButtonStatus();
+            return;
+        }
+
+        //if (!tile) return this.showToast('无可撤回', 0.8);
+
+        const index = this.slots.indexOf(tile);
+        //if (index < 0) return this.showToast('无可撤回', 0.8);
+        if (index < 0) {
+            this.refreshUndoButtonStatus();
+            return;
+        }
+        this.slots.splice(index, 1);
+        // 注意:collected 此处先保留 true,等飞回 tween 跑完再置 false。
+        // 否则飞行 0.16s 期间用户点击会触发 GameCtrl 的 TOUCH_END → onTileTap → moveTileToSlot,
+        // 撤回 tween 跟入槽 tween 抢同一个 scale 属性,最终 scale 错乱
+        tile.node.name = `tile_${tile.uid}`;
+
+        const worldPosition = tile.node.worldPosition.clone();
+        tile.node.setParent(this.mahjongPnode);
+        tile.node.setWorldPosition(worldPosition);
+        tile.node.setSiblingIndex(this.mahjongPnode.children.length - 1);
+
+        // 撤回飞回棋盘的飞行声,跟 tween 起手对齐
+        AudioManager.instance.playOneShot(AudioClipNames.taskFly);
+
+        tween(tile.node)
+            .to(0.16, { position: tile.boardPos, scale: new Vec3(Constants.MahjongBoard.BoardScale, Constants.MahjongBoard.BoardScale, 1) })
+            .call(() => {
+                // 撤回落定后再标记可点击 + 重新启用触摸
+                tile.collected = false;
+                tile.item.enableTileTouch();
+                // 飞行时把 siblingIndex 顶到末尾避免被遮挡;落地后只把这张撤回牌插回应在的层级。
+                // 注意:不能用 forEach(setSiblingIndex(index)) 整体重排所有 tile —— mahjongPnode
+                // 的 children 里还交错着 _shadowLayer_<N>_ 容器,整体重排会把这些阴影容器全部推到
+                // children 末尾,变成阴影盖在所有牌身之上。所以这里只动撤回的这一张牌。
+                const parent = this.mahjongPnode;
+                const undoneDepth = tile.layer * 100000 + tile.row * 1000 + tile.col;
+                let targetIndex = 0;
+                for (const child of parent.children) {
+                    if (child === tile.node) continue;
+                    if (child.name.startsWith(MahjongItem.SHADOW_LAYER_PREFIX)) {
+                        const m = child.name.match(/^_shadowLayer_(\d+)_$/);
+                        const cl = m ? parseInt(m[1], 10) : -1;
+                        // 同层及更低层的阴影容器都应排在撤回牌之前(牌身盖住自己的阴影)
+                        if (cl >= 0 && cl <= tile.layer) targetIndex++;
+                        continue;
+                    }
+                    const item = child.getComponent(MahjongItem);
+                    if (!item) continue;
+                    const otherDepth = item.layer * 100000 + item.row * 1000 + item.col;
+                    if (otherDepth < undoneDepth) targetIndex++;
+                }
+                tile.node.setSiblingIndex(targetIndex);
+                this.updatePlayableStates();
+                this.updateHud();
+                this.checkEndState();
+            })
+            .start();
+        this.arrangeSlotTiles(0.12+0.1);
+        this.updateHud();
+        this.refreshUndoButtonStatus();
+    }
+
+    // actionHistory 变动后调用,通知 UI 撤回按钮该置灰还是恢复彩色
+    private refreshUndoButtonStatus() {
+        const empty = this.actionHistory.length === 0;
+        director.emit(Constants.eventNames.EventSetUndoButtonStatus, empty);
+    }
+
+
+    private onBtnUnlockClick(event) {
+        if (this.gameState !== 'playing') return;
+        const box = this.targetBoxes.find((i) => !i.unlocked);
+        if (!box) return this.showToast('槽位已满', 0.8);
+
+        box.unlocked = true;
+        // 用 refreshing 当锁，挡住 fillEmptyTargetBoxes 在动画期间抢先塞目标
+        box.refreshing = true;
+
+        // 触发解锁动画：盖子飞出 + 槽位回弹，box_2 由动画自行处理显示与隐藏
+        director.emit(Constants.eventNames.EventShowSlotUnlock, this.getTargetBoxSlotID(box));
+
+        this.updateHud();
+        this.showToast('槽位+1', 0.8);
+
+        // 解锁动画约 0.5667s，等盖子飞完再生成新目标，
+        // 避免预览图在盖子还没飞走的时候提前露脸
+        this.scheduleOnce(() => {
+            box.refreshing = false;
+            if (this.gameState !== 'playing' || !box.unlocked) return;
+            this.assignNewTarget(box);
+            this.collectStoredTargets();
+            this.updateHud();
+        }, Constants.slotAnim.UnlockWait);
+    }
+
+    // private onBtnShuffleBoardClick() {
+    //     if (this.gameState !== 'playing') return;
+    //     const activeTiles = this.tiles.filter((t) => !t.collected && !t.removed);
+    //     if (activeTiles.length < 2) return;
+
+    //     // 换牌道具的提示音
+    //     AudioManager.instance.playOneShot(AudioClipNames.prop_tips);
+
+    //     const random = this.createRandom(Date.now() + activeTiles.length * 31);
+    //     const types = this.shuffle(activeTiles.map((t) => t.type), random);
+    //     for (let i = 0; i < activeTiles.length; i++) {
+    //         const tile = activeTiles[i]; tile.type = types[i];
+    //         tile.item.setData(tile.type, tile.row, tile.col, tile.layer, this.iconFrames.get(tile.type) || null);
+    //     }
+    //     this.repairTargetBoxes(); this.collectStoredTargets(); this.updatePlayableStates(); this.showToast('已换牌', 0.8);
+    // }
+
+    private onBtnShuffleBoardClick() {
+        if (this.gameState !== 'playing') return;
+        const activeTiles = this.tiles.filter((t) => !t.collected && !t.removed);
+        if (activeTiles.length < 2) return;
+
+        // 换牌道具的提示音
+        AudioManager.instance.playOneShot(AudioClipNames.prop_tips);
+
+        const random = this.createRandom(Date.now() + activeTiles.length * 31);
+        const types = this.shuffle(activeTiles.map((t) => t.type), random);
+        for (let i = 0; i < activeTiles.length; i++) {
+            const tile = activeTiles[i]; tile.type = types[i];
+            tile.item.setData(tile.type, tile.row, tile.col, tile.layer, this.iconFrames.get(tile.type) || null);
+        }
+        this.repairTargetBoxes(); this.collectStoredTargets(); this.updatePlayableStates(); this.showToast('已换牌', 0.8);
+    }
+
+    // 队列模式下: shuffle 只是把"哪个位置放哪个 type"的映射换了一下,每种 type 的总数不变,
+    // 所以 box.type / taskQueue 都仍然成立。这里只需要重渲染 box 状态,不要再去抢占队列。
+    private repairTargetBoxes() {
+        for (const box of this.targetBoxes) {
+            this.emitRenderSlot(box);
+        }
+    }
+}

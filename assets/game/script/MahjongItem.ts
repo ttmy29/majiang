@@ -1,0 +1,554 @@
+import { _decorator, Component, EventTouch, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { Constants } from './config/Constants';
+import { LayerManager } from './manager/LayerManager';
+import { AudioManager, AudioClipNames } from './manager/AudioManager';
+const { ccclass, property } = _decorator;
+
+@ccclass('MahjongItem')
+export class MahjongItem extends Component {
+
+    // 每个 layer 一个阴影容器，交错插在牌身序列中：
+    // _shadowLayer_0_ → layer 0 牌身 → _shadowLayer_1_ → layer 1 牌身 → ...
+    // 上层牌的阴影会落在下层牌面上，同层相邻牌仍会互相覆盖消除暗带
+    public static readonly SHADOW_LAYER_PREFIX = '_shadowLayer_';
+
+    private static shadowLayerName(layer: number): string {
+        return `${MahjongItem.SHADOW_LAYER_PREFIX}${layer}_`;
+    }
+
+    private static isShadowLayerNode(node: Node | null | undefined): boolean {
+        return !!node?.name?.startsWith(MahjongItem.SHADOW_LAYER_PREFIX);
+    }
+
+    @property(Node)
+    iconNode: Node = null!;
+    @property(Node)
+    shadowNode: Node = null!;
+    @property(Node)
+    maskNode: Node = null!;
+    item_id = '';
+    row = 0;
+    col = 0;
+    layer = 0;
+
+    private touchTween: Tween<Node> | null = null;
+    private shakeOriginPos: Vec3 | null = null;
+    private originSiblingIndex = -1;
+    // 记录常态下，阴影是否应该显示
+    private _originalShadowActive: boolean = false;
+    // start() 跑过一次后置 true。用于区分"首次激活（由 start 接管阴影挂载）"
+    // 和"节点池/父节点反激活后重启（onEnable 需要主动挂回）"两种场景
+    private _started: boolean = false;
+
+    onDisable() {
+        this.disableTileTouch();
+        this.node.off(Node.EventType.TRANSFORM_CHANGED, this.syncShadowTransform, this);
+        this.node.off(Node.EventType.PARENT_CHANGED, this.onTileParentChanged, this);
+        this.stopTouchTween();
+        // 父节点正在反激活时，任何 setParent / addChild / setSiblingIndex 都会抛
+        // "Cannot change hierarchy while activating or deactivating the parent."
+        // 这里只做属性瞬时还原，层级相关的恢复留到下次 start / onTileParentChanged
+        const baseScale = this.getBoardScale();
+        this.node.setScale(baseScale);
+        this.node.eulerAngles = new Vec3(0, 0, 0);
+        this.originSiblingIndex = -1;
+    }
+
+    onEnable() {
+        this.node.on(Node.EventType.TOUCH_START, this.onTouchstart, this);
+        this.node.on(Node.EventType.TOUCH_END, this.onTouchend, this);
+        this.node.on(Node.EventType.TOUCH_CANCEL, this.onTouchcancel, this);
+        this.node.on(Node.EventType.TRANSFORM_CHANGED, this.syncShadowTransform, this);
+        this.node.on(Node.EventType.PARENT_CHANGED, this.onTileParentChanged, this);
+
+        // 已经被 start 接管过的牌如果是因 pNode 反激活而走过 onDisable，
+        // 那时阴影层级未恢复（onDisable 注释解释了为什么不能动 hierarchy）。
+        // 重新激活后由这里把阴影挂回正确的 _shadowLayer_<N>_ 容器。
+        // 首次 onEnable 时 _started 还是 false，全部交给 start() 处理，避免重复挂载。
+        if (this._started && this.node.parent?.name === 'pNode') {
+            this.attachShadowToLayer();
+            if (this.shadowNode?.isValid) {
+                this.shadowNode.active = this._originalShadowActive;
+            }
+        }
+    }
+
+    onDestroy() {
+        // 阴影已被抽到独立层，不会随 tile.destroy 自动清理
+        if (this.shadowNode?.isValid && MahjongItem.isShadowLayerNode(this.shadowNode.parent)) {
+            this.shadowNode.destroy();
+        }
+    }
+
+    start() {
+        if (this.node.parent) {
+            if (this.node.parent.name !== "pNode") {
+                this.disableTileTouch();
+            }
+        }
+
+        // 把阴影抽到独立渲染层：所有阴影先于所有牌身渲染，
+        // 相邻牌的阴影会被对方的牌身自然遮住，消除相邻处的暗带
+        this.attachShadowToLayer();
+
+        // 延迟一帧计算阴影状态，确保周围的兄弟节点都已经完全实例化并绑定了行列数据
+        this.scheduleOnce(() => {
+            this.updateShadowStatus();
+        });
+
+        this._started = true;
+    }
+
+    /**
+     * 把阴影节点搬到 pNode 下 _shadowLayer_<layer>_ 的容器里。
+     * 每个 layer 的阴影容器位于该 layer 牌身之前、上一 layer 牌身之后，
+     * 这样上层牌阴影会落在下层牌面上，同层相邻牌仍能互相覆盖消除暗带。
+     */
+    private attachShadowToLayer() {
+        if (!this.shadowNode?.isValid) return;
+        const parent = this.node.parent;
+        if (!parent) return;
+
+        const layerName = MahjongItem.shadowLayerName(this.layer);
+        let layer = parent.getChildByName(layerName);
+        if (!layer) {
+            layer = new Node(layerName);
+            layer.layer = parent.layer;
+            layer.addComponent(UITransform);
+            parent.addChild(layer);
+        }
+
+        // 把阴影容器移到当前 layer 第一张牌之前的位置
+        const targetIndex = this.computeShadowLayerIndex(parent, this.layer);
+        if (layer.getSiblingIndex() !== targetIndex) {
+            layer.setSiblingIndex(targetIndex);
+        }
+
+        if (this.shadowNode.parent !== layer) {
+            // 第二个参数 true：保持世界变换，先到位再被 sync 覆盖
+            this.shadowNode.setParent(layer, true);
+        }
+        this.syncShadowTransform();
+    }
+
+    /**
+     * 计算 _shadowLayer_<layer>_ 应当落在 pNode 的兄弟索引：
+     * 数出"应当排在它前面"的子节点个数 —— 包括 layer 更小的牌身，
+     * 和 layer 更小的阴影容器。计数方式不依赖自身当前位置，所以
+     * 多张同层牌反复 attach 时索引保持稳定，不会被推到牌身之后。
+     */
+    private computeShadowLayerIndex(parent: Node, layer: number): number {
+        let count = 0;
+        for (const child of parent.children) {
+            if (MahjongItem.isShadowLayerNode(child)) {
+                const childLayer = MahjongItem.parseShadowLayerIndex(child);
+                if (childLayer >= 0 && childLayer < layer) count++;
+                continue;
+            }
+            const item = child.getComponent(MahjongItem);
+            if (item && item.layer < layer) count++;
+        }
+        return count;
+    }
+
+    private static parseShadowLayerIndex(node: Node): number {
+        const m = node.name.match(/^_shadowLayer_(\d+)_$/);
+        return m ? parseInt(m[1], 10) : -1;
+    }
+
+    /**
+     * 把阴影的局部 transform 同步成 tile 的局部 transform。
+     * _shadowLayer_<N>_ 与 tile 同属 pNode 且位置/缩放都是默认，所以直接复制即可。
+     */
+    private syncShadowTransform() {
+        if (!this.shadowNode?.isValid) return;
+        if (!MahjongItem.isShadowLayerNode(this.shadowNode.parent)) return;
+
+        this.shadowNode.setPosition(this.node.position);
+        this.shadowNode.setScale(this.node.scale);
+        this.shadowNode.setRotationFromEuler(this.node.eulerAngles);
+    }
+
+    /**
+     * 牌被移到其他容器（fly layer / 槽位）或撤回到棋盘时调用：
+     * - 回到 pNode → 重新挂回对应 layer 阴影容器并按原状态显示
+     * - 进入 fly layer / 槽位 → 把阴影内嵌到牌身下方，跟着牌一起显示
+     * - 完全脱离父节点 → 隐藏阴影（不销毁，便于撤回时复用）
+     */
+    private onTileParentChanged() {
+        if (!this.shadowNode?.isValid) return;
+
+        const parent = this.node.parent;
+        if (parent && parent.name === 'pNode') {
+            this.attachShadowToLayer();
+            this.shadowNode.active = this._originalShadowActive;
+        } else if (parent) {
+            this.detachShadowToTile();
+        } else {
+            this.shadowNode.active = false;
+        }
+    }
+
+    onTouchstart() {
+        this.click();
+    }
+
+    onTouchend(event?: EventTouch) {
+        // 撤回后的牌会让 GameCtrl 的 TOUCH_END 回调排到本回调之前,
+        // 此时 onTileTap 已经把牌 setParent 到 flyLayer 并启动了入槽 tween,
+        // 这里再启动 resetScale 的 tween 会跟入槽 tween 抢同一个 scale 属性,
+        // 导致最终缩放卡在 BoardScale 而不是 SlotScale。检查 parent 是不是棋盘,
+        // 不在棋盘上说明 tile 已被业务层接管,放弃 reset
+        if (this.node.parent?.name !== 'pNode') return;
+
+        const blocked = this.isBlockedByUpperMahjong();
+        // 如果被遮挡(正在播放抖动动画),手指抬起时不中断动画
+        if (!blocked) {
+            this.resetScale(false); // 播放 Q 弹缩小动画
+        } else {
+            // 防御性还原：极少数情况下 touchstart 时未被遮挡（playSelectedFeedback
+            // 已把阴影 detach 到 tile 内部），touchend 时由于撤回等事件让上方出现新牌
+            // 而变为被遮挡——这时不会走 resetScale，阴影会卡在 tile 节点里。
+            this.reattachShadowIfDetached();
+        }
+    }
+
+    onTouchcancel() {
+        // 同 onTouchend 的考量,牌已经被业务层接管时不要 reset
+        if (this.node.parent?.name !== 'pNode') return;
+
+        const blocked = this.isBlockedByUpperMahjong();
+        // 如果被遮挡,手指移出范围时也不中断动画
+        if (!blocked) {
+            this.resetScale(false); // 播放 Q 弹缩小动画
+        } else {
+            this.reattachShadowIfDetached();
+        }
+    }
+
+    /**
+     * 把阴影从 tile 内部挪回到共享 _shadowLayer_<N>_ 容器中。
+     * 仅在阴影确实被 detachShadowToTile 临时移到 tile 下时才动作。
+     */
+    private reattachShadowIfDetached() {
+        if (!this.shadowNode?.isValid) return;
+        if (this.shadowNode.parent !== this.node) return;
+        this.attachShadowToLayer();
+        this.shadowNode.active = this._originalShadowActive;
+    }
+
+    /**
+     * 外部调用：在 GameCtrl 整体重排牌身节点后，把每个 layer 的阴影容器
+     * 重新插回 layer 牌身之前的正确位置。对 start() 之前的初始期、阴影还在
+     * tile 内部的状态都是安全的（attachShadowToLayer 自身幂等）。
+     */
+    public refreshShadowLayerAttachment() {
+        if (!this.shadowNode?.isValid) return;
+        // 阴影正在被 detach 跟着 tile（按下中）—— 此时不应该把它拉回共享层
+        if (this.shadowNode.parent === this.node) return;
+        this.attachShadowToLayer();
+    }
+
+    click(): boolean {
+
+        const blocked = this.isBlockedByUpperMahjong();
+        if (blocked) {
+            // Blocked tiles cannot be selected, so only play the shake feedback.
+            LayerManager.instance.showToast("被上方块锁住");
+            this.playBlockedFeedback();
+        } else {
+            // Selectable tiles are enlarged and moved to the top while pressing.
+            this.playSelectedFeedback();
+        }
+
+        return blocked;
+    }
+
+    setData(item_id: string, row: number, col: number, layer = 0, frame: SpriteFrame | null = null) {
+        this.item_id = item_id;
+        this.row = row;
+        this.col = col;
+        this.layer = layer;
+
+        const sprite = this.iconNode.getComponent(Sprite);
+        if (!sprite) return;
+        if (frame) {
+            sprite.spriteFrame = frame;
+        } else {
+            console.log('MahjongItem: no frame for item', item_id);
+        }
+
+        this.setPlayable(true);
+    }
+
+    private hideLegacyIcon() {
+        const iconSprite = this.iconNode?.getComponent(Sprite);
+        if (iconSprite?.isValid) iconSprite.spriteFrame = null;
+    }
+
+    setPlayable(playable: boolean) {
+        if (!this.maskNode) {
+            this.maskNode = this.node.getChildByName('mask');
+        }
+        if (this.maskNode) {
+            this.maskNode.active = !playable;
+        }
+
+        let opacity = this.node.getComponent(UIOpacity);
+        if (!opacity) {
+            opacity = this.node.addComponent(UIOpacity);
+        }
+
+        if (this.maskNode) {
+            let maskOpacity = this.maskNode.getComponent(UIOpacity);
+            if (!maskOpacity) maskOpacity = this.maskNode.addComponent(UIOpacity);
+            maskOpacity.opacity = 0;
+        }
+    }
+
+    /**
+     * 刷新阴影状态：判断同层上下左右是否有牌
+     * row/col 是半格坐标(每张牌占 2 半格,见 GameCtrl.pickPositions),所以相邻牌差值为 ±2
+     */
+    public updateShadowStatus() {
+        if (!this.shadowNode) return;
+        const parent = this.node.parent;
+        if (!parent) return;
+
+        let hasRowMinus = false;
+        let hasRowPlus = false;
+        let hasColMinus = false;
+        let hasColPlus = false;
+
+        for (const child of parent.children) {
+            if (child === this.node || !child.activeInHierarchy) continue;
+            const item = child.getComponent(MahjongItem);
+
+            // 必须在同一层才算有效包围
+            if (!item || item.layer !== this.layer) continue;
+
+            // 同行/同列且差 2 半格(即贴身相邻)才算有效邻居
+            if (item.col === this.col) {
+                if (item.row === this.row - 2) hasRowMinus = true;
+                if (item.row === this.row + 2) hasRowPlus = true;
+            } else if (item.row === this.row) {
+                if (item.col === this.col - 2) hasColMinus = true;
+                if (item.col === this.col + 2) hasColPlus = true;
+            }
+        }
+
+        // 四方都有牌则被完全包围
+        const isSurrounded = hasRowMinus && hasRowPlus && hasColMinus && hasColPlus;
+
+        // 被包围则隐藏阴影，反之有一个方向空缺就显示
+        this._originalShadowActive = !isSurrounded;
+        this.shadowNode.active = this._originalShadowActive;
+    }
+
+    isBlockedByUpperMahjong(): boolean {
+        if (!this.maskNode) {
+            this.maskNode = this.node.getChildByName('mask');
+        }
+        if (this.maskNode?.active) return true;
+
+        const parent = this.node.parent;
+        if (!parent) return false;
+
+        const curPos = this.node.position;
+
+        // 跟 GameCtrl.isTileBlocked 用同一套阈值:相邻 step 的 82% 内算遮挡。
+        // 之前这里写死的 80/100 是按 BoardScale=0.75 时手调出来的像素值,
+        // 跟 GameCtrl 的 TileStepX*0.82=62.3 / TileStepY*0.82=77.9 略有出入,
+        // 会出现"GameCtrl 算挡 / MahjongItem 算不挡"的判定不一致,统一掉。
+        const blockLimitX = Constants.MahjongBoard.TileStepX * 0.82;
+        const blockLimitY = Constants.MahjongBoard.TileStepY * 0.82;
+
+        for (const child of parent.children) {
+            if (child === this.node || !child.activeInHierarchy) continue;
+
+            const item = child.getComponent(MahjongItem);
+            if (!item || item.layer <= this.layer) continue;
+
+            const pos = child.position;
+            if (Math.abs(pos.x - curPos.x) < blockLimitX && Math.abs(pos.y - curPos.y) < blockLimitY) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    playTapFeedback() {
+        this.stopTouchTween();
+    }
+
+    /**
+     * 【优化】：手指按下时的反馈。
+     * 时长调整为 0.15 秒，引入 sineOut 缓动，让放大到达顶点时更圆润丝滑
+     */
+    private playSelectedFeedback() {
+        const baseScale = this.getBoardScale();
+        this.stopTouchTween();
+
+        // 选中麻将的"抬起"音效,跟放大动画同时触发
+        AudioManager.instance.playOneShot(AudioClipNames.mahjongClick);
+
+        // 按下时把阴影临时移回 tile 内部，跟着 tile 一起 bringToTop，
+        // 这样阴影会盖在相邻牌身上而不被遮住（松开后由 resetScale 挂回共享层）
+        this.detachShadowToTile();
+
+        this.touchTween = tween(this.node)
+            .to(0.15, {
+                scale: new Vec3(baseScale.x * 1.08, baseScale.y * 1.08, baseScale.z)
+            }, { easing: 'sineOut' }) // 正弦减速，极具平滑感
+            .call(() => { this.touchTween = null; })
+            .start();
+
+        this.bringToTop();
+    }
+
+    /**
+     * 把阴影从共享层临时挂回 tile 节点内部，并放在背景图之前渲染。
+     * 仅用于按下时让阴影跟着 tile 置顶，不参与平时的"被相邻牌覆盖"机制。
+     */
+    private detachShadowToTile() {
+        if (!this.shadowNode?.isValid) return;
+        this.shadowNode.active = true;
+        if (this.shadowNode.parent === this.node) return;
+
+        this.shadowNode.setParent(this.node, false);
+        this.shadowNode.setPosition(0, 0, 0);
+        this.shadowNode.setScale(1, 1, 1);
+        this.shadowNode.setRotationFromEuler(0, 0, 0);
+        this.shadowNode.setSiblingIndex(0); // 排在 bg 之前
+    }
+
+    private playBlockedFeedback() {
+        this.stopTouchTween();
+        const originPos = this.shakeOriginPos?.clone() || this.node.position.clone();
+        this.shakeOriginPos = originPos.clone();
+
+        AudioManager.instance.playOneShot(AudioClipNames.mj_error);
+
+        // 初始状态重置
+        this.node.setPosition(originPos);
+        this.node.eulerAngles = new Vec3(0, 0, 2); // 0s 时 EulerZ 为 2°
+
+        const ox = originPos.x;
+        const oy = originPos.y;
+        const oz = originPos.z;
+
+        // 调整：时间整体拉长，幅度略微收敛 (-5, +3, -1.5)
+        const tweenX = tween(this.node)
+            .to(0.08, { position: new Vec3(ox - 5, oy, oz) })  // 舒缓地向左甩
+            .to(0.10, { position: new Vec3(ox + 3, oy, oz) })  // 舒缓地向右回甩
+            .to(0.08, { position: new Vec3(ox - 1.5, oy, oz) })// 较轻地向左甩
+            .to(0.06, { position: originPos });                // 平滑回正
+        // X轴总时长从 0.2 秒增加到 0.32 秒
+
+        // Z 轴旋转的时间同步拉长，保持与 X 轴一致
+        const tweenZ = tween(this.node)
+            .to(0.16, { eulerAngles: new Vec3(0, 0, -1.5) })
+            .to(0.16, { eulerAngles: new Vec3(0, 0, 0) });
+        // Z轴总时长: 0.32 秒
+
+        // 使用 parallel 并行执行 X 轴位移和 Z 轴旋转
+        this.touchTween = tween(this.node)
+            .parallel(tweenX, tweenZ)
+            .call(() => {
+                this.node.setPosition(originPos);
+                this.node.eulerAngles = new Vec3(0, 0, 0); // 确保角度回正
+                this.shakeOriginPos = null;
+                this.touchTween = null;
+            })
+            .start();
+    }
+
+    /**
+     * 手松开或移出取消时触发
+     * @param immediate 是否瞬间重置
+     */
+    private resetScale(immediate: boolean = false) {
+        this.stopTouchTween();
+        const baseScale = this.getBoardScale();
+
+        // 让牌在“掉落”的过程中就已经处于正确的遮挡关系中，消除动画结束时的突兀感
+        this.restoreSiblingIndex();
+
+        // 把按下时挂到 tile 内部的阴影挂回共享层（updateShadowStatus 会决定可见性）
+        this.attachShadowToLayer();
+
+        // 动态重新计算一次并还原阴影（防止长按期间周围牌被消除导致的状态错误）
+        this.updateShadowStatus();
+
+        // 如果强制瞬间还原，或者节点已经处于非激活状态，直接设置属性值
+        if (immediate || !this.node.activeInHierarchy) {
+            this.node.setScale(baseScale);
+            this.node.eulerAngles = new Vec3(0, 0, 0);
+            return;
+        }
+
+        // 正常手指抬起时，播放 Q 弹缩小动画
+        this.touchTween = tween(this.node)
+            .to(0.22, {
+                scale: baseScale,
+                eulerAngles: new Vec3(0, 0, 0)
+            }, { easing: 'backOut' })
+            .call(() => {
+                this.touchTween = null;
+            })
+            .start();
+    }
+
+    private stopTouchTween() {
+        if (!this.touchTween) return;
+        this.touchTween.stop();
+        this.touchTween = null;
+        if (this.shakeOriginPos) {
+            this.node.setPosition(this.shakeOriginPos);
+            this.node.eulerAngles = new Vec3(0, 0, 0);
+            this.shakeOriginPos = null;
+        }
+    }
+
+    private getBoardScale(): Vec3 {
+        const scale = Constants.MahjongBoard.BoardScale;
+        return new Vec3(scale, scale, 1);
+    }
+
+    private bringToTop() {
+        const parent = this.node.parent;
+        if (!parent) return;
+
+        if (this.originSiblingIndex < 0) {
+            this.originSiblingIndex = this.node.getSiblingIndex();
+        }
+        this.node.setSiblingIndex(parent.children.length - 1);
+    }
+
+    private restoreSiblingIndex() {
+        const parent = this.node.parent;
+        if (!parent || this.originSiblingIndex < 0) return;
+
+        const index = Math.min(this.originSiblingIndex, parent.children.length - 1);
+        this.node.setSiblingIndex(index);
+        this.originSiblingIndex = -1;
+    }
+
+    // 禁用触摸方法
+    disableTileTouch() {
+        this.node.off(Node.EventType.TOUCH_START, this.onTouchstart, this);
+        this.node.off(Node.EventType.TOUCH_END, this.onTouchend, this);
+        this.node.off(Node.EventType.TOUCH_CANCEL, this.onTouchcancel, this);
+    }
+
+    // 重新启用触摸,撤回让牌从槽飞回棋盘时调;先 off 一次保证不会重复绑定
+    enableTileTouch() {
+        this.node.off(Node.EventType.TOUCH_START, this.onTouchstart, this);
+        this.node.off(Node.EventType.TOUCH_END, this.onTouchend, this);
+        this.node.off(Node.EventType.TOUCH_CANCEL, this.onTouchcancel, this);
+        this.node.on(Node.EventType.TOUCH_START, this.onTouchstart, this);
+        this.node.on(Node.EventType.TOUCH_END, this.onTouchend, this);
+        this.node.on(Node.EventType.TOUCH_CANCEL, this.onTouchcancel, this);
+    }
+}

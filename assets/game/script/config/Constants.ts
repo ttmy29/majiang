@@ -1,0 +1,104 @@
+const Constants = {
+    eventNames: {
+        EventShowSlotShake: 'ShowSlotFillAnimation',
+        EventShowSlotUnlock: 'ShowSlotUnlock',
+        EventShowSlotMoveIn: 'ShowSlotMoveIn',
+        EventShowSlotMoveOut: 'ShowSlotMoveOut',
+        // —— 以下事件由 GameCtrl emit、UIGameLayer 渲染 ——
+        // 一次性初始化，把 GameCtrl 的 mahjongItem 预制体和 iconFrames 资源 map 交给 UI 层
+        EventGameUiInit: 'GameUiInit',
+        // HUD（关卡 / 剩余 / 槽位 / 倒计时）
+        EventHudUpdate: 'HudUpdate',
+        // Toast 文案
+        EventShowToast: 'ShowToast',
+        // 连击 label
+        EventComboUpdate: 'ComboUpdate',
+        // 渲染单个目标槽（预览图、锁/提示子节点）
+        EventRenderSlot: 'RenderSlot',
+        // 清理单个目标槽（销毁预览 + 已收集到槽里的牌）
+        EventClearSlot: 'ClearSlot',
+        // 关卡重开：批量把所有槽位 transform/box_2 复位到场景初始状态
+        EventResetSlots: 'ResetSlots',
+        // 撤回按钮置灰状态:true=灰(无可撤回),false=彩(有可撤回)
+        EventSetUndoButtonStatus: 'SetUndoButtonStatus',
+        // 闲置帮助提示:payload 是 index(1=解锁槽位按钮,2=换牌按钮)
+        EventShowTipsAnimator: 'ShowTipsAnimator',
+        // 帮助提示动画结束:UI -> GameCtrl,玩家点击提示按钮后通知,用于解除"动画中不重启计时"的锁
+        EventTipsAnimatorEnd: 'TipsAnimatorEnd',
+        // 强制中断帮助提示:GameCtrl -> UI,玩家在动画播放中点了麻将牌,停止呼吸动画
+        EventStopTipsAnimator: 'StopTipsAnimator',
+    },
+    // UIGameLayer.slotNodeArr 中节点的固定索引约定：
+    // [0] = 底部存牌槽 (slot)，[1..4] = 顶部 4 个目标槽 (slot1~slot4)
+    slotLayer: {
+        BottomSlotBarID: 0,
+        TargetBoxIndexOffset: 1,
+    },
+    // 槽位动画的等待时长，与 UIGameLayer 里的 tween 段累加值保持一致。
+    // 改动 UIGameLayer 的动画节奏时记得同步这里，否则会出现动画还没演完业务状态就刷新的衔接 bug。
+    slotAnim: {
+        // MoveOut: 0.1833 延迟 + 三段挤压 0.05*3 + 0.3 飞出 = 0.6333s，留少量余量到 0.65s
+        MoveOutWait: 0.65,
+        // MoveIn: 0.3 飞回原位，留余量到 0.35s。期间 slot 里的牌若提前飞过去会落到半路位置
+        MoveInWait: 0.35,
+        // Unlock: 盖子飞出最长链路 0.35 延迟 + 0.2167 淡出 = 0.5667s，留余量到 0.6s
+        UnlockWait: 0.6,
+    },
+    prefab: {
+        setting: 'prefab/setting'
+    },
+    GameBundleName: 'game',
+    MahjongBoard: {
+        // 麻将牌面资源所在目录，只加载该目录下的数字牌面作为棋盘牌型。
+        ResourceDir: 'resources/mahjong',
+        // 资源目录中存在但不参与随机牌型生成的辅助图片。
+        ExcludedFrames: ['flip', 'yinying'],
+        // 棋盘上相邻两列麻将牌的横向间距。
+        TileStepX: 76,
+        // 棋盘上相邻两行麻将牌的纵向间距。
+        TileStepY: 95,
+        // 棋盘麻将牌实例的统一缩放比例。
+        BoardScale: 0.57,
+        // 棋盘生成时至少使用的可视行数，用于让低关卡也能形成较完整的塔形轮廓。
+        MinVisualRows: 6,
+        // 棋盘生成时至少使用的可视列数，用于让低关卡也能形成较完整的塔形轮廓。
+        MinVisualCols: 6,
+        // 底层可视行数上限(高):createLayerGridSizes 扩容时不会超过这个值;
+        // 关卡 config.rows 超过它也会被夹回来。
+        MaxVisualRows: 6,
+        // 底层可视列数上限(宽):同上,关卡 config.cols 超过它也会被夹回。
+        MaxVisualCols: 8,
+        // 每上一层相对下一层的目标牌数比例，值越小上层越集中。
+        UpperLayerRatio: 0.55,
+        // 每上一层相对下一层的横向偏移:每层 +1 半格 = TileStepX / 2 = 38,形成经典塔形 staircase 的右上方累积阶梯。
+        // 层间 dx = halfStepX < 0.82*TileStepX = 62.3,L_n+1 仍能锁住 L_n。
+        // 底层 (layer 0) 锚定在 pNode 原点,上层按 layer * 38 依次往右叠加 —— 经典塔形从底往上"长"出去。
+        LayerOffsetX: 0,
+        // 每上一层相对下一层的纵向偏移:每层 +1 半格 = TileStepY / 2 = 47.5。
+        // 层间 dy = halfStepY < 0.82*TileStepY = 77.9,L_n+1 锁住 L_n;
+        // 跨层 (dy = 整格 = 95) 已超阈值,L_n+2 不再锁 L_n —— 即"每张牌只跟紧邻上层"的塔形语义,
+        // 跟真实麻将塔"每层只压一层"一致。
+        // 底层留在原位,上层往上叠加;视觉中心由底层(最大面积)主导,无需额外居中。
+        LayerOffsetY: 0,
+        // 半格错位摆放(细粒度):当前累积塔形已由 LayerOffsetX/Y 完成,这里默认全 [0,0] 即可。
+        // 想要某一层在常规阶梯之外再额外错半格(做花俏布局),可往数组里追加 [1,1] 等条目。
+        LayerHalfOffsetPattern: [
+            [0, 0],
+        ] as Array<readonly [number, number]>,
+        // 槽位麻将牌实例的统一缩放比例 36。
+        SlotScale: 0.32,
+        // ==================== 棋盘自适应布局 ====================
+        // 思路:pNode 边框对所有关卡固定显示 IdealPnodeWidth × IdealPnodeHeight,
+        // 棋盘按 setScale 缩到能装进 (Ideal - 2*Padding) 的可用区域。
+        // 小关 scale=1 不缩牌、大关 scale<1 缩牌,但边框视觉永远是同一个矩形 ——
+        // 关与关之间布局一致,不会出现"小关旷/大关瘦"的尺寸跳变。
+        IdealPnodeWidth: 600,
+        IdealPnodeHeight: 580,
+        // 棋盘到边框的视觉内边距(像素,在 pNode 视觉尺度下)
+        BoardPadding: 50,
+        // 极端关卡(超大 bbox)缩放下限,避免牌缩得看不清。低于这个值就不再缩了(容许略微溢出)
+        MinBoardFitRatio: 0.5,
+    },
+};
+
+export { Constants };

@@ -1,0 +1,5 @@
+[0520/100855.159:ERROR:registration_protocol_win.cc(108)] CreateFile: 拒绝访问。 (0x5)
+[0520/101045.266:ERROR:registration_protocol_win.cc(108)] CreateFile: 拒绝访问。 (0x5)
+[0520/101055.301:ERROR:registration_protocol_win.cc(108)] CreateFile: 拒绝访问。 (0x5)
+[0520/101256.659:ERROR:registration_protocol_win.cc(108)] CreateFile: 拒绝访问。 (0x5)
+[0520/101330.343:ERROR:registration_protocol_win.cc(108)] CreateFile: 拒绝访问。 (0x5)
