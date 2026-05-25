@@ -998,6 +998,8 @@ export class GameCtrl extends Component {
         const now = Date.now();
         this.comboTimes = (now - this.lastComboAt <= 5000) ? this.comboTimes + 1 : 1;
         this.lastComboAt = now;
+        // 通知 UI 刷新连击节点（重置进度条 + 显示当前 combo 次数）
+        director.emit(Constants.eventNames.EventComboUpdate, this.comboTimes);
         // combo 状态已并入 HUD payload，直接刷一次 HUD 就行
         this.updateHud();
     }

@@ -60,6 +60,8 @@ export class UIGameLayer extends Component {
     unlockTipsNode: Node = null!;
     @property(Node)
     switchTipsNode: Node = null!;
+    @property(Node)
+    comboNode:Node = null!;
 
 
     // 每个槽位在场景里的原始位置，MoveIn 时回到自己的原点而不是写死坐标
@@ -71,6 +73,12 @@ export class UIGameLayer extends Component {
     private comboLabel: Label = null!;
     private toastLabel: Label = null!;
 
+    // comboNode 下的进度条 fill 节点和连击计数文本
+    private comboBarSprite: Sprite = null!;
+    private comboCountLabel: Label = null!;
+    // 连击窗口时长（秒），与 GameCtrl.updateCombo 中的 5000ms 保持一致
+    private static readonly COMBO_DURATION = 5;
+
     // 目标槽预览相关 —— 由 EventGameUiInit 注入 prefab + 资源 map，EventRenderSlot 触发渲染
     private mahjongItem: Prefab = null!;
     private iconFrames: Map<string, SpriteFrame> = new Map();
@@ -79,15 +87,26 @@ export class UIGameLayer extends Component {
     protected onLoad() {
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
         this.setupHudLabels();
+        this.setupComboNode();
+    }
+
+    private setupComboNode() {
+        if (!this.comboNode) return;
+        const progressBar = this.comboNode.getChildByName('ProgressBar');
+        const bar = progressBar?.getChildByName('Bar');
+        if (bar) this.comboBarSprite = bar.getComponent(Sprite)!;
+        const countNode = this.comboNode.getChildByName('countLabel');
+        if (countNode) this.comboCountLabel = countNode.getComponent(Label)!;
+        this.comboNode.active = false;
     }
 
     private setupHudLabels() {
         this.targetLabel = this.ensureLabel('targetLabel', new Vec3(0, 548, 0), 30, new Color(255, 245, 215, 255), 520, 46);
         this.statusLabel = this.ensureLabel('statusLabel', new Vec3(0, 340, 0), 26, new Color(245, 252, 255, 255), 650, 38);
-        this.comboLabel = this.ensureLabel('comboLabel', new Vec3(0, 300, 0), 30, new Color(255, 214, 92, 255), 160, 42);
+        //this.comboLabel = this.ensureLabel('comboLabel', new Vec3(0, 300, 0), 30, new Color(255, 214, 92, 255), 160, 42);
         this.toastLabel = this.ensureLabel('toastLabel', new Vec3(0, -18, 0), 42, new Color(255, 0, 0, 255), 650, 70);
         this.targetLabel.node.active = false;
-        this.comboLabel.node.active = false;
+        //this.comboLabel.node.active = false;
         this.toastLabel.node.active = false;
     }
 
@@ -134,6 +153,7 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventShowSlotMoveIn, this.onEventShowSlotMoveIn, this);
             director.on(Constants.eventNames.EventShowSlotMoveOut, this.onEventShowSlotMoveOut, this);
             director.on(Constants.eventNames.EventHudUpdate, this.onEventHudUpdate, this);
+            director.on(Constants.eventNames.EventComboUpdate, this.onEventComboUpdate, this);
             director.on(Constants.eventNames.EventShowToast, this.onEventShowToast, this);
             director.on(Constants.eventNames.EventGameUiInit, this.onEventGameUiInit, this);
             director.on(Constants.eventNames.EventRenderSlot, this.onEventRenderSlot, this);
@@ -148,6 +168,7 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventShowSlotMoveIn, this.onEventShowSlotMoveIn, this);
             director.off(Constants.eventNames.EventShowSlotMoveOut, this.onEventShowSlotMoveOut, this);
             director.off(Constants.eventNames.EventHudUpdate, this.onEventHudUpdate, this);
+            director.off(Constants.eventNames.EventComboUpdate, this.onEventComboUpdate, this);
             director.off(Constants.eventNames.EventShowToast, this.onEventShowToast, this);
             director.off(Constants.eventNames.EventGameUiInit, this.onEventGameUiInit, this);
             director.off(Constants.eventNames.EventRenderSlot, this.onEventRenderSlot, this);
@@ -307,12 +328,34 @@ export class UIGameLayer extends Component {
         //const timeText = payload.hasTimer ? `    ${payload.timeSec}秒` : '';
         //this.statusLabel.string = `剩余 ${payload.remain}/${payload.total}    槽位 ${payload.slots}/${payload.slotCap}${timeText}`;
         this.statusLabel.string = '';
-        if (payload.comboActive && payload.comboTimes > 1) {
-            this.comboLabel.string = `连击x${payload.comboTimes}`;
-            this.comboLabel.node.active = true;
-        } else {
-            this.comboLabel.node.active = false;
+        // 连击展示已迁移到 comboNode（进度条 + countLabel），由 EventComboUpdate 驱动
+        void payload;
+    }
+
+    // 每次匹配完成都会触发：把 comboNode 显示出来,进度条重置到 1,然后在
+    // COMBO_DURATION 秒内匀速倒数到 0；如果途中再次完成匹配,会再次进入这个
+    // 函数,Tween.stopAllByTarget 会打断旧动画并重新开始,countLabel 同步刷新
+    onEventComboUpdate(comboTimes: number) {
+        if (!this.comboNode || !this.comboBarSprite) return;
+        this.comboNode.active = true;
+        if (this.comboCountLabel) this.comboCountLabel.string = `${comboTimes}`;
+
+        Tween.stopAllByTarget(this.comboBarSprite);
+        this.comboBarSprite.fillRange = 1;
+        tween(this.comboBarSprite)
+            .to(UIGameLayer.COMBO_DURATION, { fillRange: 0 })
+            .call(() => {
+                if (this.comboNode?.isValid) this.comboNode.active = false;
+            })
+            .start();
+    }
+
+    private resetComboNode() {
+        if (this.comboBarSprite) {
+            Tween.stopAllByTarget(this.comboBarSprite);
+            this.comboBarSprite.fillRange = 1;
         }
+        if (this.comboNode?.isValid) this.comboNode.active = false;
     }
 
     onEventShowToast(payload: ToastPayload) {
