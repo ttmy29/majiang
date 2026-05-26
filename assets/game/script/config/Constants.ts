@@ -31,6 +31,8 @@ const Constants = {
         EventFailureContinue: 'FailureContinue',
         // 失败弹窗"重新开始":UIFailureLayer -> GameCtrl,从当前关重开
         EventFailureRestart: 'FailureRestart',
+        // 胜利弹窗"下一关":UIWinLayer -> GameCtrl,进入下一关
+        EventWinNextLevel: 'WinNextLevel',
     },
     // UIGameLayer.slotNodeArr 中节点的固定索引约定：
     // [0] = 底部存牌槽 (slot)，[1..4] = 顶部 4 个目标槽 (slot1~slot4)
@@ -50,7 +52,8 @@ const Constants = {
     },
     prefab: {
         setting: 'prefab/setting',
-        failure: 'prefab/failure'
+        failure: 'prefab/failure',
+        win: 'prefab/win'
     },
     GameBundleName: 'game',
     MahjongBoard: {
@@ -59,9 +62,12 @@ const Constants = {
         // 资源目录中存在但不参与随机牌型生成的辅助图片。
         ExcludedFrames: ['flip', 'yinying'],
         // 棋盘上相邻两列麻将牌的横向间距。
-        TileStepX: 76,
+        // 牌身 root = 149×186(prefab 阴影是 208×242,但 root 才决定视觉重叠),
+        // BoardScale=0.57 后牌可视约 85×106。这里步距 80/100 保持比例 ≈ 0.80,
+        // 让同层正格相邻的牌还有少量重叠(塔形堆叠感),错砖半格重叠约 53%
+        TileStepX: 80,
         // 棋盘上相邻两行麻将牌的纵向间距。
-        TileStepY: 95,
+        TileStepY: 98,
         // 棋盘麻将牌实例的统一缩放比例。
         BoardScale: 0.57,
         // 棋盘生成时至少使用的可视行数，用于让低关卡也能形成较完整的塔形轮廓。
@@ -75,13 +81,13 @@ const Constants = {
         MaxVisualCols: 8,
         // 每上一层相对下一层的目标牌数比例，值越小上层越集中。
         UpperLayerRatio: 0.55,
-        // 每上一层相对下一层的横向偏移:每层 +1 半格 = TileStepX / 2 = 38,形成经典塔形 staircase 的右上方累积阶梯。
-        // 层间 dx = halfStepX < 0.82*TileStepX = 62.3,L_n+1 仍能锁住 L_n。
-        // 底层 (layer 0) 锚定在 pNode 原点,上层按 layer * 38 依次往右叠加 —— 经典塔形从底往上"长"出去。
+        // 每上一层相对下一层的横向偏移:每层 +1 半格 = TileStepX / 2 = 40,形成经典塔形 staircase 的右上方累积阶梯。
+        // 层间 dx = halfStepX < 0.82*TileStepX = 65.6,L_n+1 仍能锁住 L_n。
+        // 底层 (layer 0) 锚定在 pNode 原点,上层按 layer * 40 依次往右叠加 —— 经典塔形从底往上"长"出去。
         LayerOffsetX: 0,
-        // 每上一层相对下一层的纵向偏移:每层 +1 半格 = TileStepY / 2 = 47.5。
-        // 层间 dy = halfStepY < 0.82*TileStepY = 77.9,L_n+1 锁住 L_n;
-        // 跨层 (dy = 整格 = 95) 已超阈值,L_n+2 不再锁 L_n —— 即"每张牌只跟紧邻上层"的塔形语义,
+        // 每上一层相对下一层的纵向偏移:每层 +1 半格 = TileStepY / 2 = 50。
+        // 层间 dy = halfStepY < 0.82*TileStepY = 82,L_n+1 锁住 L_n;
+        // 跨层 (dy = 整格 = 100) 已超阈值,L_n+2 不再锁 L_n —— 即"每张牌只跟紧邻上层"的塔形语义,
         // 跟真实麻将塔"每层只压一层"一致。
         // 底层留在原位,上层往上叠加;视觉中心由底层(最大面积)主导,无需额外居中。
         LayerOffsetY: 0,

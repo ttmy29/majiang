@@ -1,5 +1,5 @@
 import { _decorator, Component, director, Label, Node, tween, UIOpacity, Vec3 } from 'cc';
-import { AudioManager } from './manager/AudioManager';
+import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 const { ccclass, property } = _decorator;
@@ -18,20 +18,29 @@ export class UIFailureLayer extends Component {
     @property(Node)
     iconNode2: Node = null!;
     
-    opentype :string= null;
+    isMax :boolean = false;
     start() {
+        tween(this.node)
+            .delay(0.5)
+            .call(() => {
+                AudioManager.instance.playOneShot(AudioClipNames.game_lose);
+            })
+            .start();
 
     }
 
-    init(opentype:string  = null) {
-        this.opentype = opentype;
+    init(isMax:boolean  = false,soltNode :Node = null) {
+        this.isMax = isMax;
         // opentype 非空 = 槽位全部已解锁，提示玩家清空底部 slot 继续
         // opentype 为空 = 还有未解锁槽位，沿用 prefab 默认文案("继续游戏并解锁一个新盒子?")
-        if (opentype && this.tipsLabel) {
+        if (isMax && this.tipsLabel) {
             this.tipsLabel.string = "没有更多空间了，清理后备栏的麻将来继续游戏";
+            this.iconNode1.active = false;
+            this.iconNode2.active = true;
+
+
         }
-        // if (this.iconNode1) this.iconNode1.active = !opentype;
-        // if (this.iconNode2) this.iconNode2.active = !!opentype;
+
         this.playOpenAnimation();
     }
 
@@ -109,7 +118,7 @@ export class UIFailureLayer extends Component {
 
     onButtonContinueClick() {
         AudioManager.instance.playClick();
-        director.emit(Constants.eventNames.EventFailureContinue, this.opentype);
+        director.emit(Constants.eventNames.EventFailureContinue, this.isMax);
         this.playCloseAnimation();
     }
 }

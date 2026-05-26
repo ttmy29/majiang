@@ -490,6 +490,13 @@ export class UIGameLayer extends Component {
                 // 动画彻底结束后隐藏节点
                 lockTips.active = false;
             })
+            .delay(0.2)
+            .call(()=>{
+                lockTips.setPosition(new Vec3(0, 0, 0));
+                lockTips.setScale(new Vec3(1, 1, 1));
+                uiOpacity.opacity = 255;
+                lockTips.angle = 0;
+            })
             .start();
 
         // 缩放动画

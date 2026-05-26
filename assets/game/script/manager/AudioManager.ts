@@ -13,6 +13,15 @@ export enum AudioClipNames {
     taskFly = 'taskFly', //撤回 牌飞的声音
     prop_tips = 'prop_tips', //换牌道具提示音效
     mj_error = 'mj_error', //麻将 抖动音效
+    game_lose = 'game_lose', //游戏结束 失败弹窗音效
+    game_win = 'game_win', //游戏结束 胜利弹窗音效
+    combo_level1 = 'bucuo1', //不错
+    combo_level2 = 'lihai2', //厉害
+    combo_level3 = 'niude3', //牛的
+    combo_level4 = 'juele4', //绝了
+    combo_level5 = 'taiqiangle5', //太强了
+    combo_level6 = 'yingmale6', // 赢麻了
+    combo_level7 = 'wudile7', //无敌了
 
 }
 

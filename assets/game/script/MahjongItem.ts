@@ -1,4 +1,4 @@
-import { _decorator, Component, EventTouch, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, Component, EventTouch, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
@@ -6,19 +6,6 @@ const { ccclass, property } = _decorator;
 
 @ccclass('MahjongItem')
 export class MahjongItem extends Component {
-
-    // 每个 layer 一个阴影容器，交错插在牌身序列中：
-    // _shadowLayer_0_ → layer 0 牌身 → _shadowLayer_1_ → layer 1 牌身 → ...
-    // 上层牌的阴影会落在下层牌面上，同层相邻牌仍会互相覆盖消除暗带
-    public static readonly SHADOW_LAYER_PREFIX = '_shadowLayer_';
-
-    private static shadowLayerName(layer: number): string {
-        return `${MahjongItem.SHADOW_LAYER_PREFIX}${layer}_`;
-    }
-
-    private static isShadowLayerNode(node: Node | null | undefined): boolean {
-        return !!node?.name?.startsWith(MahjongItem.SHADOW_LAYER_PREFIX);
-    }
 
     @property(Node)
     iconNode: Node = null!;
@@ -33,12 +20,40 @@ export class MahjongItem extends Component {
 
     private touchTween: Tween<Node> | null = null;
     private shakeOriginPos: Vec3 | null = null;
-    private originSiblingIndex = -1;
     // 记录常态下，阴影是否应该显示
     private _originalShadowActive: boolean = false;
     // start() 跑过一次后置 true。用于区分"首次激活（由 start 接管阴影挂载）"
     // 和"节点池/父节点反激活后重启（onEnable 需要主动挂回）"两种场景
     private _started: boolean = false;
+
+    // 同 z 层容器内的深度排序。row+col 合成单一深度键:
+    // 屏幕越靠"下+右"(row+col 越大)画得越在前面。
+    public static compareBoardDisplayOrderRC(rowA: number, colA: number, rowB: number, colB: number): number {
+        const keyA = rowA + colA;
+        const keyB = rowB + colB;
+        if (keyA !== keyB) return keyA - keyB;
+        return rowA - rowB;
+    }
+
+    public static refreshLayerDisplayOrder(layerContainer: Node | null | undefined) {
+        if (!layerContainer?.isValid) return;
+
+        const children = layerContainer.children.slice();
+        const tileNodes = children
+            .map((node) => ({ node, item: node.getComponent(MahjongItem) }))
+            .filter((entry): entry is { node: Node; item: MahjongItem } => !!entry.item)
+            .sort((a, b) => MahjongItem.compareBoardDisplayOrderRC(a.item.row, a.item.col, b.item.row, b.item.col));
+
+        let index = 0;
+        for (const child of children) {
+            if (!child.getComponent(MahjongItem)) {
+                child.setSiblingIndex(index++);
+            }
+        }
+        for (const entry of tileNodes) {
+            entry.node.setSiblingIndex(index++);
+        }
+    }
 
     onDisable() {
         this.disableTileTouch();
@@ -51,7 +66,6 @@ export class MahjongItem extends Component {
         const baseScale = this.getBoardScale();
         this.node.setScale(baseScale);
         this.node.eulerAngles = new Vec3(0, 0, 0);
-        this.originSiblingIndex = -1;
     }
 
     onEnable() {
@@ -63,9 +77,9 @@ export class MahjongItem extends Component {
 
         // 已经被 start 接管过的牌如果是因 pNode 反激活而走过 onDisable，
         // 那时阴影层级未恢复（onDisable 注释解释了为什么不能动 hierarchy）。
-        // 重新激活后由这里把阴影挂回正确的 _shadowLayer_<N>_ 容器。
+        // 重新激活后由这里把阴影挂回正确的 _layer_<N>_ 容器。
         // 首次 onEnable 时 _started 还是 false，全部交给 start() 处理，避免重复挂载。
-        if (this._started && this.node.parent?.name === 'pNode') {
+        if (this._started && this.isOnBoard()) {
             this.attachShadowToLayer();
             if (this.shadowNode?.isValid) {
                 this.shadowNode.active = this._originalShadowActive;
@@ -74,15 +88,16 @@ export class MahjongItem extends Component {
     }
 
     onDestroy() {
-        // 阴影已被抽到独立层，不会随 tile.destroy 自动清理
-        if (this.shadowNode?.isValid && MahjongItem.isShadowLayerNode(this.shadowNode.parent)) {
+        // 阴影已被抽到层容器,不会随 tile.destroy 自动清理;但按下时阴影会临时挂回 tile 内部,
+        // 这种情况由 tile.destroy 自动回收即可,不需要主动 destroy
+        if (this.shadowNode?.isValid && this.shadowNode.parent !== this.node) {
             this.shadowNode.destroy();
         }
     }
 
     start() {
         if (this.node.parent) {
-            if (this.node.parent.name !== "pNode") {
+            if (!this.isOnBoard()) {
                 this.disableTileTouch();
             }
         }
@@ -99,70 +114,41 @@ export class MahjongItem extends Component {
         this._started = true;
     }
 
+    // 判断 tile 当前是否"挂在棋盘上"。容器化后 tile 直接 parent 是 _layer_<N>_,
+    // 棋盘 pNode 是它的 grandparent;tile 飞到 flyLayer/槽位时不满足
+    private isOnBoard(): boolean {
+        return this.node.parent?.parent?.name === 'pNode';
+    }
+
     /**
-     * 把阴影节点搬到 pNode 下 _shadowLayer_<layer>_ 的容器里。
-     * 每个 layer 的阴影容器位于该 layer 牌身之前、上一 layer 牌身之后，
-     * 这样上层牌阴影会落在下层牌面上，同层相邻牌仍能互相覆盖消除暗带。
+     * 把阴影挂到 tile 所在的 _layer_<N>_ 容器里的最前面位置,
+     * 让阴影先于同层牌身渲染,但仍盖在更低层牌身之上。
      */
     private attachShadowToLayer() {
         if (!this.shadowNode?.isValid) return;
         const parent = this.node.parent;
         if (!parent) return;
 
-        const layerName = MahjongItem.shadowLayerName(this.layer);
-        let layer = parent.getChildByName(layerName);
-        if (!layer) {
-            layer = new Node(layerName);
-            layer.layer = parent.layer;
-            layer.addComponent(UITransform);
-            parent.addChild(layer);
-        }
-
-        // 把阴影容器移到当前 layer 第一张牌之前的位置
-        const targetIndex = this.computeShadowLayerIndex(parent, this.layer);
-        if (layer.getSiblingIndex() !== targetIndex) {
-            layer.setSiblingIndex(targetIndex);
-        }
-
-        if (this.shadowNode.parent !== layer) {
+        if (this.shadowNode.parent !== parent) {
             // 第二个参数 true：保持世界变换，先到位再被 sync 覆盖
-            this.shadowNode.setParent(layer, true);
+            this.shadowNode.setParent(parent, true);
+        }
+        // 阴影排在层容器最前面,后续 tile.start 时其他 tile 的阴影也会排在前面,
+        // 多张阴影之间相对顺序不重要(它们渲染到同一像素时颜色相同)
+        if (this.shadowNode.getSiblingIndex() !== 0) {
+            this.shadowNode.setSiblingIndex(0);
         }
         this.syncShadowTransform();
     }
 
     /**
-     * 计算 _shadowLayer_<layer>_ 应当落在 pNode 的兄弟索引：
-     * 数出"应当排在它前面"的子节点个数 —— 包括 layer 更小的牌身，
-     * 和 layer 更小的阴影容器。计数方式不依赖自身当前位置，所以
-     * 多张同层牌反复 attach 时索引保持稳定，不会被推到牌身之后。
-     */
-    private computeShadowLayerIndex(parent: Node, layer: number): number {
-        let count = 0;
-        for (const child of parent.children) {
-            if (MahjongItem.isShadowLayerNode(child)) {
-                const childLayer = MahjongItem.parseShadowLayerIndex(child);
-                if (childLayer >= 0 && childLayer < layer) count++;
-                continue;
-            }
-            const item = child.getComponent(MahjongItem);
-            if (item && item.layer < layer) count++;
-        }
-        return count;
-    }
-
-    private static parseShadowLayerIndex(node: Node): number {
-        const m = node.name.match(/^_shadowLayer_(\d+)_$/);
-        return m ? parseInt(m[1], 10) : -1;
-    }
-
-    /**
      * 把阴影的局部 transform 同步成 tile 的局部 transform。
-     * _shadowLayer_<N>_ 与 tile 同属 pNode 且位置/缩放都是默认，所以直接复制即可。
+     * 容器化后阴影跟 tile 在同一个 _layer_<N>_ 容器下,位置/缩放都是默认,直接复制即可。
+     * 按下时阴影会临时 detach 到 tile 内部,这时不需要同步(detachShadowToTile 已 reset)。
      */
     private syncShadowTransform() {
         if (!this.shadowNode?.isValid) return;
-        if (!MahjongItem.isShadowLayerNode(this.shadowNode.parent)) return;
+        if (this.shadowNode.parent === this.node) return;
 
         this.shadowNode.setPosition(this.node.position);
         this.shadowNode.setScale(this.node.scale);
@@ -179,7 +165,7 @@ export class MahjongItem extends Component {
         if (!this.shadowNode?.isValid) return;
 
         const parent = this.node.parent;
-        if (parent && parent.name === 'pNode') {
+        if (parent && this.isOnBoard()) {
             this.attachShadowToLayer();
             this.shadowNode.active = this._originalShadowActive;
         } else if (parent) {
@@ -199,7 +185,7 @@ export class MahjongItem extends Component {
         // 这里再启动 resetScale 的 tween 会跟入槽 tween 抢同一个 scale 属性,
         // 导致最终缩放卡在 BoardScale 而不是 SlotScale。检查 parent 是不是棋盘,
         // 不在棋盘上说明 tile 已被业务层接管,放弃 reset
-        if (this.node.parent?.name !== 'pNode') return;
+        if (!this.isOnBoard()) return;
 
         const blocked = this.isBlockedByUpperMahjong();
         // 如果被遮挡(正在播放抖动动画),手指抬起时不中断动画
@@ -215,7 +201,7 @@ export class MahjongItem extends Component {
 
     onTouchcancel() {
         // 同 onTouchend 的考量,牌已经被业务层接管时不要 reset
-        if (this.node.parent?.name !== 'pNode') return;
+        if (!this.isOnBoard()) return;
 
         const blocked = this.isBlockedByUpperMahjong();
         // 如果被遮挡,手指移出范围时也不中断动画
@@ -227,26 +213,15 @@ export class MahjongItem extends Component {
     }
 
     /**
-     * 把阴影从 tile 内部挪回到共享 _shadowLayer_<N>_ 容器中。
+     * 把阴影从 tile 内部挪回到共享 _layer_<N>_ 容器中。
      * 仅在阴影确实被 detachShadowToTile 临时移到 tile 下时才动作。
      */
     private reattachShadowIfDetached() {
         if (!this.shadowNode?.isValid) return;
         if (this.shadowNode.parent !== this.node) return;
         this.attachShadowToLayer();
+        MahjongItem.refreshLayerDisplayOrder(this.node.parent);
         this.shadowNode.active = this._originalShadowActive;
-    }
-
-    /**
-     * 外部调用：在 GameCtrl 整体重排牌身节点后，把每个 layer 的阴影容器
-     * 重新插回 layer 牌身之前的正确位置。对 start() 之前的初始期、阴影还在
-     * tile 内部的状态都是安全的（attachShadowToLayer 自身幂等）。
-     */
-    public refreshShadowLayerAttachment() {
-        if (!this.shadowNode?.isValid) return;
-        // 阴影正在被 detach 跟着 tile（按下中）—— 此时不应该把它拉回共享层
-        if (this.shadowNode.parent === this.node) return;
-        this.attachShadowToLayer();
     }
 
     click(): boolean {
@@ -351,8 +326,9 @@ export class MahjongItem extends Component {
         }
         if (this.maskNode?.active) return true;
 
-        const parent = this.node.parent;
-        if (!parent) return false;
+        const myLayerContainer = this.node.parent;
+        const pNode = myLayerContainer?.parent;
+        if (!myLayerContainer || !pNode) return false;
 
         const curPos = this.node.position;
 
@@ -363,15 +339,23 @@ export class MahjongItem extends Component {
         const blockLimitX = Constants.MahjongBoard.TileStepX * 0.82;
         const blockLimitY = Constants.MahjongBoard.TileStepY * 0.82;
 
-        for (const child of parent.children) {
-            if (child === this.node || !child.activeInHierarchy) continue;
+        // 容器化后只能从同层容器看到同层 tiles,上层 tile 在兄弟 _layer_<M>_ 容器里
+        for (const layerContainer of pNode.children) {
+            if (layerContainer === myLayerContainer) continue;
+            const m = layerContainer.name.match(/^_layer_(\d+)_$/);
+            if (!m) continue;
+            const cl = parseInt(m[1], 10);
+            if (cl <= this.layer) continue;
 
-            const item = child.getComponent(MahjongItem);
-            if (!item || item.layer <= this.layer) continue;
+            for (const child of layerContainer.children) {
+                if (!child.activeInHierarchy) continue;
+                const item = child.getComponent(MahjongItem);
+                if (!item) continue;
 
-            const pos = child.position;
-            if (Math.abs(pos.x - curPos.x) < blockLimitX && Math.abs(pos.y - curPos.y) < blockLimitY) {
-                return true;
+                const pos = child.position;
+                if (Math.abs(pos.x - curPos.x) < blockLimitX && Math.abs(pos.y - curPos.y) < blockLimitY) {
+                    return true;
+                }
             }
         }
 
@@ -472,11 +456,10 @@ export class MahjongItem extends Component {
         this.stopTouchTween();
         const baseScale = this.getBoardScale();
 
-        // 让牌在“掉落”的过程中就已经处于正确的遮挡关系中，消除动画结束时的突兀感
-        this.restoreSiblingIndex();
-
         // 把按下时挂到 tile 内部的阴影挂回共享层（updateShadowStatus 会决定可见性）
         this.attachShadowToLayer();
+        // 让牌在“掉落”的过程中就已经处于正确的遮挡关系中，消除动画结束时的突兀感。
+        MahjongItem.refreshLayerDisplayOrder(this.node.parent);
 
         // 动态重新计算一次并还原阴影（防止长按期间周围牌被消除导致的状态错误）
         this.updateShadowStatus();
@@ -520,19 +503,7 @@ export class MahjongItem extends Component {
         const parent = this.node.parent;
         if (!parent) return;
 
-        if (this.originSiblingIndex < 0) {
-            this.originSiblingIndex = this.node.getSiblingIndex();
-        }
         this.node.setSiblingIndex(parent.children.length - 1);
-    }
-
-    private restoreSiblingIndex() {
-        const parent = this.node.parent;
-        if (!parent || this.originSiblingIndex < 0) return;
-
-        const index = Math.min(this.originSiblingIndex, parent.children.length - 1);
-        this.node.setSiblingIndex(index);
-        this.originSiblingIndex = -1;
     }
 
     // 禁用触摸方法

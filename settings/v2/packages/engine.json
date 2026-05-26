@@ -3,7 +3,7 @@
   "modules": {
     "configs": {
       "defaultConfig": {
-        "name": "Default Config",
+        "name": "默认配置",
         "cache": {
           "base": {
             "_value": true
@@ -12,7 +12,7 @@
             "_value": true
           },
           "gfx-webgl2": {
-            "_value": true
+            "_value": false
           },
           "gfx-webgpu": {
             "_value": false
@@ -21,10 +21,10 @@
             "_value": true
           },
           "skeletal-animation": {
-            "_value": false
+            "_value": true
           },
           "3d": {
-            "_value": false
+            "_value": true
           },
           "meshopt": {
             "_value": false
@@ -45,7 +45,7 @@
             "_value": true
           },
           "ui-skew": {
-            "_value": false
+            "_value": true
           },
           "affine-transform": {
             "_value": true
@@ -54,14 +54,14 @@
             "_value": true
           },
           "particle": {
-            "_value": false
+            "_value": true
           },
           "physics": {
-            "_value": false,
+            "_value": true,
             "_option": "physics-ammo"
           },
           "physics-ammo": {
-            "_value": false,
+            "_value": true,
             "_flags": {
               "LOAD_BULLET_MANUALLY": false
             }
@@ -83,7 +83,7 @@
             "_option": "physics-2d-box2d"
           },
           "physics-2d-box2d": {
-            "_value": false
+            "_value": true
           },
           "physics-2d-box2d-wasm": {
             "_value": false,
@@ -101,7 +101,7 @@
             "_value": true
           },
           "primitive": {
-            "_value": false
+            "_value": true
           },
           "profiler": {
             "_value": true
@@ -131,16 +131,16 @@
             "_value": true
           },
           "websocket": {
-            "_value": false
+            "_value": true
           },
           "websocket-server": {
             "_value": false
           },
           "terrain": {
-            "_value": false
+            "_value": true
           },
           "light-probe": {
-            "_value": false
+            "_value": true
           },
           "tiled-map": {
             "_value": true
@@ -150,16 +150,16 @@
           },
           "spine": {
             "_value": true,
-            "_option": "spine-3.8"
+            "_option": "spine-4.2"
           },
           "spine-3.8": {
-            "_value": true,
+            "_value": false,
             "_flags": {
               "LOAD_SPINE_MANUALLY": false
             }
           },
           "spine-4.2": {
-            "_value": false,
+            "_value": true,
             "_flags": {
               "LOAD_SPINE_MANUALLY": false
             }
@@ -168,7 +168,7 @@
             "_value": true
           },
           "marionette": {
-            "_value": false
+            "_value": true
           },
           "procedural-animation": {
             "_value": false
@@ -187,11 +187,16 @@
             "_value": false
           },
           "xr": {
-            "_value": false
+            "_value": true
           }
+        },
+        "flags": {
+          "LOAD_SPINE_MANUALLY": false,
+          "LOAD_BULLET_MANUALLY": false
         },
         "includeModules": [
           "2d",
+          "3d",
           "affine-transform",
           "animation",
           "audio",
@@ -199,28 +204,35 @@
           "custom-pipeline",
           "dragon-bones",
           "gfx-webgl",
-          "gfx-webgl2",
           "graphics",
           "intersection-2d",
+          "light-probe",
+          "marionette",
           "mask",
+          "particle",
           "particle-2d",
           "physics-2d-box2d",
+          "physics-ammo",
+          "primitive",
           "profiler",
           "rich-text",
-          "spine-3.8",
+          "skeletal-animation",
+          "spine-4.2",
+          "terrain",
           "tiled-map",
           "tween",
           "ui",
+          "ui-skew",
           "video",
-          "webview"
+          "websocket",
+          "webview",
+          "xr"
         ],
         "noDeprecatedFeatures": {
           "value": false,
           "version": ""
-        },
-        "flags": {}
+        }
       }
-    },
-    "globalConfigKey": "defaultConfig"
+    }
   }
 }

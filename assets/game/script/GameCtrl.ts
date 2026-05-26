@@ -1,4 +1,4 @@
-import { _decorator, assetManager, Component, director, instantiate, Label, Node, Prefab, SpriteFrame, tween, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, Component, director, instantiate, Label, Node, Prefab, SpriteFrame, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
 import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAllLevels } from './config/LevelJsonLoader';
@@ -77,6 +77,7 @@ export class GameCtrl extends Component {
     private uidSeed = 1;
 
     private remainTime = 0;
+    private elapsedTime = 0;
     private lastTickSecond = -1;
     private comboTimes = 0;
     private lastComboAt = 0;
@@ -100,6 +101,7 @@ export class GameCtrl extends Component {
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
         director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
         director.on(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
+        director.on(Constants.eventNames.EventWinNextLevel, this.onEventWinNextLevel, this);
         this.initSceneRefs();
         this.preloadMahjongFrames(() => {
             if (this.iconIds.length === 0) {
@@ -139,13 +141,21 @@ export class GameCtrl extends Component {
             if (!node) continue;
             node.active = true;
             node.children.forEach(child => {
-                if (array.indexOf(child.name) < 0) child.destroy();
+                if (array.indexOf(child.name) < 0) {
+                    child.destroy()
+                } else if ( child.parent.name == "slot3" || child.parent.name == "slot4") {
+                    if (child.name == "box_2" || child.name == "lock") {
+                        child.active = false;
+                    }
+                };
             });
         }
     }
 
     update(deltaTime: number) {
         if (this.gameState !== 'playing' || !this.config) return;
+
+        this.elapsedTime += deltaTime;
 
         if (this.config.levelTime <= 0) return;
 
@@ -184,6 +194,7 @@ export class GameCtrl extends Component {
 
         this.slotCapacity = this.config.slotCount || 7;
         this.remainTime = this.config.levelTime || 300;
+        this.elapsedTime = 0;
         this.lastTickSecond = -1;
 
         this.clearBoard();
@@ -202,7 +213,7 @@ export class GameCtrl extends Component {
 
         // 不同关卡 JSON 半格跨度差异很大(level1=10×10,level9=14×16,level10=14×8)。
         // 这里按 bbox 同时调 pNode 边框大小(更美观,小关不显得旷)和整体缩放(超大关卡兜底)
-        this.fitBoardAndResizePnode(positions);
+        //this.fitBoardAndResizePnode(positions);
 
         const { cx, cy } = this.computeBoardCenter(positions);
         const halfStepX = Constants.MahjongBoard.TileStepX / 2;
@@ -219,13 +230,19 @@ export class GameCtrl extends Component {
             const y = (cy - p.y_row) * halfStepY;
             const boardPos = new Vec3(x, y, 0);
 
+            console.log(
+                `tile_${i}_${type}   index=${i} type=${type} ` +
+                `xyz=(x_col=${p.x_col}, y_row=${p.y_row}, z_layer=${p.z_layer}) ` +
+                `nodePos=(${boardPos.x.toFixed(2)}, ${boardPos.y.toFixed(2)}, ${boardPos.z.toFixed(2)})`
+            );
+
             const node = instantiate(this.mahjongItem);
             node.name = `tile_${i}_${type}`;
             node.layer = this.mahjongPnode.layer;
             // 初始在屏幕上方，用于进场动画
             node.setPosition(boardPos.x, boardPos.y + 760, boardPos.z);
             node.setScale(Constants.MahjongBoard.BoardScale, Constants.MahjongBoard.BoardScale, 1);
-            this.mahjongPnode.addChild(node);
+            this.getOrCreateLayerContainer(p.z_layer).addChild(node);
 
             const item = node.getComponent(MahjongItem) || node.addComponent(MahjongItem);
             item.setData(type, p.y_row, p.x_col, p.z_layer, this.iconFrames.get(type) || null);
@@ -246,19 +263,12 @@ export class GameCtrl extends Component {
             node.on(Node.EventType.TOUCH_END, () => this.onTileTap(tile), this);
         }
 
-        // 重新进行渲染层级排序
-        // 注意：直接对 pNode.children 整体 setSiblingIndex 会把 _shadowLayer_<N>_
-        // 容器挤到末尾，导致所有阴影盖在所有牌身之上（参见下面 onTileUndo 中的同款警告）。
-        // 这里在重排后逐张调用 refreshShadowLayerAttachment，让阴影容器回到它该在的位置。
-        // 当前路径在 tile.start() 之前调用，shadow 容器尚未创建，refresh 是 no-op；
-        // 即便未来调用时机变化，此重排也不会再破坏阴影渲染层次。
-        const sortedTiles = this.tiles
-            .slice()
-            .sort((a, b) => this.compareBoardDisplayOrder(a, b));
-        sortedTiles.forEach((tile, index) => tile.node.setSiblingIndex(index));
-        for (const tile of sortedTiles) {
-            tile.item.refreshShadowLayerAttachment();
+        // 容器化后:层间顺序由 _layer_<N>_ 容器位置保证,这里只重排每个层容器内部的牌身。
+        const layers = new Set<number>();
+        for (const tile of this.tiles) {
+            layers.add(tile.layer);
         }
+        layers.forEach((layer) => this.refreshLayerDisplayOrder(this.getOrCreateLayerContainer(layer)));
 
         this.updateBoardTileShadows();
     }
@@ -370,7 +380,20 @@ export class GameCtrl extends Component {
     }
 
     private onTileTap(tile: TileRecord) {
-        if (this.gameState !== 'playing' || this.dealingTiles || tile.collected || tile.removed || this.isTileBlocked(tile)) {
+        if (this.gameState !== 'playing' || this.dealingTiles || tile.collected || tile.removed) {
+            return;
+        }
+        const blocker = this.findBlockerTile(tile);
+        if (blocker) {
+            console.log(
+                `[TapBlocked] tile uid=${tile.uid} type=${tile.type} ` +
+                `xyz=(col=${tile.col}, row=${tile.row}, z=${tile.layer}) ` +
+                `nodePos=(${tile.boardPos.x.toFixed(2)}, ${tile.boardPos.y.toFixed(2)}) ` +
+                `<-- blocker uid=${blocker.uid} type=${blocker.type} ` +
+                `xyz=(col=${blocker.col}, row=${blocker.row}, z=${blocker.layer}) ` +
+                `nodePos=(${blocker.boardPos.x.toFixed(2)}, ${blocker.boardPos.y.toFixed(2)}) ` +
+                `delta=(${(blocker.boardPos.x - tile.boardPos.x).toFixed(2)}, ${(blocker.boardPos.y - tile.boardPos.y).toFixed(2)})`
+            );
             return;
         }
 
@@ -650,8 +673,7 @@ export class GameCtrl extends Component {
     private winLevel() {
         this.gameState = 'win';
         this.clearIdleTips();
-        this.showToast('恭喜过关！');
-        this.scheduleOnce(() => this.startLevel(this.nowLevel + 1), 1.5);
+        LayerManager.instance.showUI('win', this.elapsedTime);
     }
 
     private failLevel(reason: string) {
@@ -675,6 +697,10 @@ export class GameCtrl extends Component {
 
     private onEventFailureRestart() {
         this.startLevel(this.nowLevel);
+    }
+
+    private onEventWinNextLevel() {
+        this.startLevel(this.nowLevel + 1);
     }
 
     private onEventFailureContinue(opentype: string | null) {
@@ -727,15 +753,19 @@ export class GameCtrl extends Component {
     }
 
     private isTileBlocked(tile: TileRecord): boolean {
+        return this.findBlockerTile(tile) !== null;
+    }
+
+    private findBlockerTile(tile: TileRecord): TileRecord | null {
         for (const other of this.tiles) {
             if (other === tile || other.collected || other.removed || other.layer <= tile.layer) continue;
             // 判断是否在同层级上方遮挡 (物理碰撞盒检查)
             if (Math.abs(other.boardPos.x - tile.boardPos.x) < Constants.MahjongBoard.TileStepX * 0.82 &&
                 Math.abs(other.boardPos.y - tile.boardPos.y) < Constants.MahjongBoard.TileStepY * 0.82) {
-                return true;
+                return other;
             }
         }
-        return false;
+        return null;
     }
 
     private updateBoardTileShadows() {
@@ -1072,7 +1102,8 @@ export class GameCtrl extends Component {
     }
 
     private showToast(message: string, seconds = 1.1) {
-        director.emit(Constants.eventNames.EventShowToast, { msg: message, seconds });
+        console.log('GameCtrl: show toast', message);
+        //director.emit(Constants.eventNames.EventShowToast, { msg: message, seconds });
     }
 
     // ==========================================
@@ -1135,10 +1166,35 @@ export class GameCtrl extends Component {
     }
 
     private compareBoardDisplayOrder(a: TileRecord, b: TileRecord): number {
-        const depthA = a.layer * 100000 + a.row * 1000 + a.col;
-        const depthB = b.layer * 100000 + b.row * 1000 + b.col;
-        if (depthA !== depthB) return depthA - depthB;
-        return a.col - b.col;
+        return MahjongItem.compareBoardDisplayOrderRC(a.row, a.col, b.row, b.col);
+    }
+
+    // 取(或新建)某个 z 层的容器节点。所有同层的牌身 + 阴影都挂在这里,
+    // 容器按 layer 升序排列,层间渲染顺序由容器自身位置保证,层内只需排 row/col
+    private getOrCreateLayerContainer(layer: number): Node {
+        const name = `_layer_${layer}_`;
+        let container = this.mahjongPnode.getChildByName(name);
+        if (container) return container;
+
+        container = new Node(name);
+        container.layer = this.mahjongPnode.layer;
+        container.addComponent(UITransform);
+        this.mahjongPnode.addChild(container);
+
+        // 按 layer 数字升序插到正确位置:数出已存在的、layer 比自己小的容器个数
+        let targetIndex = 0;
+        for (const child of this.mahjongPnode.children) {
+            if (child === container) continue;
+            const m = child.name.match(/^_layer_(\d+)_$/);
+            if (!m) continue;
+            if (parseInt(m[1], 10) < layer) targetIndex++;
+        }
+        container.setSiblingIndex(targetIndex);
+        return container;
+    }
+
+    private refreshLayerDisplayOrder(layerContainer: Node) {
+        MahjongItem.refreshLayerDisplayOrder(layerContainer);
     }
 
     private findChildDeep(parent: Node | null, name: string): Node | null {
@@ -1209,9 +1265,11 @@ export class GameCtrl extends Component {
         tile.node.name = `tile_${tile.uid}`;
 
         const worldPosition = tile.node.worldPosition.clone();
-        tile.node.setParent(this.mahjongPnode);
+        const layerContainer = this.getOrCreateLayerContainer(tile.layer);
+        tile.node.setParent(layerContainer);
         tile.node.setWorldPosition(worldPosition);
-        tile.node.setSiblingIndex(this.mahjongPnode.children.length - 1);
+        // 飞行期间先顶到本层容器末尾(同层最上面),避免被同层兄弟遮住
+        tile.node.setSiblingIndex(layerContainer.children.length - 1);
 
         // 撤回飞回棋盘的飞行声,跟 tween 起手对齐
         AudioManager.instance.playOneShot(AudioClipNames.taskFly);
@@ -1222,28 +1280,8 @@ export class GameCtrl extends Component {
                 // 撤回落定后再标记可点击 + 重新启用触摸
                 tile.collected = false;
                 tile.item.enableTileTouch();
-                // 飞行时把 siblingIndex 顶到末尾避免被遮挡;落地后只把这张撤回牌插回应在的层级。
-                // 注意:不能用 forEach(setSiblingIndex(index)) 整体重排所有 tile —— mahjongPnode
-                // 的 children 里还交错着 _shadowLayer_<N>_ 容器,整体重排会把这些阴影容器全部推到
-                // children 末尾,变成阴影盖在所有牌身之上。所以这里只动撤回的这一张牌。
-                const parent = this.mahjongPnode;
-                const undoneDepth = tile.layer * 100000 + tile.row * 1000 + tile.col;
-                let targetIndex = 0;
-                for (const child of parent.children) {
-                    if (child === tile.node) continue;
-                    if (child.name.startsWith(MahjongItem.SHADOW_LAYER_PREFIX)) {
-                        const m = child.name.match(/^_shadowLayer_(\d+)_$/);
-                        const cl = m ? parseInt(m[1], 10) : -1;
-                        // 同层及更低层的阴影容器都应排在撤回牌之前(牌身盖住自己的阴影)
-                        if (cl >= 0 && cl <= tile.layer) targetIndex++;
-                        continue;
-                    }
-                    const item = child.getComponent(MahjongItem);
-                    if (!item) continue;
-                    const otherDepth = item.layer * 100000 + item.row * 1000 + item.col;
-                    if (otherDepth < undoneDepth) targetIndex++;
-                }
-                tile.node.setSiblingIndex(targetIndex);
+                // 容器化后:层间顺序由 _layer_<N>_ 容器位置保证,落地后统一重排本层。
+                this.refreshLayerDisplayOrder(layerContainer);
                 this.updatePlayableStates();
                 this.updateHud();
                 this.checkEndState();
