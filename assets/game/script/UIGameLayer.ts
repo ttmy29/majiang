@@ -62,7 +62,8 @@ export class UIGameLayer extends Component {
     switchTipsNode: Node = null!;
     @property(Node)
     comboNode:Node = null!;
-
+    @property(Node)
+    comboLabelNode:Node = null!;
 
     // 每个槽位在场景里的原始位置，MoveIn 时回到自己的原点而不是写死坐标
     private slotOriginPositions: Vec3[] = [];
@@ -70,14 +71,30 @@ export class UIGameLayer extends Component {
     // HUD label —— 由 GameCtrl emit EventHudUpdate / EventShowToast 触发渲染
     private targetLabel: Label = null!;
     private statusLabel: Label = null!;
-    private comboLabel: Label = null!;
+
     private toastLabel: Label = null!;
 
     // comboNode 下的进度条 fill 节点和连击计数文本
     private comboBarSprite: Sprite = null!;
     private comboCountLabel: Label = null!;
+    // comboLabelNode 上挂的 Label,显示 "不错/厉害/..." 这种连击口号
+    private comboTextLabel: Label = null!;
+    // 当前已经播放到的连击口号下标(0~7),combo 中断或窗口到期时清零
+    private comboAudioLevel = 0;
+    // 每 3 次连击解锁下一级口号,与 COMBO_AUDIOS 长度对应,超过 7 后不再升级
+    private static readonly COMBO_STEP = 3;
     // 连击窗口时长（秒），与 GameCtrl.updateCombo 中的 5000ms 保持一致
     private static readonly COMBO_DURATION = 5;
+    // 连击口号:每 3 次连击按顺序播一个,同步在 comboLabelNode 上显示对应文本
+    private static readonly COMBO_AUDIOS: { audio: AudioClipNames; text: string }[] = [
+        { audio: AudioClipNames.combo_level1, text: '不错' },
+        { audio: AudioClipNames.combo_level2, text: '厉害' },
+        { audio: AudioClipNames.combo_level3, text: '牛的' },
+        { audio: AudioClipNames.combo_level4, text: '绝了!' },
+        { audio: AudioClipNames.combo_level5, text: '太强了!' },
+        { audio: AudioClipNames.combo_level6, text: '赢麻了!' },
+        { audio: AudioClipNames.combo_level7, text: '无敌了!' },
+    ];
 
     // 目标槽预览相关 —— 由 EventGameUiInit 注入 prefab + 资源 map，EventRenderSlot 触发渲染
     private mahjongItem: Prefab = null!;
@@ -97,6 +114,10 @@ export class UIGameLayer extends Component {
         if (bar) this.comboBarSprite = bar.getComponent(Sprite)!;
         const countNode = this.comboNode.getChildByName('countLabel');
         if (countNode) this.comboCountLabel = countNode.getComponent(Label)!;
+        if (this.comboLabelNode) {
+            this.comboTextLabel = this.comboLabelNode.getComponent(Label)!;
+            this.comboLabelNode.active = false;
+        }
         this.comboNode.active = false;
     }
 
@@ -340,12 +361,51 @@ export class UIGameLayer extends Component {
         this.comboNode.active = true;
         if (this.comboCountLabel) this.comboCountLabel.string = `${comboTimes}`;
 
+        // GameCtrl 在窗口过期后会把 comboTimes 重新置为 1,意味着开启新一轮 combo,
+        // 已播放过的口号等级要从头来过,旧的 comboLabel 文本也要先收掉
+        if (comboTimes <= 1) {
+            this.comboAudioLevel = 0;
+            if (this.comboLabelNode) this.comboLabelNode.active = false;
+        }
+
+        // 每 COMBO_STEP 次连击解锁下一级口号:第 3/6/9/... 次时按顺序播一个
+        const targetLevel = Math.floor(comboTimes / UIGameLayer.COMBO_STEP);
+        const maxLevel = UIGameLayer.COMBO_AUDIOS.length;
+        if (targetLevel > this.comboAudioLevel && targetLevel <= maxLevel) {
+            this.comboAudioLevel = targetLevel;
+            this.playComboLevel(targetLevel - 1);
+        }
+
         Tween.stopAllByTarget(this.comboBarSprite);
         this.comboBarSprite.fillRange = 1;
         tween(this.comboBarSprite)
             .to(UIGameLayer.COMBO_DURATION, { fillRange: 0 })
             .call(() => {
                 if (this.comboNode?.isValid) this.comboNode.active = false;
+                // 窗口走完意味着这一轮 combo 结束,下一次匹配再从 level1 开始
+                this.comboAudioLevel = 0;
+                if (this.comboLabelNode?.isValid) this.comboLabelNode.active = false;
+            })
+            .start();
+    }
+
+    // 播放对应等级的连击口号音效,同步在 comboLabelNode 上弹一下文本
+    // 文本只跟着这次音效出现:弹入 → 短暂停留 → 自动收起,下次音效再播再显示
+    private playComboLevel(index: number) {
+        const entry = UIGameLayer.COMBO_AUDIOS[index];
+        if (!entry) return;
+        AudioManager.instance.playOneShot(entry.audio);
+        if (!this.comboLabelNode) return;
+        if (this.comboTextLabel) this.comboTextLabel.string = entry.text;
+        Tween.stopAllByTarget(this.comboLabelNode);
+        this.comboLabelNode.active = true;
+        this.comboLabelNode.setScale(0.6, 0.6, 1);
+        tween(this.comboLabelNode)
+            .to(0.12, { scale: new Vec3(1.15, 1.15, 1) }, { easing: 'sineOut' })
+            .to(0.08, { scale: new Vec3(1, 1, 1) }, { easing: 'sineInOut' })
+            .delay(0.9)
+            .call(() => {
+                if (this.comboLabelNode?.isValid) this.comboLabelNode.active = false;
             })
             .start();
     }

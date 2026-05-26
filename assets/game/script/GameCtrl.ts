@@ -67,6 +67,9 @@ export class GameCtrl extends Component {
     private taskQueue: string[] = [];
     private tiles: TileRecord[] = [];
     private slots: TileRecord[] = [];
+    // 失败弹窗"清空后备栏继续"后,被丢弃的牌挂在这里。
+    // 它们在 slotNode 里 active=false 隐藏,collectStoredTargets 看到匹配 type 的 box 会把它们捞回来飞向目标槽
+    private discardedTiles: TileRecord[] = [];
     private actionHistory: TileRecord[] = [];
     private targetBoxes: TargetBox[] = [];
 
@@ -132,24 +135,7 @@ export class GameCtrl extends Component {
     }
 
     protected onDisable(): void {
-        const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
-        const array = [
-            'item1', 'item2', 'item3', 'item4', 'box_2', 'lock'
-        ];
-        for (let i = 1; i <= 4; i++) {
-            const node = rootSlotNode.getChildByName(`slot${i}`);
-            if (!node) continue;
-            node.active = true;
-            node.children.forEach(child => {
-                if (array.indexOf(child.name) < 0) {
-                    child.destroy()
-                } else if ( child.parent.name == "slot3" || child.parent.name == "slot4") {
-                    if (child.name == "box_2" || child.name == "lock") {
-                        child.active = false;
-                    }
-                };
-            });
-        }
+        this.onUpDateUiInit();
     }
 
     update(deltaTime: number) {
@@ -175,17 +161,18 @@ export class GameCtrl extends Component {
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
+        this.discardedTiles = [];
         this.actionHistory = [];
         this.refreshUndoButtonStatus();
         this.clearIdleTips();
-
+        this.onUpDateUiInit();
         const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
         if (rootSlotNode && this.targetBoxes.length === 0) this.setupTargetSlot(rootSlotNode);
 
         this.config = this.createLevelConfig(level);
         this.taskQueue = this.buildTaskQueue(this.levelJson);
 
-        this.resetTargetBoxes();
+        //this.resetTargetBoxes();
         this.comboTimes = 0;
         this.lastComboAt = 0;
         this.resolvingMatch = false;
@@ -230,11 +217,11 @@ export class GameCtrl extends Component {
             const y = (cy - p.y_row) * halfStepY;
             const boardPos = new Vec3(x, y, 0);
 
-            console.log(
-                `tile_${i}_${type}   index=${i} type=${type} ` +
-                `xyz=(x_col=${p.x_col}, y_row=${p.y_row}, z_layer=${p.z_layer}) ` +
-                `nodePos=(${boardPos.x.toFixed(2)}, ${boardPos.y.toFixed(2)}, ${boardPos.z.toFixed(2)})`
-            );
+            // console.log(
+            //     `tile_${i}_${type}   index=${i} type=${type} ` +
+            //     `xyz=(x_col=${p.x_col}, y_row=${p.y_row}, z_layer=${p.z_layer}) ` +
+            //     `nodePos=(${boardPos.x.toFixed(2)}, ${boardPos.y.toFixed(2)}, ${boardPos.z.toFixed(2)})`
+            // );
 
             const node = instantiate(this.mahjongItem);
             node.name = `tile_${i}_${type}`;
@@ -597,7 +584,7 @@ export class GameCtrl extends Component {
 
     private collectStoredTargets() {
         if (this.gameState !== 'playing' || this.resolvingMatch) return;
-        const moveList: { tile: TileRecord; box: TargetBox }[] = [];
+        const moveList: { tile: TileRecord; box: TargetBox; fromDiscarded: boolean }[] = [];
         const plannedByBox = new Map<TargetBox, number>();
 
         for (const tile of this.slots.slice()) {
@@ -606,15 +593,32 @@ export class GameCtrl extends Component {
             const planned = plannedByBox.get(box) || 0;
             if (box.progress + box.pending + planned >= box.required) continue;
             plannedByBox.set(box, planned + 1);
-            moveList.push({ tile, box });
+            moveList.push({ tile, box, fromDiscarded: false });
+        }
+        // 再扫"清空后备栏"挂起的牌:某个 box 的 type 命中时把它们捞回去
+        for (const tile of this.discardedTiles.slice()) {
+            if (!tile.node?.isValid) continue;
+            const box = this.findMatchingTargetBox(tile.type);
+            if (!box) continue;
+            const planned = plannedByBox.get(box) || 0;
+            if (box.progress + box.pending + planned >= box.required) continue;
+            plannedByBox.set(box, planned + 1);
+            moveList.push({ tile, box, fromDiscarded: true });
         }
         if (moveList.length === 0) return;
 
         this.resolvingMatch = true;
         for (const entry of moveList) {
-            const index = this.slots.indexOf(entry.tile);
-            if (index >= 0) this.slots.splice(index, 1);
-            this.actionHistory = this.actionHistory.filter((t) => t !== entry.tile);
+            if (entry.fromDiscarded) {
+                const index = this.discardedTiles.indexOf(entry.tile);
+                if (index >= 0) this.discardedTiles.splice(index, 1);
+                // 隐藏的牌先点亮,紧接着 moveTileToTarget 会把它 reparent 到 flyLayer 开飞
+                entry.tile.node.active = true;
+            } else {
+                const index = this.slots.indexOf(entry.tile);
+                if (index >= 0) this.slots.splice(index, 1);
+                this.actionHistory = this.actionHistory.filter((t) => t !== entry.tile);
+            }
             this.moveTileToTarget(entry.tile, entry.box);
         }
         this.refreshUndoButtonStatus();
@@ -730,13 +734,22 @@ export class GameCtrl extends Component {
         }, Constants.slotAnim.UnlockWait);
     }
 
-    // 失败弹窗"继续游戏(所有槽位已解锁)":把底部 slot 里的牌都丢掉,腾出空间让玩家继续
+    // 失败弹窗"继续游戏(所有槽位已解锁)":把底部 slot 里的牌先挂起、不销毁,
+    // 等后续 box 拿到匹配 type 时 collectStoredTargets 会把它们捞回去飞向目标槽
     private clearBottomSlot() {
+        const discardedSet = new Set(this.slots);
         for (const tile of this.slots) {
-            tile.removed = true;
-            if (tile.node?.isValid) tile.node.destroy();
+            // 重新让这张牌可被目标槽接收(moveTileToTarget 会再把 collected/removed 置 true)
+            tile.collected = false;
+            if (tile.node?.isValid) tile.node.active = false;
+            this.discardedTiles.push(tile);
         }
         this.slots = [];
+        // 丢进回收站的牌不再能被撤回
+        this.actionHistory = this.actionHistory.filter((t) => !discardedSet.has(t));
+        this.refreshUndoButtonStatus();
+        // 当前目标若已经能消化这些牌(例如本次失败前的 refresh 已给出新 type),立即试一次回收
+        this.collectStoredTargets();
     }
 
     // ==========================================
@@ -1365,5 +1378,27 @@ export class GameCtrl extends Component {
         for (const box of this.targetBoxes) {
             this.emitRenderSlot(box);
         }
+    }
+
+    private onUpDateUiInit() {
+        const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
+        const array = [
+            'item1', 'item2', 'item3', 'item4', 'box_2', 'lock'
+        ];
+        for (let i = 1; i <= 4; i++) {
+            const node = rootSlotNode.getChildByName(`slot${i}`);
+            if (!node) continue;
+            node.active = true;
+            node.children.forEach(child => {
+                if (array.indexOf(child.name) < 0) {
+                    child.destroy()
+                } else if (child.parent.name == "slot3" || child.parent.name == "slot4") {
+                    if (child.name == "box_2" || child.name == "lock") {
+                        child.active = true;
+                    }
+                };
+            });
+        }
+        this.resetTargetBoxes();
     }
 }
