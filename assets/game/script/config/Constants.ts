@@ -27,6 +27,10 @@ const Constants = {
         EventTipsAnimatorEnd: 'TipsAnimatorEnd',
         // 强制中断帮助提示:GameCtrl -> UI,玩家在动画播放中点了麻将牌,停止呼吸动画
         EventStopTipsAnimator: 'StopTipsAnimator',
+        // 失败弹窗"继续游戏":UIFailureLayer -> GameCtrl,payload 是 opentype(null=解锁一个槽位继续,非空=清空底部 slot 继续)
+        EventFailureContinue: 'FailureContinue',
+        // 失败弹窗"重新开始":UIFailureLayer -> GameCtrl,从当前关重开
+        EventFailureRestart: 'FailureRestart',
     },
     // UIGameLayer.slotNodeArr 中节点的固定索引约定：
     // [0] = 底部存牌槽 (slot)，[1..4] = 顶部 4 个目标槽 (slot1~slot4)
@@ -45,7 +49,8 @@ const Constants = {
         UnlockWait: 0.6,
     },
     prefab: {
-        setting: 'prefab/setting'
+        setting: 'prefab/setting',
+        failure: 'prefab/failure'
     },
     GameBundleName: 'game',
     MahjongBoard: {

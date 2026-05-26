@@ -1,6 +1,7 @@
 import { _decorator, Component, EventMouse, Node, tween, UIOpacity, Vec3 } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
+import { StorageKey, StorageManager } from './manager/StorageManager';
 const { ccclass, property } = _decorator;
 
 @ccclass('UISetingLayer')
@@ -26,7 +27,26 @@ export class UISetingLayer extends Component {
             buttonNode.active = opentype === 1;
         }
 
+        this.applySavedSettings();
         this.playOpenAnimation();
+    }
+
+    private applySavedSettings() {
+        const audioSet = this.viewNode?.getChildByName('Game_frame')?.getChildByName('audioSet');
+        if (!audioSet) return;
+
+        this.applySwitchState(audioSet.getChildByName('music'), StorageKey.Music);
+        this.applySwitchState(audioSet.getChildByName('audio'), StorageKey.Audio);
+        this.applySwitchState(audioSet.getChildByName('vibrate'), StorageKey.Vibrate);
+    }
+
+    private applySwitchState(switchNode: Node | null, key: StorageKey) {
+        if (!switchNode) return;
+        const isOn = StorageManager.instance.getBoolean(key, true);
+        const dakai = switchNode.getChildByName('dakai_1');
+        const guanbi = switchNode.getChildByName('guanbi_1');
+        if (dakai) dakai.active = isOn;
+        if (guanbi) guanbi.active = !isOn;
     }
     private playOpenAnimation() {
         if (!this.node) return;
@@ -93,13 +113,21 @@ export class UISetingLayer extends Component {
 
     onButtonSwichtClick(event: EventMouse, data: string) {
         AudioManager.instance.playClick();
-        const targetNode = event.target;
-        if (targetNode.getChildByName("dakai_1").active) {
-            targetNode.getChildByName("dakai_1").active = false;
-            targetNode.getChildByName("guanbi_1").active = true;
-        } else {
-            targetNode.getChildByName("dakai_1").active = true;
-            targetNode.getChildByName("guanbi_1").active = false;
+        const targetNode = event.target as Node;
+        const willOpen = !targetNode.getChildByName("dakai_1").active;
+        targetNode.getChildByName("dakai_1").active = willOpen;
+        targetNode.getChildByName("guanbi_1").active = !willOpen;
+
+        switch (targetNode.name) {
+            case 'music':
+                AudioManager.instance.setMusicEnabled(willOpen);
+                break;
+            case 'audio':
+                AudioManager.instance.setEffectEnabled(willOpen);
+                break;
+            case 'vibrate':
+                StorageManager.instance.setBoolean(StorageKey.Vibrate, willOpen);
+                break;
         }
     }
 

@@ -4,6 +4,7 @@ import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
 import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAllLevels } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
+import { LayerManager } from './manager/LayerManager';
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
     baseDiff: number;
@@ -97,6 +98,8 @@ export class GameCtrl extends Component {
 
     start() {
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
+        director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
+        director.on(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
         this.initSceneRefs();
         this.preloadMahjongFrames(() => {
             if (this.iconIds.length === 0) {
@@ -123,7 +126,22 @@ export class GameCtrl extends Component {
     // 退到 start 层后再点开始，靠 onEnable 触发整局重开
     protected onEnable() {
         if (!this.hasStarted) return;
-        this.startLevel(1);
+        this.startLevel(this.nowLevel);
+    }
+
+    protected onDisable(): void {
+        const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
+        const array = [
+            'item1', 'item2', 'item3', 'item4', 'box_2', 'lock'
+        ];
+        for (let i = 1; i <= 4; i++) {
+            const node = rootSlotNode.getChildByName(`slot${i}`);
+            if (!node) continue;
+            node.active = true;
+            node.children.forEach(child => {
+                if (array.indexOf(child.name) < 0) child.destroy();
+            });
+        }
     }
 
     update(deltaTime: number) {
@@ -444,15 +462,13 @@ export class GameCtrl extends Component {
         tile.node.setWorldPosition(worldPosition);
         tile.item.setPlayable(true);
 
-        this.arrangeSlotTiles(isSlotFull ? 0 : 0.16+0.1, tile);
+        this.arrangeSlotTiles(0.16 + 0.1, tile);
         this.updatePlayableStates();
         this.updateHud();
 
-        if (isSlotFull) {
-            this.checkEndState();
-        } else {
-            this.scheduleOnce(() => this.checkEndState(), 0.18);
-        }
+        // 满槽情况下也走完整飞行动画,等牌真正落进槽位再判失败,
+        // 否则失败弹窗会在牌还没飞过去时就盖上来
+        this.scheduleOnce(() => this.checkEndState(), isSlotFull ? 0.16 + 0.1 + 0.05 : 0.18);
     }
 
     private arrangeSlotTiles(duration = 0.08, flyingTile: TileRecord | null = null) {
@@ -580,7 +596,7 @@ export class GameCtrl extends Component {
         }
         this.refreshUndoButtonStatus();
 
-        this.arrangeSlotTiles(0.12+0.1);
+        this.arrangeSlotTiles(0.12 + 0.1);
         this.scheduleOnce(() => {
             this.resolvingMatch = false;
             this.collectStoredTargets();
@@ -642,8 +658,59 @@ export class GameCtrl extends Component {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
         this.clearIdleTips();
+
+        // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
+        if (reason === '槽位满了') {
+            const allUnlocked = this.targetBoxes.every((b) => b.unlocked);
+            // opentype 为空 = 还有未解锁的槽位,"继续游戏" 帮玩家解锁一个槽位
+            // opentype 非空 = 所有槽位都解锁了,"继续游戏" 清空底部 slot
+            const opentype = allUnlocked ? 'clearSlot' : null;
+            LayerManager.instance.showUI('failure', opentype);
+            return;
+        }
+
         this.showToast(`${reason}，重开本关`);
         this.scheduleOnce(() => this.startLevel(this.nowLevel), 1.5);
+    }
+
+    private onEventFailureRestart() {
+        this.startLevel(this.nowLevel);
+    }
+
+    private onEventFailureContinue(opentype: string | null) {
+        if (this.gameState !== 'fail') return;
+        this.gameState = 'playing';
+        if (opentype) {
+            this.clearBottomSlot();
+        } else {
+            this.unlockNextSlotForContinue();
+        }
+        this.updateHud();
+    }
+
+    // 失败弹窗"继续游戏(还有锁着的槽位)":解锁下一个槽位,并在动画结束后给它分配新目标
+    private unlockNextSlotForContinue() {
+        const box = this.targetBoxes.find((b) => !b.unlocked);
+        if (!box) return;
+        box.unlocked = true;
+        box.refreshing = true;
+        director.emit(Constants.eventNames.EventShowSlotUnlock, this.getTargetBoxSlotID(box));
+        this.scheduleOnce(() => {
+            box.refreshing = false;
+            if (this.gameState !== 'playing' || !box.unlocked) return;
+            this.assignNewTarget(box);
+            this.collectStoredTargets();
+            this.updateHud();
+        }, Constants.slotAnim.UnlockWait);
+    }
+
+    // 失败弹窗"继续游戏(所有槽位已解锁)":把底部 slot 里的牌都丢掉,腾出空间让玩家继续
+    private clearBottomSlot() {
+        for (const tile of this.slots) {
+            tile.removed = true;
+            if (tile.node?.isValid) tile.node.destroy();
+        }
+        this.slots = [];
     }
 
     // ==========================================
@@ -1182,7 +1249,7 @@ export class GameCtrl extends Component {
                 this.checkEndState();
             })
             .start();
-        this.arrangeSlotTiles(0.12+0.1);
+        this.arrangeSlotTiles(0.12 + 0.1);
         this.updateHud();
         this.refreshUndoButtonStatus();
     }

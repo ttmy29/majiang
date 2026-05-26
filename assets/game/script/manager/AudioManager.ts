@@ -1,8 +1,7 @@
-import { _decorator, AudioClip, AudioSource, sys } from 'cc';
+import { _decorator, AudioClip, AudioSource } from 'cc';
+import { StorageKey, StorageManager } from './StorageManager';
 
 const { ccclass } = _decorator;
-
-const AUDIO_CONFIG_KEY = 'mahjong_match_audio_enabled';
 
 export enum AudioClipNames {
     Click = 'button_sound',//按钮点击
@@ -25,7 +24,6 @@ export class AudioManager {
     private bgmSource: AudioSource | null = null;
     private effectSources: AudioSource[] = [];
 
-    private soundOn = true;
     private effectSourceIndex = 0;
 
     public clips: { [name: string]: AudioClip } = {};
@@ -40,30 +38,38 @@ export class AudioManager {
         return this._instance;
     }
 
+    private get musicOn(): boolean {
+        return StorageManager.instance.getBoolean(StorageKey.Music, true);
+    }
+
+    private get effectOn(): boolean {
+        return StorageManager.instance.getBoolean(StorageKey.Audio, true);
+    }
+
     init(audioSources: AudioSource[]) {
         this.audioSources = (audioSources || []).filter((source) => !!source);
         this.bgmSource = this.audioSources[0] || null;
         this.effectSources = this.audioSources.length > 1 ? this.audioSources.slice(1) : this.audioSources;
         this.effectSourceIndex = 0;
 
-        this.getSoundConfig();
-        this.soundOn ? this.play() : this.pause();
+        this.play();
     }
 
-    getSoundConfig() {
-        const value = sys.localStorage.getItem(AUDIO_CONFIG_KEY);
-        this.soundOn = value === null ? true : value === 'true';
-        return this.soundOn;
+    setMusicEnabled(enabled: boolean) {
+        StorageManager.instance.setBoolean(StorageKey.Music, enabled);
+        if (enabled) {
+            this.bgmSource?.play();
+        } else {
+            this.bgmSource?.pause();
+        }
     }
 
-    setSoundConfig(soundOn: boolean) {
-        this.soundOn = soundOn;
-        sys.localStorage.setItem(AUDIO_CONFIG_KEY, String(this.soundOn));
-        this.soundOn ? this.play() : this.pause();
+    setEffectEnabled(enabled: boolean) {
+        StorageManager.instance.setBoolean(StorageKey.Audio, enabled);
     }
 
     play() {
-        if (!this.soundOn || !this.bgmSource) return;
+        if (!this.musicOn || !this.bgmSource) return;
 
         this.bgmSource.play();
     }
@@ -101,7 +107,7 @@ export class AudioManager {
     }
 
     playBgm(clipName: AudioClipName, loop = true) {
-        if (!this.soundOn || !this.bgmSource) return;
+        if (!this.musicOn || !this.bgmSource) return;
 
         const clip = this.getClip(clipName);
         if (!clip) return;
@@ -113,7 +119,7 @@ export class AudioManager {
     }
 
     playOneShot(clipName: AudioClipName, volume = 1) {
-        if (!this.soundOn) return;
+        if (!this.effectOn) return;
 
         const clip = this.getClip(clipName);
         const source = this.getEffectSource();

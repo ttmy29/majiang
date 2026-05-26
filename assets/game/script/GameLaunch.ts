@@ -17,13 +17,26 @@ export class GameLaunch extends Component {
     }
 
     private initAudioManager() {
-        // 优先用 GameLaunch 节点上挂的 AudioSource(第 0 个当 BGM,其余当音效);
-        // 一个都没挂时自动补一个,保证 playOneShot 至少有 source 可走
-        let sources = this.getComponents(AudioSource);
-        if (sources.length === 0) {
-            sources = [this.addComponent(AudioSource)];
-        }
-        AudioManager.instance.init(sources);
+        const bundle = assetManager.getBundle(Constants.GameBundleName);
+        bundle.load<AudioClip>('bgm/01_bgmusic', AudioClip, (err, clip: AudioClip) => {
+            if (err) {
+                console.error('加载音频失败', err);
+                return;
+            }
+
+            const bgmSource = this.node.addComponent(AudioSource);
+            bgmSource.clip = clip;
+            bgmSource.loop = true;
+
+            const effectSourceCount = 4;
+            const effectSources: AudioSource[] = [];
+            for (let i = 0; i < effectSourceCount; i++) {
+                effectSources.push(this.node.addComponent(AudioSource));
+            }
+
+            AudioManager.instance.init([bgmSource, ...effectSources]);
+        });
+
     }
 
     initPrefabResources() {
