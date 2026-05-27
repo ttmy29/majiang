@@ -17,8 +17,9 @@ export class UIFailureLayer extends Component {
     iconNode1: Node = null!;
     @property(Node)
     iconNode2: Node = null!;
-    
-    isMax :boolean = false;
+
+    isMax: boolean = false;
+    soltNode: Node = null!;
     start() {
         tween(this.node)
             .delay(0.5)
@@ -26,10 +27,18 @@ export class UIFailureLayer extends Component {
                 AudioManager.instance.playOneShot(AudioClipNames.game_lose);
             })
             .start();
-
+        //显示牌
+        let idx = 1;
+        const tiles = this.soltNode.children.filter((item) => item.getChildByName("bg"));
+        tiles.forEach((item) => {
+            item.setPosition(this.iconNode2.getChildByName(`item${idx}`).getPosition());
+            item.parent = this.iconNode2;
+            item.setScale(Constants.MahjongBoard.SlotScale + 0.06, Constants.MahjongBoard.SlotScale+ 0.06, 1);
+            idx += 1;
+        });
     }
 
-    init(isMax:boolean  = false,soltNode :Node = null) {
+    init(isMax: boolean = false, soltNode: Node = null) {
         this.isMax = isMax;
         // opentype 非空 = 槽位全部已解锁，提示玩家清空底部 slot 继续
         // opentype 为空 = 还有未解锁槽位，沿用 prefab 默认文案("继续游戏并解锁一个新盒子?")
@@ -37,8 +46,8 @@ export class UIFailureLayer extends Component {
             this.tipsLabel.string = "没有更多空间了，清理后备栏的麻将来继续游戏";
             this.iconNode1.active = false;
             this.iconNode2.active = true;
-
-
+            this.soltNode = soltNode;
+            //console.log(soltNode);
         }
 
         this.playOpenAnimation();
@@ -68,8 +77,19 @@ export class UIFailureLayer extends Component {
         }
     }
 
+    private returnTilesToSlotNode() {
+        if (!this.soltNode || !this.iconNode2) return;
+        const tiles = this.iconNode2.children.filter((item) => item.getChildByName("bg"));
+        tiles.forEach((item) => {
+            item.parent = this.soltNode;
+            item.active = false;
+        });
+    }
+
     private playCloseAnimation() {
         if (!this.node) return;
+
+        this.returnTilesToSlotNode();
 
         const target = this.viewNode ?? this.node;
         const maskOpacity = this.maskNode ? this.maskNode.getComponent(UIOpacity) : null;

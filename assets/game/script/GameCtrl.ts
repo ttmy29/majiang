@@ -5,6 +5,7 @@ import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAll
 import { MahjongItem } from './MahjongItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
+import { Utils } from './util/Utils';
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
     baseDiff: number;
@@ -58,7 +59,7 @@ export class GameCtrl extends Component {
     @property(Label)
     levelLabel: Label = null!;
 
-    nowLevel = 1;
+    nowLevel = 0;
 
     // 玩法状态与核心数据
     private gameState: GameState = 'ready';
@@ -89,6 +90,8 @@ export class GameCtrl extends Component {
     private dealingTiles = false;
     private targetsInitialized = false;
     private hasStarted = false;
+    private shuffleAnimating = false;
+    private shuffleSeq = 0;
     // 闲置帮助提示:玩家点牌后开始 10s 计时,期间没新点击就触发一次提示;
     // 提示动画播放期间(tipsActive=true)点牌不重启计时,等 UI 通知 End 才解除
     private tipsActive = false;
@@ -136,7 +139,6 @@ export class GameCtrl extends Component {
     }
 
     protected onDisable(): void {
-        this.onUpDateUiInit();
     }
 
     update(deltaTime: number) {
@@ -167,7 +169,7 @@ export class GameCtrl extends Component {
         this.refreshUndoButtonStatus();
         this.clearIdleTips();
         this.onUpDateUiInit();
-        const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
+        const rootSlotNode = Utils.findChildDeep(this.node, 'slotNode');
         if (rootSlotNode && this.targetBoxes.length === 0) this.setupTargetSlot(rootSlotNode);
 
         this.config = this.createLevelConfig(level);
@@ -180,6 +182,8 @@ export class GameCtrl extends Component {
         this.resolvingMatch = false;
         this.dealingTiles = false;
         this.targetsInitialized = false;
+        this.shuffleAnimating = false;
+        this.shuffleSeq++;
 
         this.slotCapacity = this.config.slotCount || 7;
         this.remainTime = this.config.levelTime || 300;
@@ -369,7 +373,7 @@ export class GameCtrl extends Component {
     }
 
     private onTileTap(tile: TileRecord) {
-        if (this.gameState !== 'playing' || this.dealingTiles || tile.collected || tile.removed) {
+        if (this.gameState !== 'playing' || this.dealingTiles || this.shuffleAnimating || tile.collected || tile.removed) {
             return;
         }
         const blocker = this.findBlockerTile(tile);
@@ -421,10 +425,10 @@ export class GameCtrl extends Component {
         tile.node.setWorldPosition(worldPosition);
         tile.item.setPlayable(true);
 
-        const targetIndex = this.clamp(box.progress + box.pending, 1, Math.max(1, box.required));
+        const targetIndex = Utils.clamp(box.progress + box.pending, 1, Math.max(1, box.required));
         const targetCell = box.itemNodes[targetIndex] || box.iconNode;
         const targetWorldPosition = targetCell ? targetCell.worldPosition.clone() : box.node.worldPosition.clone();
-        const targetFlyPosition = this.worldToLocalPosition(flyLayer, targetWorldPosition);
+        const targetFlyPosition = Utils.worldToLocalPosition(flyLayer, targetWorldPosition);
         tile.node.setSiblingIndex(flyLayer.children.length - 1);
         const targetBoxPosition = targetCell ? targetCell.position.clone() : Vec3.ZERO.clone();
 
@@ -490,14 +494,14 @@ export class GameCtrl extends Component {
             const tile = this.slots[i];
             const target = this.getSlotTargetPosition(i);
             if (tile === flyingTile || tile.node.parent !== this.slotNode) {
-                const targetWorldPosition = this.localToWorldPosition(this.slotNode, target);
+                const targetWorldPosition = Utils.localToWorldPosition(this.slotNode, target);
                 const flyLayer = this.ensureFlyLayer();
                 if (tile.node.parent !== flyLayer) {
                     const worldPosition = tile.node.worldPosition.clone();
                     tile.node.setParent(flyLayer);
                     tile.node.setWorldPosition(worldPosition);
                 }
-                const targetFlyPosition = this.worldToLocalPosition(flyLayer, targetWorldPosition);
+                const targetFlyPosition = Utils.worldToLocalPosition(flyLayer, targetWorldPosition);
                 tile.node.setSiblingIndex(flyLayer.children.length - 1);
 
                 // 飞入的麻将牌起飞时就触发底部存牌槽抖动,把飞行时长传过去,
@@ -645,10 +649,10 @@ export class GameCtrl extends Component {
         }
 
         this.fillEmptyTargetBoxes();
-        this.lockUnavailableTargetBoxes();
-        if (!this.canStillCompleteTasks()) {
-            this.failLevel('死局，目标牌不足');
-        }
+        //this.lockUnavailableTargetBoxes();
+        // if (!this.canStillCompleteTasks()) {
+        //     this.failLevel('死局，目标牌不足');
+        // }
     }
 
     private canStillCompleteTasks(): boolean {
@@ -693,7 +697,7 @@ export class GameCtrl extends Component {
             // opentype 为空 = 还有未解锁的槽位,"继续游戏" 帮玩家解锁一个槽位
             // opentype 非空 = 所有槽位都解锁了,"继续游戏" 清空底部 slot
             const opentype = allUnlocked ? 'clearSlot' : null;
-            LayerManager.instance.showUI('failure', opentype);
+            LayerManager.instance.showUI('failure', opentype,this.slotNode);
             return;
         }
 
@@ -866,7 +870,7 @@ export class GameCtrl extends Component {
 
     private resetTargetBoxes() {
         if (this.targetBoxes.length === 0) {
-            const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
+            const rootSlotNode = Utils.findChildDeep(this.node, 'slotNode');
             this.setupTargetSlot(rootSlotNode);
         }
         const unlockedCount = this.config?.unlockedSlotCount ?? 2;
@@ -904,7 +908,54 @@ export class GameCtrl extends Component {
         box.progress = 0;
         box.pending = 0;
         this.emitRenderSlot(box);
+        if (type) this.attachDiscardedTilesToBox(box);
         return !!type;
+    }
+
+    // 失败弹窗"清空后备栏"后挂起的 discardedTiles,在新目标生成时按 type 立即归位到目标槽,
+    // 不走飞行动画 —— 直接 reparent 到 box.node 并摆到 itemNodes[1..] 位置,
+    // 由槽位的 MoveIn 动画带着一起回到屏幕
+    private attachDiscardedTilesToBox(box: TargetBox) {
+        if (this.discardedTiles.length === 0) return;
+        const matched: TileRecord[] = [];
+        for (const tile of this.discardedTiles) {
+            if (matched.length + box.progress >= box.required) break;
+            if (!tile.node?.isValid) continue;
+            if (tile.type !== box.type) continue;
+            matched.push(tile);
+        }
+        if (matched.length === 0) return;
+
+        for (const tile of matched) {
+            const idx = this.discardedTiles.indexOf(tile);
+            if (idx >= 0) this.discardedTiles.splice(idx, 1);
+
+            tile.collected = true;
+            tile.removed = true;
+            tile.node.name = `targetTile_${tile.uid}`;
+
+            const targetIndex = Utils.clamp(box.progress + 1, 1, Math.max(1, box.required));
+            const targetCell = box.itemNodes[targetIndex] || box.iconNode;
+            const targetBoxPosition = targetCell ? targetCell.position.clone() : Vec3.ZERO.clone();
+
+            tile.node.active = true;
+            tile.node.setParent(box.node);
+            tile.node.setPosition(targetBoxPosition);
+            tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
+            tile.node.setSiblingIndex(160 + box.progress + 1);
+            tile.item.disableTileTouch();
+
+            box.progress = Math.min(box.required, box.progress + 1);
+        }
+
+        this.emitRenderSlot(box);
+
+        // 全部归位后若刚好达成目标,触发 refresh 流程(MoveOut → 生成新目标 → MoveIn)
+        if (box.progress >= box.required) {
+            this.scheduleOnce(() => {
+                if (this.gameState === 'playing') this.refreshTargetBoxWithAnimation(box);
+            }, 0.18);
+        }
     }
 
     private fillEmptyTargetBoxes() {
@@ -981,10 +1032,10 @@ export class GameCtrl extends Component {
     // ==========================================
 
     private initSceneRefs() {
-        this.mahjongPnode = this.mahjongPnode || this.node.getChildByName('pNode') || this.findChildDeep(this.node, 'pNode')!;
+        this.mahjongPnode = this.mahjongPnode || this.node.getChildByName('pNode') || Utils.findChildDeep(this.node, 'pNode')!;
         this.levelLabel = this.levelLabel || this.node.getChildByName('levelLabel')?.getComponent(Label)!;
 
-        const rootSlotNode = this.node.getChildByName('slotNode') || this.findChildDeep(this.node, 'slotNode');
+        const rootSlotNode = this.node.getChildByName('slotNode') || Utils.findChildDeep(this.node, 'slotNode');
         this.slotNode = rootSlotNode?.getChildByName('slot') || rootSlotNode!;
 
         this.captureSlotPositions();
@@ -1006,16 +1057,6 @@ export class GameCtrl extends Component {
         node.setSiblingIndex(parent.children.length - 1);
         this.flyLayer = node;
         return node;
-    }
-
-    private worldToLocalPosition(parent: Node, worldPosition: Vec3): Vec3 {
-        const transform = parent.getComponent(UITransform) || parent.addComponent(UITransform);
-        return transform.convertToNodeSpaceAR(worldPosition);
-    }
-
-    private localToWorldPosition(parent: Node, localPosition: Vec3): Vec3 {
-        const transform = parent.getComponent(UITransform) || parent.addComponent(UITransform);
-        return transform.convertToWorldSpaceAR(localPosition);
     }
 
     private captureSlotPositions() {
@@ -1187,10 +1228,6 @@ export class GameCtrl extends Component {
         };
     }
 
-    private compareBoardDisplayOrder(a: TileRecord, b: TileRecord): number {
-        return MahjongItem.compareBoardDisplayOrderRC(a.row, a.col, b.row, b.col);
-    }
-
     // 取(或新建)某个 z 层的容器节点。所有同层的牌身 + 阴影都挂在这里,
     // 容器按 layer 升序排列,层间渲染顺序由容器自身位置保证,层内只需排 row/col
     private getOrCreateLayerContainer(layer: number): Node {
@@ -1217,42 +1254,6 @@ export class GameCtrl extends Component {
 
     private refreshLayerDisplayOrder(layerContainer: Node) {
         MahjongItem.refreshLayerDisplayOrder(layerContainer);
-    }
-
-    private findChildDeep(parent: Node | null, name: string): Node | null {
-        if (!parent) return null;
-        const direct = parent.getChildByName(name);
-        if (direct) return direct;
-        for (const child of parent.children) {
-            const found = this.findChildDeep(child, name);
-            if (found) return found;
-        }
-        return null;
-    }
-
-    private createRandom(seed: number): () => number {
-        let value = seed >>> 0;
-        return () => {
-            value += 0x6D2B79F5;
-            let t = value;
-            t = Math.imul(t ^ (t >>> 15), t | 1);
-            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-        };
-    }
-
-    private shuffle<T>(items: T[], random: () => number): T[] {
-        for (let i = items.length - 1; i > 0; i--) {
-            const j = Math.floor(random() * (i + 1));
-            const tmp = items[i];
-            items[i] = items[j];
-            items[j] = tmp;
-        }
-        return items;
-    }
-
-    private clamp(value: number, min: number, max: number): number {
-        return Math.max(min, Math.min(max, value));
     }
 
     private onBtnUndoClick(event) {
@@ -1355,8 +1356,8 @@ export class GameCtrl extends Component {
     //     // 换牌道具的提示音
     //     AudioManager.instance.playOneShot(AudioClipNames.prop_tips);
 
-    //     const random = this.createRandom(Date.now() + activeTiles.length * 31);
-    //     const types = this.shuffle(activeTiles.map((t) => t.type), random);
+    //     const random = Utils.createRandom(Date.now() + activeTiles.length * 31);
+    //     const types = Utils.shuffle(activeTiles.map((t) => t.type), random);
     //     for (let i = 0; i < activeTiles.length; i++) {
     //         const tile = activeTiles[i]; tile.type = types[i];
     //         tile.item.setData(tile.type, tile.row, tile.col, tile.layer, this.iconFrames.get(tile.type) || null);
@@ -1365,20 +1366,53 @@ export class GameCtrl extends Component {
     // }
 
     private onBtnShuffleBoardClick() {
-        if (this.gameState !== 'playing') return;
+        if (this.gameState !== 'playing' || this.shuffleAnimating) return;
         const activeTiles = this.tiles.filter((t) => !t.collected && !t.removed);
-        if (activeTiles.length < 2) return;
+        if (activeTiles.length === 0) return;
+
+        const topCandidates = activeTiles.filter((t) => !this.isTileBlocked(t));
+        if (topCandidates.length === 0) return;
 
         // 换牌道具的提示音
         AudioManager.instance.playOneShot(AudioClipNames.prop_tips);
 
-        const random = this.createRandom(Date.now() + activeTiles.length * 31);
-        const types = this.shuffle(activeTiles.map((t) => t.type), random);
-        for (let i = 0; i < activeTiles.length; i++) {
-            const tile = activeTiles[i]; tile.type = types[i];
-            tile.item.setData(tile.type, tile.row, tile.col, tile.layer, this.iconFrames.get(tile.type) || null);
-        }
-        this.repairTargetBoxes(); this.collectStoredTargets(); this.updatePlayableStates(); this.showToast('已换牌', 0.8);
+        const random = Utils.createRandom(Date.now() + activeTiles.length * 31);
+        const topTile = topCandidates[Math.floor(random() * topCandidates.length)];
+        const lowerTiles = activeTiles.filter((t) => t.layer < topTile.layer);
+        const lowerTile = lowerTiles.length > 0 ? lowerTiles[Math.floor(random() * lowerTiles.length)] : null;
+        const duration = Constants.shuffleAnim.Duration;
+        const swapAt = Math.min(Constants.shuffleAnim.SwapAt, duration);
+        const shuffleSeq = ++this.shuffleSeq;
+
+        this.shuffleAnimating = true;
+        director.emit(Constants.eventNames.EventShowShuffleTileEffect, {
+            worldPosition: topTile.node.worldPosition.clone(),
+            scale: Constants.MahjongBoard.BoardScale,
+            duration,
+        });
+
+        this.scheduleOnce(() => {
+            if (shuffleSeq !== this.shuffleSeq) return;
+            if (this.gameState !== 'playing') return;
+            if (!topTile.node?.isValid || topTile.collected || topTile.removed) return;
+            if (!lowerTile || !lowerTile.node?.isValid || lowerTile.collected || lowerTile.removed) return;
+
+            const topType = topTile.type;
+            topTile.type = lowerTile.type;
+            lowerTile.type = topType;
+            topTile.item.setData(topTile.type, topTile.row, topTile.col, topTile.layer, this.iconFrames.get(topTile.type) || null);
+            lowerTile.item.setData(lowerTile.type, lowerTile.row, lowerTile.col, lowerTile.layer, this.iconFrames.get(lowerTile.type) || null);
+        }, swapAt);
+        this.scheduleOnce(() => {
+            if (shuffleSeq !== this.shuffleSeq) return;
+            this.shuffleAnimating = false;
+            if (this.gameState !== 'playing') return;
+            this.repairTargetBoxes();
+            this.collectStoredTargets();
+            this.updatePlayableStates();
+            this.updateHud();
+            this.showToast('已换牌', 0.8);
+        }, duration);
     }
 
     // 队列模式下: shuffle 只是把"哪个位置放哪个 type"的映射换了一下,每种 type 的总数不变,
@@ -1390,24 +1424,7 @@ export class GameCtrl extends Component {
     }
 
     private onUpDateUiInit() {
-        const rootSlotNode = this.findChildDeep(this.node, 'slotNode');
-        const array = [
-            'item1', 'item2', 'item3', 'item4', 'box_2', 'lock'
-        ];
-        for (let i = 1; i <= 4; i++) {
-            const node = rootSlotNode.getChildByName(`slot${i}`);
-            if (!node) continue;
-            node.active = true;
-            node.children.forEach(child => {
-                if (array.indexOf(child.name) < 0) {
-                    child.destroy()
-                } else if (child.parent.name == "slot3" || child.parent.name == "slot4") {
-                    if (child.name == "box_2" || child.name == "lock") {
-                        child.active = true;
-                    }
-                };
-            });
-        }
+        director.emit(Constants.eventNames.EventCleanSlotContainers);
         this.resetTargetBoxes();
     }
 }

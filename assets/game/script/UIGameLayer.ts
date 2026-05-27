@@ -1,4 +1,4 @@
-import { _decorator, builtinResMgr, Button, Color, Component, director, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
@@ -41,6 +41,12 @@ interface ClearSlotPayload {
 
 interface ResetSlotsPayload {
     targetBoxStates: { slotID: number; unlocked: boolean }[];
+}
+
+interface ShuffleTileEffectPayload {
+    worldPosition: Vec3;
+    scale?: number;
+    duration?: number;
 }
 
 @ccclass('UIGameLayer')
@@ -100,11 +106,17 @@ export class UIGameLayer extends Component {
     private mahjongItem: Prefab = null!;
     private iconFrames: Map<string, SpriteFrame> = new Map();
     private slotPreviews: (Node | null)[] = [];
+    private shuffleEffectNode: Node | null = null;
+    private shuffleEffectAnimation: Animation | null = null;
+    private shuffleEffectOpacity: UIOpacity | null = null;
+    private shuffleEffectClip: AnimationClip | null = null;
+    private shuffleEffectSeq = 0;
 
     protected onLoad() {
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
         this.setupHudLabels();
         this.setupComboNode();
+        this.preloadShuffleEffectClip();
     }
 
     private setupComboNode() {
@@ -160,6 +172,7 @@ export class UIGameLayer extends Component {
 
     onDisable() {
         this.registerGlobalEvent(false);
+        this.onEventCleanSlotContainers();
     }
 
     onEnable() {
@@ -180,8 +193,10 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventRenderSlot, this.onEventRenderSlot, this);
             director.on(Constants.eventNames.EventClearSlot, this.onEventClearSlot, this);
             director.on(Constants.eventNames.EventResetSlots, this.onEventResetSlots, this);
+            director.on(Constants.eventNames.EventCleanSlotContainers, this.onEventCleanSlotContainers, this);
             director.on(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
             director.on(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
+            director.on(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.on(Constants.eventNames.EventStopTipsAnimator, this.onStopTipsAnimator, this);
         } else {
             director.off(Constants.eventNames.EventShowSlotShake, this.onEventShowSlotShake, this);
@@ -195,8 +210,10 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventRenderSlot, this.onEventRenderSlot, this);
             director.off(Constants.eventNames.EventClearSlot, this.onEventClearSlot, this);
             director.off(Constants.eventNames.EventResetSlots, this.onEventResetSlots, this);
+            director.off(Constants.eventNames.EventCleanSlotContainers, this.onEventCleanSlotContainers, this);
             director.off(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
             director.off(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
+            director.off(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.off(Constants.eventNames.EventStopTipsAnimator, this.onStopTipsAnimator, this);
         }
     }
@@ -339,6 +356,33 @@ export class UIGameLayer extends Component {
             box2.setScale(1, 1, 1);
             box2.setRotationFromEuler(new Vec3(0, 0, 0));
             box2.active = locked;
+        }
+    }
+
+    // 清理槽位容器: slot1~4 下面除了 item1~4/box_2/lock 这些 prefab 自带的锚点和锁,
+    // 其他都是上一局/上一次失败弹窗残留的脏节点(slotTile_*、targetTile_* 等),全部销毁。
+    // 同时把 slot3/slot4 的 box_2/lock 重新点亮(被 onEventResetSlots 翻成 unlocked 时关掉的),
+    // 让锁着的两个槽位回到"盖着箱子+挂锁"的初始外观,lock 顶到最上层避免被 box_2 盖住
+    onEventCleanSlotContainers() {
+        const keep = ['item1', 'item2', 'item3', 'item4', 'box_2', 'lock'];
+        for (let i = 1; i <= 4; i++) {
+            const slot = this.slotNodeArr[i];
+            if (!slot) continue;
+            slot.active = true;
+            for (const child of slot.children.slice()) {
+                if (keep.indexOf(child.name) < 0) {
+                    child.destroy();
+                    continue;
+                }
+                if (slot.name === 'slot3' || slot.name === 'slot4') {
+                    if (child.name === 'box_2' || child.name === 'lock') {
+                        child.active = true;
+                        if (child.name === 'lock') {
+                            child.setSiblingIndex(slot.children.length - 1);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -602,7 +646,7 @@ export class UIGameLayer extends Component {
             // 初始状态：高高拔起并拉伸
             gaiZi.setPosition(new Vec3(0, 165, 0));
             gaiZi.setScale(new Vec3(1.09, 1.44, 1));
-
+            gaiZi.angle = 0;
             let gaiZiOpacity = gaiZi.getComponent(UIOpacity) || gaiZi.addComponent(UIOpacity);
             gaiZiOpacity.opacity = 0;
             Tween.stopAllByTarget(gaiZiOpacity);
@@ -677,6 +721,90 @@ export class UIGameLayer extends Component {
         AudioManager.instance.playClick();
         LayerManager.instance.showUI("setting", 1);
         //this.onShowTipsAnimator(1);
+    }
+
+    private preloadShuffleEffectClip() {
+        const bundle = assetManager.getBundle(Constants.GameBundleName);
+        if (!bundle) {
+            console.warn('[UIGameLayer] game bundle not found, shuffle effect will use fallback tween');
+            return;
+        }
+
+        bundle.load('resources/magic/animation', AnimationClip, (err, clip) => {
+            if (err || !clip) {
+                console.warn('[UIGameLayer] load shuffle effect animation failed', err);
+                return;
+            }
+            //clip.speed = 0.3;
+            this.shuffleEffectClip = clip;
+            if (this.shuffleEffectAnimation) {
+                this.shuffleEffectAnimation.defaultClip = clip;
+            }
+        });
+    }
+
+    private ensureShuffleEffectNode(): Node {
+        if (this.shuffleEffectNode?.isValid) return this.shuffleEffectNode;
+
+        const node = new Node('shuffleEffectNode');
+        node.layer = this.node.layer;
+        node.active = false;
+        this.node.addChild(node);
+        node.addComponent(UITransform).setContentSize(212, 210);
+        node.addComponent(Sprite);
+        // const graphics = node.addComponent(Graphics);
+        // graphics.lineWidth = 8;
+        // graphics.strokeColor = new Color(255, 244, 156, 230);
+        // graphics.circle(0, 0, 88);
+        // graphics.stroke();
+        this.shuffleEffectOpacity = node.addComponent(UIOpacity);
+        this.shuffleEffectAnimation = node.addComponent(Animation);
+        if (this.shuffleEffectClip) {
+            this.shuffleEffectAnimation.defaultClip = this.shuffleEffectClip;
+        }
+        this.shuffleEffectNode = node;
+        return node;
+    }
+
+    private onEventShowShuffleTileEffect(payload: ShuffleTileEffectPayload) {
+        if (!payload?.worldPosition) return;
+
+        const node = this.ensureShuffleEffectNode();
+        const transform = this.node.getComponent(UITransform) || this.node.addComponent(UITransform);
+        const localPosition = transform.convertToNodeSpaceAR(payload.worldPosition);
+        const scale = payload.scale ?? Constants.MahjongBoard.BoardScale;
+        const duration = payload.duration ?? Constants.shuffleAnim.Duration;
+        const seq = ++this.shuffleEffectSeq;
+
+        Tween.stopAllByTarget(node);
+        if (this.shuffleEffectOpacity) Tween.stopAllByTarget(this.shuffleEffectOpacity);
+        if (this.shuffleEffectAnimation) this.shuffleEffectAnimation.stop();
+
+        node.active = true;
+        node.setPosition(localPosition);
+        node.setScale(1, 1, 1);
+        node.setRotationFromEuler(0, 0, 0);
+        node.setSiblingIndex(this.node.children.length - 1);
+        if (this.shuffleEffectOpacity) this.shuffleEffectOpacity.opacity = 255;
+
+        if (this.shuffleEffectAnimation && this.shuffleEffectClip) {
+            this.shuffleEffectAnimation.defaultClip = this.shuffleEffectClip;
+            this.shuffleEffectAnimation.play();
+            this.scheduleOnce(() => {
+                if (seq !== this.shuffleEffectSeq) return;
+                if (node?.isValid) node.active = false;
+            }, duration);
+            return;
+        }
+
+        tween(node)
+            .to(duration * 0.5, { scale: new Vec3(scale * 1.08, scale * 1.08, 1) }, { easing: 'sineOut' })
+            .to(duration * 0.5, { scale: new Vec3(scale, scale, 1) }, { easing: 'sineInOut' })
+            .call(() => {
+                if (seq !== this.shuffleEffectSeq) return;
+                if (node?.isValid) node.active = false;
+            })
+            .start();
     }
 
 

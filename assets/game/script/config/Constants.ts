@@ -19,10 +19,13 @@ const Constants = {
         EventClearSlot: 'ClearSlot',
         // 关卡重开：批量把所有槽位 transform/box_2 复位到场景初始状态
         EventResetSlots: 'ResetSlots',
+        // 清理槽位容器内的脏子节点(上一局残留的 slotTile_* 等),并把 slot3/slot4 的 box_2/lock 重新点亮
+        EventCleanSlotContainers: 'CleanSlotContainers',
         // 撤回按钮置灰状态:true=灰(无可撤回),false=彩(有可撤回)
         EventSetUndoButtonStatus: 'SetUndoButtonStatus',
         // 闲置帮助提示:payload 是 index(1=解锁槽位按钮,2=换牌按钮)
         EventShowTipsAnimator: 'ShowTipsAnimator',
+        EventShowShuffleTileEffect: 'ShowShuffleTileEffect',
         // 帮助提示动画结束:UI -> GameCtrl,玩家点击提示按钮后通知,用于解除"动画中不重启计时"的锁
         EventTipsAnimatorEnd: 'TipsAnimatorEnd',
         // 强制中断帮助提示:GameCtrl -> UI,玩家在动画播放中点了麻将牌,停止呼吸动画
@@ -49,6 +52,10 @@ const Constants = {
         MoveInWait: 0.35,
         // Unlock: 盖子飞出最长链路 0.35 延迟 + 0.2167 淡出 = 0.5667s，留余量到 0.6s
         UnlockWait: 0.6,
+    },
+    shuffleAnim: {
+        Duration: 0.72,
+        SwapAt: 0.33,
     },
     prefab: {
         setting: 'prefab/setting',
