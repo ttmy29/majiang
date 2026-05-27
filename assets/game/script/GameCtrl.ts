@@ -84,6 +84,7 @@ export class GameCtrl extends Component {
     private lastTickSecond = -1;
     private comboTimes = 0;
     private lastComboAt = 0;
+    private comboEmitPending = false;
     private resolvingMatch = false;
     private dealingTiles = false;
     private targetsInitialized = false;
@@ -175,6 +176,7 @@ export class GameCtrl extends Component {
         //this.resetTargetBoxes();
         this.comboTimes = 0;
         this.lastComboAt = 0;
+        this.comboEmitPending = false;
         this.resolvingMatch = false;
         this.dealingTiles = false;
         this.targetsInitialized = false;
@@ -1108,10 +1110,17 @@ export class GameCtrl extends Component {
         const now = Date.now();
         this.comboTimes = (now - this.lastComboAt <= 5000) ? this.comboTimes + 1 : 1;
         this.lastComboAt = now;
-        // 通知 UI 刷新连击节点（重置进度条 + 显示当前 combo 次数）
-        director.emit(Constants.eventNames.EventComboUpdate, this.comboTimes);
-        // combo 状态已并入 HUD payload，直接刷一次 HUD 就行
-        this.updateHud();
+        // 0.18s 延迟跟槽位 MoveOut 起手对齐:让 combo 口号/进度条出现在"砸完→飞走"那一刻,
+        // 而不是飞行落位那一帧。同时 collectStoredTargets 一次让多个 box 完成时,
+        // 0.18s 内的多次 updateCombo 只 emit 一次,避免口号文字/音效互相覆盖到只剩最后一档。
+        if (this.comboEmitPending) return;
+        this.comboEmitPending = true;
+        this.scheduleOnce(() => {
+            this.comboEmitPending = false;
+            if (this.gameState !== 'playing' || this.comboTimes < 1) return;
+            director.emit(Constants.eventNames.EventComboUpdate, this.comboTimes);
+            this.updateHud();
+        }, 0.18);
     }
 
     private showToast(message: string, seconds = 1.1) {
