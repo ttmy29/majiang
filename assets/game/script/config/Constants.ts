@@ -111,6 +111,12 @@ const Constants = {
         ] as Array<readonly [number, number]>,
         // 槽位麻将牌实例的统一缩放比例 36。
         SlotScale: 0.32,
+        // 底部存牌槽里牌的缩放(比目标槽 SlotScale 略小 0.05),视觉上比目标槽小一圈
+        SlotTileScale: 0.27,
+        // 牌在底部 slot 内的 siblingIndex 基数: BottomSlotSiblingBase + slotIndex
+        BottomSlotSiblingBase: 100,
+        // 牌在目标槽内的 siblingIndex 基数: TargetBoxSiblingBase + orderInBox + 1
+        TargetBoxSiblingBase: 160,
         // ==================== 棋盘自适应布局 ====================
         // 思路:优先读取 pNode 运行时真实尺寸,再用关卡 bbox 计算 fitRatio。
         // 棋盘按 fitRatio 缩放牌的位置和大小,装进真实尺寸 - 2*Padding 的可用区域。

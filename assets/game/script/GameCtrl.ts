@@ -5,7 +5,7 @@ import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAll
 import { MahjongItem } from './MahjongItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
-import { ProgressManager, ProgressSnapshot, TileKey, TileSnap } from './manager/ProgressManager';
+import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { Utils } from './util/Utils';
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
@@ -153,6 +153,12 @@ export class GameCtrl extends Component {
     }
 
     protected onDisable(): void {
+    }
+
+    protected onDestroy(): void {
+        // 防御性注销 — Canvas 是 persist 节点,GameCtrl 实际不会被销毁,
+        // 但开发期 HMR / 场景切换会触发,避免重复监听
+        game.off(Game.EVENT_HIDE, this.onAppHide, this);
     }
 
     // 读关卡号 + 中途快照。引导关永远忽略快照(也清掉防御性 dump)
@@ -566,7 +572,7 @@ export class GameCtrl extends Component {
                 tile.node.setPosition(targetBoxPosition);
                 tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
                 // siblingIndex 依 progress 递增即可（这张落下后 progress 就会变成 progress+1）
-                tile.node.setSiblingIndex(160 + box.progress + 1);
+                tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + box.progress + 1);
                 //屏蔽触摸方法
                 tile.item.disableTileTouch();
                 Utils.onVibrationShort();
@@ -608,8 +614,8 @@ export class GameCtrl extends Component {
     }
 
     private arrangeSlotTiles(duration = 0.08, flyingTile: TileRecord | null = null) {
-        // 底部存牌槽的牌比目标槽小 0.05,视觉上略小一圈
-        const slotTileScale = Constants.MahjongBoard.SlotScale - 0.05;
+        // 底部存牌槽的牌比目标槽小,视觉上略小一圈
+        const slotTileScale = Constants.MahjongBoard.SlotTileScale;
         for (let i = 0; i < this.slots.length; i++) {
             const tile = this.slots[i];
             const target = this.getSlotTargetPosition(i);
@@ -641,7 +647,7 @@ export class GameCtrl extends Component {
                         tile.node.setScale(slotTileScale, slotTileScale, 1);
                         //屏蔽触摸方法
                         tile.item.disableTileTouch();
-                        tile.node.setSiblingIndex(100 + this.slots.indexOf(tile));
+                        tile.node.setSiblingIndex(Constants.MahjongBoard.BottomSlotSiblingBase + this.slots.indexOf(tile));
                         // 只有真正"飞进来"的那张牌算落位反馈,其余靠 reparent/位移补位的牌不算
                         if (tile === flyingTile) Utils.onVibrationShort();
                     })
@@ -649,7 +655,7 @@ export class GameCtrl extends Component {
                 continue;
             }
 
-            tile.node.setSiblingIndex(100 + i);
+            tile.node.setSiblingIndex(Constants.MahjongBoard.BottomSlotSiblingBase + i);
             tween(tile.node)
                 .to(duration, { position: target, scale: new Vec3(slotTileScale, slotTileScale, 1) })
                 .start();
@@ -844,8 +850,7 @@ export class GameCtrl extends Component {
     }
 
     private onEventFailureRestart() {
-        // 重开必须 fresh — 显式清掉旧快照,避免 startLevel 内部判错 level 后又被恢复
-        ProgressManager.clearSnapshot();
+        // startLevel 走 fresh 分支会自己 clearSnapshot,这里不重复调
         this.startLevel(this.nowLevel);
     }
 
@@ -1086,7 +1091,7 @@ export class GameCtrl extends Component {
             tile.node.setParent(box.node);
             tile.node.setPosition(targetBoxPosition);
             tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
-            tile.node.setSiblingIndex(160 + box.progress + 1);
+            tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + box.progress + 1);
             tile.item.disableTileTouch();
 
             box.progress = Math.min(box.required, box.progress + 1);
@@ -1594,7 +1599,10 @@ export class GameCtrl extends Component {
     }
 
     private buildSnapshot(): ProgressSnapshot {
-        // 反向索引: tile -> 它在 slot/box/discarded 里的位置,避免重复扫描
+        // 反向索引: Node -> TileRecord,buildSnapshot 内部反复用,避免每张 box 牌都 tiles.find 全表扫
+        const tileByNode = new Map<Node, TileRecord>();
+        this.tiles.forEach((t) => tileByNode.set(t.node, t));
+
         const slotIndexByTile = new Map<TileRecord, number>();
         this.slots.forEach((t, i) => slotIndexByTile.set(t, i));
         const discardedSet = new Set(this.discardedTiles);
@@ -1602,8 +1610,7 @@ export class GameCtrl extends Component {
         this.targetBoxes.forEach((box, boxIdx) => {
             for (const child of box.node.children) {
                 if (!child.name.startsWith('targetTile_')) continue;
-                // node 没有反向指针,匹配方式:遍历当前 tiles,看哪个 tile.node === child
-                const tile = this.tiles.find((t) => t.node === child);
+                const tile = tileByNode.get(child);
                 if (tile) tileToBoxIndex.set(tile, boxIdx);
             }
         });
@@ -1624,11 +1631,13 @@ export class GameCtrl extends Component {
             };
         });
 
-        // box.tileKeys 按 sibling 顺序导出,恢复时按同样顺序写回 itemNodes[1..progress]
-        const boxes = this.targetBoxes.map((box) => {
+        // box.tileKeys 按 siblingIndex 升序导出 — 落入越早 siblingIndex 越小,恢复时按同样顺序写回 itemNodes[1..progress]
+        const boxes: BoxSnap[] = this.targetBoxes.map((box) => {
             const tileKeys: TileKey[] = box.node.children
                 .filter((c) => c.name.startsWith('targetTile_'))
-                .map((c) => this.tiles.find((t) => t.node === c))
+                .slice()
+                .sort((a, b) => a.getSiblingIndex() - b.getSiblingIndex())
+                .map((c) => tileByNode.get(c))
                 .filter((t): t is TileRecord => !!t)
                 .map((t) => this.tileKey(t));
             return {
@@ -1655,24 +1664,28 @@ export class GameCtrl extends Component {
     }
 
     private applySnapshot(snap: ProgressSnapshot) {
-        // 关掉发牌动画的 off-screen 初始坐标,所有牌马上回到 boardPos
+        // 建索引: (layer,row,col) -> snap / tile,后续多步反复用
+        const snapByKey = new Map<string, TileSnap>();
+        for (const s of snap.tiles) snapByKey.set(`${s.layer}|${s.row}|${s.col}`, s);
+        const tileByKey = new Map<string, TileRecord>();
+        for (const tile of this.tiles) tileByKey.set(`${tile.layer}|${tile.row}|${tile.col}`, tile);
+        const lookup = (k: TileKey): TileRecord | null => tileByKey.get(`${k.layer}|${k.row}|${k.col}`) || null;
+
+        // 1. 只把仍留在棋盘上的 tile 复位到 boardPos。
+        //    其它(slot/target/discarded) 在 step 3-5 里会 setParent + setPosition,
+        //    在这之前它们停在 generateBoard 的 y+760 起飞坐标也无妨 — 同帧内被覆盖,无视觉闪烁
         const boardScale = this.getBoardTileScale();
         for (const tile of this.tiles) {
+            const s = snapByKey.get(`${tile.layer}|${tile.row}|${tile.col}`);
+            if (s && s.location !== 'board') continue;
             tile.node.setPosition(tile.boardPos);
             tile.node.setScale(boardScale, boardScale, 1);
         }
 
-        // 索引: (layer,row,col) -> TileRecord
-        const tileByKey = new Map<string, TileRecord>();
-        for (const tile of this.tiles) {
-            tileByKey.set(`${tile.layer}|${tile.row}|${tile.col}`, tile);
-        }
-        const lookup = (k: TileKey): TileRecord | null => tileByKey.get(`${k.layer}|${k.row}|${k.col}`) || null;
-
-        // 1. 覆盖 taskQueue (buildTaskQueue 已先填了原始队列)
+        // 2. 覆盖 taskQueue (buildTaskQueue 已先填了原始队列)
         this.taskQueue = snap.taskQueue.slice();
 
-        // 2. 还原每张牌的 type/collected/removed (type 可能被 shuffle 改过)
+        // 3. 还原每张牌的 type/collected/removed (type 可能被 shuffle 改过)
         for (const snapTile of snap.tiles) {
             const tile = lookup(snapTile);
             if (!tile) continue;
@@ -1682,16 +1695,15 @@ export class GameCtrl extends Component {
             }
             tile.collected = snapTile.collected;
             tile.removed = snapTile.removed;
-            // removed 表示这张牌已不在棋盘上(进 box 或被消掉)
+            // 异常情况:被标 removed 但 location 还在 board → 隐藏防呆
             if (snapTile.removed && snapTile.location === 'board') {
-                // 异常情况:被标 removed 但 location 还在 board → 隐藏
                 tile.node.active = false;
             }
         }
 
-        // 3. 底部 slot
+        // 4. 底部 slot
         this.slots = [];
-        const slotTileScale = Constants.MahjongBoard.SlotScale - 0.05;
+        const slotTileScale = Constants.MahjongBoard.SlotTileScale;
         for (let i = 0; i < snap.slotKeys.length; i++) {
             const tile = lookup(snap.slotKeys[i]);
             if (!tile) continue;
@@ -1700,11 +1712,11 @@ export class GameCtrl extends Component {
             tile.node.setParent(this.slotNode);
             tile.node.setPosition(this.getSlotTargetPosition(i));
             tile.node.setScale(slotTileScale, slotTileScale, 1);
-            tile.node.setSiblingIndex(100 + i);
+            tile.node.setSiblingIndex(Constants.MahjongBoard.BottomSlotSiblingBase + i);
             tile.item.disableTileTouch();
         }
 
-        // 4. 目标槽 + 落入的 tiles
+        // 5. 目标槽 + 落入的 tiles
         for (let i = 0; i < this.targetBoxes.length && i < snap.boxes.length; i++) {
             const box = this.targetBoxes[i];
             const boxSnap = snap.boxes[i];
@@ -1726,14 +1738,14 @@ export class GameCtrl extends Component {
                 tile.node.setParent(box.node);
                 tile.node.setPosition(cellPos);
                 tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
-                tile.node.setSiblingIndex(160 + j + 1);
+                tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + j + 1);
                 tile.item.disableTileTouch();
             }
             // 同步 UI(预览图/锁状态),覆盖 resetTargetBoxes 写入的初始状态
             this.emitRenderSlot(box);
         }
 
-        // 5. 失败弹窗清空后备栏后挂起的牌
+        // 6. 失败弹窗清空后备栏后挂起的牌
         this.discardedTiles = [];
         for (const key of snap.discardedKeys) {
             const tile = lookup(key);
@@ -1744,13 +1756,13 @@ export class GameCtrl extends Component {
             tile.item.disableTileTouch();
         }
 
-        // 6. 撤回栈:只保留确实在 slots 里的(防御性 - clearBottomSlot 可能已过滤过,但 snapshot 跨会话防呆)
+        // 7. 撤回栈:只保留确实在 slots 里的(防御性 - clearBottomSlot 可能已过滤过,但 snapshot 跨会话防呆)
         const slotSet = new Set(this.slots);
         this.actionHistory = snap.actionHistoryKeys
             .map((k) => lookup(k))
             .filter((t): t is TileRecord => !!t && slotSet.has(t));
 
-        // 7. 计时与状态
+        // 8. 计时与状态
         this.remainTime = snap.remainTime;
         this.elapsedTime = snap.elapsedTime;
         this.lastTickSecond = -1;
@@ -1760,7 +1772,7 @@ export class GameCtrl extends Component {
         this.dealingTiles = false;
         this.gameState = 'playing';
 
-        // 8. 板上 shadow 需重算(slot/target 上的牌 MahjongItem.start 已被守卫,不会误挂)
+        // 9. 板上 shadow 需重算(slot/target 上的牌 MahjongItem.start 已被守卫,不会误挂)
         this.refreshUndoButtonStatus();
         // 板上所有 layer 容器重排一次,保证渲染顺序
         const layers = new Set<number>();
@@ -1768,7 +1780,7 @@ export class GameCtrl extends Component {
         layers.forEach((layer) => this.refreshLayerDisplayOrder(this.getOrCreateLayerContainer(layer)));
         this.updateBoardTileShadows();
 
-        // 9. 若恢复的 slot 牌刚好匹配某个 box.type,立刻飞过去补单
+        // 10. 若恢复的 slot 牌刚好匹配某个 box.type,立刻飞过去补单
         this.collectStoredTargets();
     }
 
