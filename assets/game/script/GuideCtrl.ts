@@ -15,7 +15,7 @@ export class GuideCtrl extends Component {
     fingerNode: Node = null!;
 
     @property
-    shadowOpacity: number = 190;
+    shadowOpacity: number = 140;
 
     @property
     targetNodePath: string = 'Canvas/gameLayer/slotNode/slot1';
@@ -122,16 +122,16 @@ export class GuideCtrl extends Component {
                 }
                 if(payload.count == 2){
                     return {
-                        x: -60,
-                        y: -120,
+                        x: -35,
+                        y: -170,
                     };
                 }
             }
             if(payload .row == 3){ //点的是右边的一个
                  if(payload.count == 2){
                     return {
-                        x: -60,
-                        y: -120,
+                        x: -35,
+                        y: -170,
                     };
                 }
             }

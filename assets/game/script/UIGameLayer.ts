@@ -1,4 +1,4 @@
-import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, Widget } from 'cc';
+import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, view, Widget } from 'cc';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
@@ -70,6 +70,8 @@ export class UIGameLayer extends Component {
     comboNode: Node = null!;
     @property(Node)
     comboLabelNode: Node = null!;
+    @property(Node)
+    bgNode: Node = null!;
 
     // 每个槽位在场景里的原始位置，MoveIn 时回到自己的原点而不是写死坐标
     private slotOriginPositions: Vec3[] = [];
@@ -117,11 +119,44 @@ export class UIGameLayer extends Component {
     private guideNode: Node | null = null;
 
     protected onLoad() {
+        //背景适配
+        this.adaptBackground();
+
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
         this.slotRootTop = this.getSlotRootWidget()?.top ?? 0;
         //this.setupHudLabels();
         this.setupComboNode();
         this.preloadShuffleEffectClip();
+    }
+
+    adaptBackground() {
+        // 1. 获取当前屏幕可视区域大小 (实际设备的屏幕尺寸)
+        const visibleSize = view.getVisibleSize();
+        
+        // 2. 获取项目设置中的原始设计分辨率 (你在 Cocos 项目设置里填的宽高)
+        const designSize = this.bgNode.getComponent(UITransform).contentSize;
+
+        // 3. 分别计算宽和高的缩放比例
+        const scaleX = visibleSize.width / designSize.width;
+        const scaleY = visibleSize.height / designSize.height;
+
+        // 4. 选择适配策略（通常背景图用策略 A）
+
+        // 【策略 A：等比缩放，铺满全屏不留黑边】(推荐)
+        // 取宽、高比例中的最大值。这样图片不会拉伸变形，但超出的边缘可能会被裁剪。
+        const maxScale = Math.max(scaleX, scaleY);
+        this.bgNode.setScale(new Vec3(maxScale, maxScale, 1));
+
+        /*
+        // 【策略 B：强行拉伸填满全屏】(不推荐，除非图片很简单)
+        // 直接应用各自的比例，图片会被拉伸、压扁变形。
+        this.bgNode.setScale(new Vec3(scaleX, scaleY, 1));
+        
+        // 【策略 C：等比缩放，全部显示完整】
+        // 取宽、高比例中的最小值。图片完整显示，但屏幕上下或左右可能会出现黑边。
+        const minScale = Math.min(scaleX, scaleY);
+        this.bgNode.setScale(new Vec3(minScale, minScale, 1));
+        */
     }
 
     private setupComboNode() {
