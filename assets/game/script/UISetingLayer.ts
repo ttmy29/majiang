@@ -2,6 +2,7 @@ import { _decorator, Component, EventMouse, Node, tween, UIOpacity, Vec3 } from 
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
+import { Utils } from './util/Utils';
 const { ccclass, property } = _decorator;
 
 @ccclass('UISetingLayer')
@@ -126,7 +127,7 @@ export class UISetingLayer extends Component {
                 AudioManager.instance.setEffectEnabled(willOpen);
                 break;
             case 'vibrate':
-                StorageManager.instance.setBoolean(StorageKey.Vibrate, willOpen);
+                Utils.setVibrateEnabled(willOpen);
                 break;
         }
     }

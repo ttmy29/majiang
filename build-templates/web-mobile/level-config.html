@@ -1,0 +1,1946 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mahjong Level Config</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f2;
+      --panel: #ffffff;
+      --panel-soft: #f0f4f3;
+      --ink: #202523;
+      --muted: #68736e;
+      --line: #d8ded9;
+      --accent: #217c70;
+      --accent-strong: #12665d;
+      --warn: #b5532b;
+      --danger: #b3261e;
+      --shadow: 0 10px 30px rgba(42, 51, 47, 0.11);
+      --tile-w: 85px;
+      --tile-h: 106px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      background:
+        linear-gradient(180deg, rgba(33, 124, 112, 0.09), transparent 260px),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      height: 34px;
+      border-radius: 6px;
+      padding: 0 12px;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    button:hover {
+      border-color: #9cb5ad;
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      color: #9aa5a0;
+      background: #eef1ef;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+
+    button.danger {
+      border-color: #d6a49d;
+      color: var(--danger);
+      background: #fff7f5;
+    }
+
+    button.active {
+      border-color: var(--accent);
+      background: #dff3ef;
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    input,
+    select {
+      width: 100%;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      padding: 0 10px;
+      outline: none;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(33, 124, 112, 0.13);
+    }
+
+    label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .app {
+      height: 100%;
+      min-width: 1060px;
+      padding: 16px;
+      display: grid;
+      grid-template-rows: 64px minmax(0, 1fr) 118px 58px;
+      gap: 12px;
+    }
+
+    .panel {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(216, 222, 217, 0.92);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: auto auto auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 150px;
+    }
+
+    .brand strong {
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .brand span,
+    .status {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .level-box {
+      width: 150px;
+    }
+
+    .top-actions,
+    .mode-row,
+    .button-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .status {
+      justify-self: stretch;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .main {
+      display: grid;
+      grid-template-columns: minmax(620px, 1fr) 260px;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .preview-panel {
+      display: grid;
+      grid-template-rows: 48px minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    .panel-head {
+      min-height: 48px;
+      border-bottom: 1px solid var(--line);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .panel-title {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .panel-title strong {
+      font-size: 14px;
+    }
+
+    .panel-title span {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 520px;
+    }
+
+    .preview-tools {
+      display: grid;
+      grid-template-columns: 116px 130px 88px;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .preview-wrap {
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: linear-gradient(180deg, #e9f1e6, #dcebe2);
+      scrollbar-gutter: stable both-edges;
+    }
+
+    .preview-body {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(620px, 1fr) 340px;
+      gap: 12px;
+      padding: 14px;
+      background: #fbfcfa;
+    }
+
+    .preview-wrap {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .board {
+      position: relative;
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      overflow: visible;
+      transform-origin: top left;
+    }
+
+    .board::before,
+    .board::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .board::before {
+      inset: 0;
+      background: url("assets/game/native/2d/2db215dd-a207-4519-ae19-f7d4d14baf70.png") center / 100% 100% no-repeat;
+    }
+
+    .board::after {
+      left: 50%;
+      top: calc(50% - 25px);
+      width: 510px;
+      height: 507px;
+      transform: translate(-50%, -50%);
+      background: url("assets/game/native/c6/c6006a99-eb45-4319-8f75-96b335b43649.png") center / 100% 100% no-repeat;
+    }
+
+    .task-panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      overflow: hidden;
+    }
+
+    .task-head,
+    .task-actions {
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .task-actions {
+      border-top: 1px solid var(--line);
+      border-bottom: 0;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .task-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .task-title span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+    }
+
+    .task-list {
+      min-height: 0;
+      overflow: auto;
+      padding: 10px;
+      display: grid;
+      align-content: start;
+      grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+      gap: 8px;
+    }
+
+    .task-item {
+      height: 96px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      display: grid;
+      grid-template-rows: 18px 1fr 16px;
+      gap: 2px;
+      place-items: center;
+      padding: 5px;
+      cursor: pointer;
+    }
+
+    .task-item:hover,
+    .task-item.selected {
+      border-color: var(--accent);
+      background: #e7f5f2;
+    }
+
+    .task-order {
+      width: 100%;
+      color: var(--muted);
+      font-size: 11px;
+      text-align: left;
+    }
+
+    .task-img {
+      width: 38px;
+      height: 48px;
+      object-fit: contain;
+      filter: drop-shadow(0 5px 5px rgba(38, 42, 40, 0.18));
+      pointer-events: none;
+    }
+
+    .task-id {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .task-empty {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      padding: 30px 14px;
+      grid-column: 1 / -1;
+    }
+
+    .board-empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    .tile {
+      position: absolute;
+      width: var(--tile-w);
+      height: var(--tile-h);
+      border: 0;
+      padding: 0;
+      background: transparent;
+      transform: translate(-50%, -50%);
+      cursor: pointer;
+      z-index: 1;
+    }
+
+    .tile::after {
+      content: attr(data-label);
+      position: absolute;
+      left: 50%;
+      bottom: -16px;
+      transform: translateX(-50%);
+      color: #4d5a55;
+      font-size: 10px;
+      opacity: 0;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    .tile:hover::after,
+    .tile.selected::after {
+      opacity: 1;
+    }
+
+    .tile-img,
+    .palette-img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      filter: drop-shadow(0 5px 5px rgba(38, 42, 40, 0.22));
+      user-select: none;
+      pointer-events: none;
+    }
+
+    .tile.selected .tile-img {
+      filter:
+        drop-shadow(0 0 0 var(--accent))
+        drop-shadow(0 0 8px rgba(33, 124, 112, 0.9))
+        drop-shadow(0 5px 5px rgba(38, 42, 40, 0.22));
+    }
+
+    .tile.task-highlight .tile-img {
+      filter:
+        drop-shadow(0 0 0 #d69819)
+        drop-shadow(0 0 10px rgba(214, 152, 25, 0.92))
+        drop-shadow(0 5px 5px rgba(38, 42, 40, 0.22));
+    }
+
+    .tile.task-highlight::before {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      border: 2px solid #d69819;
+      border-radius: 8px;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .tile.hidden-layer {
+      display: none;
+    }
+
+    .palette-panel {
+      display: grid;
+      grid-template-rows: 48px minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    .palette {
+      overflow: auto;
+      padding: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+      align-content: start;
+      gap: 8px;
+      background: #fbfcfa;
+    }
+
+    .palette-item {
+      height: 76px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 5px 4px 3px;
+      display: grid;
+      grid-template-rows: 1fr 14px;
+      gap: 2px;
+      place-items: center;
+      cursor: pointer;
+    }
+
+    .palette-item:hover,
+    .palette-item.selected {
+      border-color: var(--accent);
+      background: #e7f5f2;
+    }
+
+    .palette-img {
+      width: 40px;
+      height: 50px;
+    }
+
+    .palette-id {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .edit-panel {
+      padding: 12px;
+      display: grid;
+      grid-template-columns: minmax(230px, 1.1fr) minmax(420px, 2fr) minmax(260px, 1.2fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .edit-section {
+      min-width: 0;
+      display: grid;
+      gap: 8px;
+    }
+
+    .edit-title {
+      font-weight: 700;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(70px, 1fr));
+      gap: 8px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      padding: 8px;
+      min-width: 0;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 3px;
+      font-size: 16px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .message {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfcfa;
+      color: var(--muted);
+      padding: 8px 10px;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .message.error {
+      border-color: #e2aca5;
+      background: #fff3f2;
+      color: var(--danger);
+    }
+
+    .message.ok {
+      border-color: #9dccbd;
+      background: #effaf6;
+      color: var(--accent-strong);
+    }
+
+    .io-panel {
+      padding: 10px 12px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .io-left {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .io-left strong {
+      font-size: 13px;
+    }
+
+    .io-left span {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .file-input {
+      display: none;
+    }
+
+    .kbd {
+      border: 1px solid #bdc7c2;
+      border-bottom-color: #9aa6a0;
+      border-radius: 4px;
+      background: #fff;
+      padding: 1px 5px;
+      color: #4d5a55;
+      font-size: 11px;
+    }
+
+    @media (max-width: 1100px) {
+      body {
+        overflow: auto;
+      }
+
+      .app {
+        min-width: 0;
+        height: auto;
+        min-height: 100%;
+        grid-template-rows: auto auto auto auto;
+      }
+
+      .topbar,
+      .main,
+      .edit-panel,
+      .io-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .preview-panel,
+      .palette-panel {
+        min-height: 520px;
+      }
+
+      .preview-tools {
+        grid-template-columns: 1fr;
+      }
+
+      .preview-body {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="panel topbar" aria-label="选关">
+      <div class="brand">
+        <strong>关卡配置</strong>
+        <span>Mahjong Match</span>
+      </div>
+      <label class="level-box">
+        关卡号
+        <input id="levelInput" type="number" min="0" step="1" value="0">
+      </label>
+      <div class="top-actions">
+        <button id="prevBtn" type="button">上一关</button>
+        <button id="loadBtn" class="primary" type="button">确定</button>
+        <button id="nextBtn" type="button">下一关</button>
+      </div>
+      <div id="status" class="status">等待加载资源</div>
+      <button id="reloadBtn" type="button">重新加载</button>
+    </section>
+
+    <section class="main">
+      <section class="panel preview-panel" aria-label="关卡预览">
+        <div class="panel-head">
+          <div class="panel-title">
+            <strong>关卡预览</strong>
+            <span id="previewSub">半格坐标预览，点击牌可选中或执行当前模式</span>
+          </div>
+          <div class="preview-tools">
+            <label>
+              显示层
+              <select id="layerFilter"></select>
+            </label>
+            <label>
+              缩放
+              <input id="zoomInput" type="range" min="35" max="150" value="100">
+            </label>
+            <button id="fitBtn" type="button">适配</button>
+          </div>
+        </div>
+        <div class="preview-body">
+          <div id="previewWrap" class="preview-wrap">
+            <div id="board" class="board">
+              <div class="board-empty">请先加载关卡</div>
+            </div>
+          </div>
+          <aside class="task-panel" aria-label="任务顺序">
+            <div class="task-head">
+              <div class="task-title">
+                任务顺序
+                <span id="taskSub">0 组</span>
+              </div>
+              <div id="taskMessage" class="message">点击任务项可修改或删除</div>
+            </div>
+            <div id="taskList" class="task-list"></div>
+            <div class="task-actions">
+              <button id="taskReplaceBtn" type="button">修改</button>
+              <button id="taskDeleteBtn" class="danger" type="button">删除</button>
+              <button id="taskRebuildBtn" type="button">重建</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="panel palette-panel" aria-label="麻将牌库">
+        <div class="panel-head">
+          <div class="panel-title">
+            <strong>麻将牌库</strong>
+            <span id="paletteSub">加载中</span>
+          </div>
+        </div>
+        <div id="palette" class="palette"></div>
+      </section>
+    </section>
+
+    <section class="panel edit-panel" aria-label="编辑操作">
+      <div class="edit-section">
+        <div class="edit-title">模式</div>
+        <div class="mode-row" id="modeRow">
+          <button class="active" data-mode="select" type="button">选择</button>
+          <button data-mode="replace" type="button">替换</button>
+          <button data-mode="add" type="button">添加</button>
+          <button data-mode="delete" type="button">删除</button>
+        </div>
+        <div id="editMessage" class="message">选择麻将牌后可替换或添加</div>
+      </div>
+
+      <div class="edit-section">
+        <div class="edit-title">
+          坐标与牌型
+          <span id="selectionLabel" class="status">未选中</span>
+        </div>
+        <div class="fields">
+          <label>
+            z_layer
+            <input id="zInput" type="number" min="0" step="1" value="0">
+          </label>
+          <label>
+            y_row
+            <input id="yInput" type="number" min="0" step="1" value="0">
+          </label>
+          <label>
+            x_col
+            <input id="xInput" type="number" min="0" step="1" value="0">
+          </label>
+          <label>
+            tile_id
+            <input id="tileInput" type="number" min="0" step="1" value="0">
+          </label>
+        </div>
+        <div class="button-row">
+          <button id="addBtn" class="primary" type="button">添加</button>
+          <button id="replaceBtn" type="button">替换</button>
+          <button id="deleteBtn" class="danger" type="button">删除</button>
+          <button id="validateBtn" type="button">校验</button>
+          <button id="undoBtn" type="button">撤销</button>
+          <button id="redoBtn" type="button">重做</button>
+        </div>
+      </div>
+
+      <div class="edit-section">
+        <div class="edit-title">统计</div>
+        <div class="summary-grid">
+          <div class="metric"><span>牌数</span><strong id="tileCountMetric">0</strong></div>
+          <div class="metric"><span>层数</span><strong id="layerCountMetric">0</strong></div>
+          <div class="metric"><span>任务</span><strong id="taskCountMetric">0</strong></div>
+          <div class="metric"><span>牌型</span><strong id="typeCountMetric">0</strong></div>
+        </div>
+        <div id="countsMessage" class="message">暂无统计</div>
+      </div>
+    </section>
+
+    <section class="panel io-panel" aria-label="导入导出">
+      <div class="io-left">
+        <strong>导入 / 导出</strong>
+        <span>导出会重建 `positions`、`decoded_config.data/task/taskNum` 与 `summary`。建议通过本地服务打开，避免 `file://` 限制。</span>
+      </div>
+      <div class="button-row">
+        <input id="fileInput" class="file-input" type="file" accept=".json,application/json">
+        <button id="importBtn" type="button">导入 JSON</button>
+        <button id="exportBtn" class="primary" type="button">导出 JSON</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const TILE_W = 85;
+      const TILE_H = 106;
+      const TILE_STEP_X = 80;
+      const TILE_STEP_Y = 98;
+      const STEP_X = TILE_STEP_X / 2;
+      const STEP_Y = TILE_STEP_Y / 2;
+      const BOARD_SCALE = 0.57;
+      const BOARD_W = 712;
+      const BOARD_H = 641;
+      const BOARD_PADDING = 0;
+      const MIN_BOARD_FIT_RATIO = 0.5;
+      const MAX_BOARD_FIT_RATIO = 1.18;
+      const EXCLUDED_FRAMES = new Set(["flip", "yinying"]);
+      const EMBEDDED_LEVELS = {
+        0: {"level_no":0,"level_json":"level_0","index_config":{"level_json":"level_0","level_json2":"","level_json3":"","base_diff":7,"type":0,"typeNum":0,"guideType":0,"leveltipsTrigger":0},"summary":{"data_layers":2,"rows_per_layer":[7,7],"cols_per_row_minmax":[[8,8],[8,8]],"non_zero_tiles":9,"tile_counts":{"4001":3,"4005":3,"4007":3},"hard":4,"task_count":3,"chain_count":0},"positions":[{"z_layer":0,"y_row":0,"x_col":0,"tile_id":4001},{"z_layer":0,"y_row":0,"x_col":3,"tile_id":4001},{"z_layer":0,"y_row":0,"x_col":6,"tile_id":4001},{"z_layer":0,"y_row":3,"x_col":1,"tile_id":4007},{"z_layer":0,"y_row":3,"x_col":3,"tile_id":4007},{"z_layer":0,"y_row":3,"x_col":5,"tile_id":4007},{"z_layer":0,"y_row":5,"x_col":3,"tile_id":4005},{"z_layer":1,"y_row":3,"x_col":2,"tile_id":4005},{"z_layer":1,"y_row":3,"x_col":4,"tile_id":4005}],"decoded_config":{"data":[[[4001,0,0,4001,0,0,4001,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,4007,0,4007,0,4007,0,0],[0,0,0,0,0,0,0,0],[0,0,0,4005,0,0,0,0],[0,0,0,0,0,0,0,0]],[[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,4005,0,4005,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0]]],"task":[[4005,4007,4001]],"taskNum":[[3,3,3]],"hard":4,"chain":[]}}
+      };
+      const UUID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      const UUID_VALUES = Object.create(null);
+      Array.from(UUID_CHARS).forEach((char, index) => {
+        UUID_VALUES[char] = index;
+      });
+
+      const dom = {
+        levelInput: document.getElementById("levelInput"),
+        prevBtn: document.getElementById("prevBtn"),
+        loadBtn: document.getElementById("loadBtn"),
+        nextBtn: document.getElementById("nextBtn"),
+        reloadBtn: document.getElementById("reloadBtn"),
+        status: document.getElementById("status"),
+        previewSub: document.getElementById("previewSub"),
+        previewWrap: document.getElementById("previewWrap"),
+        board: document.getElementById("board"),
+        taskSub: document.getElementById("taskSub"),
+        taskMessage: document.getElementById("taskMessage"),
+        taskList: document.getElementById("taskList"),
+        taskReplaceBtn: document.getElementById("taskReplaceBtn"),
+        taskDeleteBtn: document.getElementById("taskDeleteBtn"),
+        taskRebuildBtn: document.getElementById("taskRebuildBtn"),
+        layerFilter: document.getElementById("layerFilter"),
+        zoomInput: document.getElementById("zoomInput"),
+        fitBtn: document.getElementById("fitBtn"),
+        palette: document.getElementById("palette"),
+        paletteSub: document.getElementById("paletteSub"),
+        modeRow: document.getElementById("modeRow"),
+        editMessage: document.getElementById("editMessage"),
+        selectionLabel: document.getElementById("selectionLabel"),
+        zInput: document.getElementById("zInput"),
+        yInput: document.getElementById("yInput"),
+        xInput: document.getElementById("xInput"),
+        tileInput: document.getElementById("tileInput"),
+        addBtn: document.getElementById("addBtn"),
+        replaceBtn: document.getElementById("replaceBtn"),
+        deleteBtn: document.getElementById("deleteBtn"),
+        validateBtn: document.getElementById("validateBtn"),
+        undoBtn: document.getElementById("undoBtn"),
+        redoBtn: document.getElementById("redoBtn"),
+        tileCountMetric: document.getElementById("tileCountMetric"),
+        layerCountMetric: document.getElementById("layerCountMetric"),
+        taskCountMetric: document.getElementById("taskCountMetric"),
+        typeCountMetric: document.getElementById("typeCountMetric"),
+        countsMessage: document.getElementById("countsMessage"),
+        fileInput: document.getElementById("fileInput"),
+        importBtn: document.getElementById("importBtn"),
+        exportBtn: document.getElementById("exportBtn"),
+      };
+
+      const state = {
+        manifest: null,
+        pathToUuid: new Map(),
+        levels: new Map(),
+        tileAssets: new Map(),
+        tileIds: [],
+        currentLevel: 0,
+        levelJson: null,
+        positions: [],
+        taskOrder: [],
+        selectedTaskIndex: -1,
+        selectedIndex: -1,
+        selectedTileId: "",
+        mode: "select",
+        layerFilter: "all",
+        zoom: 1,
+        undoStack: [],
+        redoStack: [],
+        loading: false,
+      };
+
+      function setStatus(message) {
+        dom.status.textContent = message;
+      }
+
+      function setMessage(message, type = "") {
+        dom.editMessage.textContent = message;
+        dom.editMessage.className = `message${type ? " " + type : ""}`;
+      }
+
+      function setCountsMessage(message, type = "") {
+        dom.countsMessage.textContent = message;
+        dom.countsMessage.className = `message${type ? " " + type : ""}`;
+      }
+
+      function setTaskMessage(message, type = "") {
+        dom.taskMessage.textContent = message;
+        dom.taskMessage.className = `message${type ? " " + type : ""}`;
+      }
+
+      function cloneJson(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function normalizeInt(value, fallback = 0) {
+        const number = Number.parseInt(value, 10);
+        return Number.isFinite(number) ? number : fallback;
+      }
+
+      function decodeUuid(id) {
+        const atIndex = id.indexOf("@");
+        const raw = atIndex >= 0 ? id.slice(0, atIndex) : id;
+        const suffix = atIndex >= 0 ? id.slice(atIndex) : "";
+        if (raw.length !== 22) return id;
+
+        const template = Array.from("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
+        const hex = "0123456789abcdef";
+        const indices = [];
+        for (let i = 0; i < template.length; i++) {
+          if (template[i] === "x") indices.push(i);
+        }
+
+        template[0] = raw[0];
+        template[1] = raw[1];
+        let cursor = 2;
+        for (let i = 2; i < raw.length; i += 2) {
+          const a = UUID_VALUES[raw[i]];
+          const b = UUID_VALUES[raw[i + 1]];
+          if (a === undefined || b === undefined) return id;
+          template[indices[cursor++]] = hex[a >> 2];
+          template[indices[cursor++]] = hex[((a & 3) << 2) | (b >> 4)];
+          template[indices[cursor++]] = hex[b & 15];
+        }
+        return template.join("") + suffix;
+      }
+
+      function importUrlForUuid(uuid) {
+        const decoded = decodeUuid(uuid).split("@")[0];
+        return `assets/game/import/${decoded.slice(0, 2)}/${decoded}.json`;
+      }
+
+      function nativeUrlForUuid(uuid, extension = "png") {
+        const decoded = decodeUuid(uuid).split("@")[0];
+        return `assets/game/native/${decoded.slice(0, 2)}/${decoded}.${extension}`;
+      }
+
+      function extractCocosPayload(assetJson, predicate) {
+        const queue = [assetJson];
+        const seen = new Set();
+        while (queue.length > 0) {
+          const value = queue.shift();
+          if (!value || typeof value !== "object" || seen.has(value)) continue;
+          seen.add(value);
+          if (!Array.isArray(value) && predicate(value)) return value;
+          if (Array.isArray(value)) {
+            for (const item of value) queue.push(item);
+          } else {
+            for (const item of Object.values(value)) queue.push(item);
+          }
+        }
+        return null;
+      }
+
+      async function fetchJson(url) {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`${url} ${response.status}`);
+        return response.json();
+      }
+
+      async function tryFetchJson(url) {
+        try {
+          return await fetchJson(url);
+        } catch (error) {
+          return null;
+        }
+      }
+
+      async function loadManifest() {
+        const manifest = await fetchJson("assets/game/config.json");
+        state.manifest = manifest;
+        state.pathToUuid.clear();
+        for (const [index, pathInfo] of Object.entries(manifest.paths || {})) {
+          const assetPath = pathInfo && pathInfo[0];
+          if (typeof assetPath === "string") {
+            state.pathToUuid.set(assetPath, manifest.uuids[Number(index)]);
+          }
+        }
+        indexTiles();
+        indexLevels();
+      }
+
+      function indexTiles() {
+        state.tileAssets.clear();
+        for (const [assetPath, uuid] of state.pathToUuid.entries()) {
+          const match = assetPath.match(/^resources\/mahjong\/([^/]+)$/);
+          if (!match) continue;
+          const id = match[1];
+          if (!/^\d+$/.test(id) || EXCLUDED_FRAMES.has(id)) continue;
+          state.tileAssets.set(id, {
+            id,
+            uuid,
+            url: nativeUrlForUuid(uuid, "png"),
+            fallbackUrl: `../../assets/game/resources/mahjong/${id}.png`,
+          });
+        }
+        state.tileIds = Array.from(state.tileAssets.keys()).sort((a, b) => Number(a) - Number(b));
+        renderPalette();
+      }
+
+      function indexLevels() {
+        state.levels.clear();
+        for (const [assetPath, uuid] of state.pathToUuid.entries()) {
+          const match = assetPath.match(/^json\/pure_level(\d+)_config$/);
+          if (!match) continue;
+          state.levels.set(Number(match[1]), {
+            level: Number(match[1]),
+            uuid,
+            url: importUrlForUuid(uuid),
+            fallbackUrl: `../../assets/game/json/pure_level${match[1]}_config.json`,
+          });
+        }
+      }
+
+      async function loadLevel(level) {
+        if (!state.manifest) await loadManifest();
+        const record = state.levels.get(level) || {
+          level,
+          uuid: "",
+          url: "",
+          fallbackUrl: `../../assets/game/json/pure_level${level}_config.json`,
+          fallbackOnly: true,
+        };
+        let payload = null;
+        if (record.url) {
+          const packed = await tryFetchJson(record.url);
+          if (packed) {
+            payload = extractCocosPayload(packed, (value) => {
+              return typeof value.level_no === "number" && Array.isArray(value.positions);
+            });
+          }
+        }
+        if (!payload && record.fallbackUrl) {
+          payload = await tryFetchJson(record.fallbackUrl);
+        }
+        if (!payload && EMBEDDED_LEVELS[level]) {
+          payload = cloneJson(EMBEDDED_LEVELS[level]);
+        }
+        if (!payload) throw new Error(`无法读取关卡 ${level} 的 JSON`);
+
+        state.currentLevel = level;
+        state.levelJson = cloneJson(payload);
+        state.positions = normalizePositions(payload.positions);
+        const loadedTask = normalizeTaskOrder(payload.decoded_config?.task?.[0]);
+        state.taskOrder = loadedTask.length > 0 ? loadedTask : buildAutoTaskSequence(getTileCounts(state.positions), []);
+        state.selectedTaskIndex = -1;
+        state.selectedIndex = -1;
+        state.zoom = 1;
+        dom.zoomInput.value = "100";
+        state.undoStack = [];
+        state.redoStack = [];
+        dom.levelInput.value = String(level);
+        dom.previewSub.textContent = `pure_level${level}_config，${state.positions.length} 张牌`;
+        setMessage("关卡已加载", "ok");
+        renderAll();
+        requestAnimationFrame(fitZoom);
+      }
+
+      function normalizePositions(positions) {
+        return (positions || [])
+          .map((item) => ({
+            z_layer: normalizeInt(item.z_layer),
+            y_row: normalizeInt(item.y_row),
+            x_col: normalizeInt(item.x_col),
+            tile_id: normalizeInt(item.tile_id),
+          }))
+          .filter((item) => Number.isFinite(item.tile_id) && item.tile_id > 0);
+      }
+
+      function normalizeTaskOrder(task) {
+        return (task || [])
+          .map((id) => normalizeInt(id))
+          .filter((id) => id > 0);
+      }
+
+      function renderPalette() {
+        dom.palette.innerHTML = "";
+        for (const id of state.tileIds) {
+          const asset = state.tileAssets.get(id);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `palette-item${state.selectedTileId === id ? " selected" : ""}`;
+          button.dataset.tileId = id;
+          button.innerHTML = `
+            <img class="palette-img" src="${asset.url}" alt="${id}" loading="lazy" data-fallback="${asset.fallbackUrl || ""}">
+            <span class="palette-id">${id}</span>
+          `;
+          const img = button.querySelector("img");
+          img.addEventListener("error", useImageFallback, { once: true });
+          button.addEventListener("click", () => selectPaletteTile(id));
+          dom.palette.appendChild(button);
+        }
+        dom.paletteSub.textContent = `${state.tileIds.length} 张牌`;
+      }
+
+      function selectPaletteTile(id) {
+        state.selectedTileId = String(id);
+        dom.tileInput.value = String(id);
+        renderPalette();
+        if (state.mode === "select") setMode("replace");
+        setMessage(`已选择牌型 ${id}`, "ok");
+      }
+
+      function renderAll() {
+        renderLayerFilter();
+        renderBoard();
+        renderTasks();
+        renderPalette();
+        renderSelection();
+        renderMetrics();
+        updateButtons();
+      }
+
+      function renderLayerFilter() {
+        const previous = state.layerFilter;
+        const layers = uniqueLayers();
+        dom.layerFilter.innerHTML = "";
+        const allOption = document.createElement("option");
+        allOption.value = "all";
+        allOption.textContent = "全部";
+        dom.layerFilter.appendChild(allOption);
+        for (const layer of layers) {
+          const option = document.createElement("option");
+          option.value = String(layer);
+          option.textContent = `第 ${layer} 层`;
+          dom.layerFilter.appendChild(option);
+        }
+        state.layerFilter = previous === "all" || layers.includes(Number(previous)) ? previous : "all";
+        dom.layerFilter.value = state.layerFilter;
+      }
+
+      function uniqueLayers() {
+        return Array.from(new Set(state.positions.map((item) => item.z_layer))).sort((a, b) => a - b);
+      }
+
+      function getBounds() {
+        if (state.positions.length === 0) {
+          return { minCol: 0, maxCol: 8, minRow: 0, maxRow: 8, minLayer: 0, maxLayer: 0 };
+        }
+        let minCol = Infinity;
+        let maxCol = -Infinity;
+        let minRow = Infinity;
+        let maxRow = -Infinity;
+        let minLayer = Infinity;
+        let maxLayer = -Infinity;
+        for (const item of state.positions) {
+          minCol = Math.min(minCol, item.x_col);
+          maxCol = Math.max(maxCol, item.x_col);
+          minRow = Math.min(minRow, item.y_row);
+          maxRow = Math.max(maxRow, item.y_row);
+          minLayer = Math.min(minLayer, item.z_layer);
+          maxLayer = Math.max(maxLayer, item.z_layer);
+        }
+        return { minCol, maxCol, minRow, maxRow, minLayer, maxLayer };
+      }
+
+      function computeBoardCenter() {
+        let minRow = Infinity;
+        let maxRow = -Infinity;
+        let minCol = Infinity;
+        let maxCol = -Infinity;
+        for (const item of state.positions) {
+          if (item.z_layer !== 0) continue;
+          minRow = Math.min(minRow, item.y_row);
+          maxRow = Math.max(maxRow, item.y_row);
+          minCol = Math.min(minCol, item.x_col);
+          maxCol = Math.max(maxCol, item.x_col);
+        }
+        if (minRow === Infinity) {
+          for (const item of state.positions) {
+            minRow = Math.min(minRow, item.y_row);
+            maxRow = Math.max(maxRow, item.y_row);
+            minCol = Math.min(minCol, item.x_col);
+            maxCol = Math.max(maxCol, item.x_col);
+          }
+        }
+        if (minRow === Infinity) return { cx: 0, cy: 0 };
+        return { cx: (minCol + maxCol) / 2, cy: (minRow + maxRow) / 2 };
+      }
+
+      function computeBoardFitRatio(bounds) {
+        if (state.positions.length === 0) return 1;
+        const boardW = (bounds.maxCol - bounds.minCol) * STEP_X + TILE_STEP_X * BOARD_SCALE;
+        const boardH = (bounds.maxRow - bounds.minRow) * STEP_Y + TILE_STEP_Y * BOARD_SCALE;
+        const usableW = BOARD_W - BOARD_PADDING * 2;
+        const usableH = BOARD_H - BOARD_PADDING * 2;
+        return Math.max(
+          MIN_BOARD_FIT_RATIO,
+          Math.min(MAX_BOARD_FIT_RATIO, Math.min(usableW / boardW, usableH / boardH)),
+        );
+      }
+
+      function renderBoard() {
+        dom.board.innerHTML = "";
+        const bounds = getBounds();
+        const selectedTaskTileId = getSelectedTaskTileId();
+        const fitRatio = computeBoardFitRatio(bounds);
+        const width = BOARD_W;
+        const height = BOARD_H;
+        const tileW = TILE_W * fitRatio;
+        const tileH = TILE_H * fitRatio;
+        const halfStepX = STEP_X * fitRatio;
+        const halfStepY = STEP_Y * fitRatio;
+        const center = computeBoardCenter();
+        dom.board.style.width = `${width}px`;
+        dom.board.style.height = `${height}px`;
+        dom.board.style.transform = `scale(${state.zoom})`;
+        dom.board.style.marginRight = `${width * (state.zoom - 1)}px`;
+        dom.board.style.marginBottom = `${height * (state.zoom - 1)}px`;
+
+        if (state.positions.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "board-empty";
+          empty.textContent = "当前关卡没有牌";
+          dom.board.appendChild(empty);
+          return;
+        }
+
+        const sorted = state.positions
+          .map((item, index) => ({ item, index }))
+          .sort((a, b) => {
+            return a.item.z_layer - b.item.z_layer ||
+              (a.item.y_row + a.item.x_col) - (b.item.y_row + b.item.x_col) ||
+              a.item.y_row - b.item.y_row ||
+              a.index - b.index;
+          });
+
+        for (const entry of sorted) {
+          const item = entry.item;
+          const asset = state.tileAssets.get(String(item.tile_id));
+          const left = width / 2 + (item.x_col - center.cx) * halfStepX;
+          const top = height / 2 + (item.y_row - center.cy) * halfStepY;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `tile${entry.index === state.selectedIndex ? " selected" : ""}`;
+          button.style.width = `${tileW}px`;
+          button.style.height = `${tileH}px`;
+          if (selectedTaskTileId && String(item.tile_id) === selectedTaskTileId) button.classList.add("task-highlight");
+          if (state.layerFilter !== "all" && Number(state.layerFilter) !== item.z_layer) button.classList.add("hidden-layer");
+          button.dataset.index = String(entry.index);
+          button.dataset.label = `z${item.z_layer} y${item.y_row} x${item.x_col}`;
+          button.style.left = `${left}px`;
+          button.style.top = `${top}px`;
+          button.style.zIndex = String(100 + item.z_layer * 1000 + (item.y_row + item.x_col) * 20 + item.y_row);
+          if (asset) {
+            button.innerHTML = `<img class="tile-img" src="${asset.url}" alt="${item.tile_id}" data-fallback="${asset.fallbackUrl || ""}">`;
+            button.querySelector("img").addEventListener("error", useImageFallback, { once: true });
+          } else {
+            button.innerHTML = `<span>${item.tile_id}</span>`;
+            button.style.border = "1px solid #d6a49d";
+            button.style.background = "#fff3f2";
+          }
+          button.addEventListener("click", () => handleBoardTileClick(entry.index));
+          dom.board.appendChild(button);
+        }
+      }
+
+      function useImageFallback(event) {
+        const img = event.currentTarget;
+        const fallback = img.dataset.fallback;
+        if (fallback && img.src.indexOf(fallback) < 0) {
+          img.src = fallback;
+        }
+      }
+
+      function renderTasks() {
+        dom.taskList.innerHTML = "";
+        const task = getExportTaskOrder();
+        if (state.selectedTaskIndex >= task.length) state.selectedTaskIndex = -1;
+        dom.taskSub.textContent = `${task.length} 组`;
+        if (task.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "task-empty";
+          empty.textContent = "暂无任务，点击重建可按牌型数量生成";
+          dom.taskList.appendChild(empty);
+          setTaskMessage("暂无任务", "");
+          updateButtons();
+          return;
+        }
+
+        for (let index = 0; index < task.length; index++) {
+          const id = String(task[index]);
+          const asset = state.tileAssets.get(id);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `task-item${index === state.selectedTaskIndex ? " selected" : ""}`;
+          button.dataset.index = String(index);
+          if (asset) {
+            button.innerHTML = `
+              <span class="task-order">#${index + 1}</span>
+              <img class="task-img" src="${asset.url}" alt="${id}" data-fallback="${asset.fallbackUrl || ""}">
+              <span class="task-id">${id} x3</span>
+            `;
+            button.querySelector("img").addEventListener("error", useImageFallback, { once: true });
+          } else {
+            button.innerHTML = `
+              <span class="task-order">#${index + 1}</span>
+              <span>${id}</span>
+              <span class="task-id">x3</span>
+            `;
+          }
+          button.addEventListener("click", () => selectTask(index));
+          dom.taskList.appendChild(button);
+        }
+
+        const errors = validateTaskOrderAgainstCounts(task, getTileCounts(state.positions));
+        if (errors.length > 0) {
+          setTaskMessage(errors[0], "error");
+        } else {
+          setTaskMessage("任务顺序正常", "ok");
+        }
+      }
+
+      function refreshTaskMessage(successMessage) {
+        const errors = validateTaskOrderAgainstCounts(getExportTaskOrder(), getTileCounts(state.positions));
+        if (errors.length > 0) {
+          setTaskMessage(errors[0], "error");
+        } else {
+          setTaskMessage(successMessage, "ok");
+        }
+      }
+
+      function selectTask(index) {
+        state.selectedTaskIndex = index;
+        const id = getExportTaskOrder()[index];
+        if (id) {
+          state.selectedTileId = String(id);
+          dom.tileInput.value = String(id);
+        }
+        renderBoard();
+        renderTasks();
+        renderPalette();
+        setTaskMessage(`选中任务 #${index + 1}`, "ok");
+        updateButtons();
+      }
+
+      function getSelectedTaskTileId() {
+        const id = getExportTaskOrder()[state.selectedTaskIndex];
+        return id ? String(id) : "";
+      }
+
+      function handleBoardTileClick(index) {
+        const item = state.positions[index];
+        if (!item) return;
+        selectPosition(index);
+        if (state.mode === "replace") {
+          replaceSelected();
+        } else if (state.mode === "delete") {
+          deleteSelected();
+        }
+      }
+
+      function selectPosition(index) {
+        state.selectedIndex = index;
+        const item = state.positions[index];
+        if (item) {
+          dom.zInput.value = String(item.z_layer);
+          dom.yInput.value = String(item.y_row);
+          dom.xInput.value = String(item.x_col);
+          dom.tileInput.value = String(item.tile_id);
+        }
+        renderBoard();
+        renderSelection();
+        updateButtons();
+      }
+
+      function renderSelection() {
+        const item = state.positions[state.selectedIndex];
+        if (!item) {
+          dom.selectionLabel.textContent = "未选中";
+          return;
+        }
+        dom.selectionLabel.textContent = `选中 ${item.tile_id} @ z${item.z_layer}, y${item.y_row}, x${item.x_col}`;
+      }
+
+      function renderMetrics() {
+        const counts = getTileCounts(state.positions);
+        const layers = uniqueLayers();
+        const task = getExportTaskOrder();
+        dom.tileCountMetric.textContent = String(state.positions.length);
+        dom.layerCountMetric.textContent = String(layers.length);
+        dom.taskCountMetric.textContent = String(task.length);
+        dom.typeCountMetric.textContent = String(counts.size);
+        const invalid = Array.from(counts.entries()).filter(([, count]) => count % 3 !== 0);
+        if (invalid.length > 0) {
+          setCountsMessage(`数量不是 3 的倍数: ${invalid.map(([id, count]) => `${id}=${count}`).join(", ")}`, "error");
+        } else {
+          setCountsMessage(`牌型数量正常，任务 ${task.length} 组`, "ok");
+        }
+      }
+
+      function updateButtons() {
+        const hasLevel = !!state.levelJson;
+        const hasSelection = state.selectedIndex >= 0 && !!state.positions[state.selectedIndex];
+        dom.addBtn.disabled = !hasLevel;
+        dom.replaceBtn.disabled = !hasLevel || !hasSelection;
+        dom.deleteBtn.disabled = !hasLevel || !hasSelection;
+        dom.exportBtn.disabled = !hasLevel;
+        dom.validateBtn.disabled = !hasLevel;
+        dom.taskReplaceBtn.disabled = !hasLevel || state.selectedTaskIndex < 0;
+        dom.taskDeleteBtn.disabled = !hasLevel || state.selectedTaskIndex < 0;
+        dom.taskRebuildBtn.disabled = !hasLevel;
+        dom.undoBtn.disabled = state.undoStack.length === 0;
+        dom.redoBtn.disabled = state.redoStack.length === 0;
+      }
+
+      function getFormPosition() {
+        return {
+          z_layer: Math.max(0, normalizeInt(dom.zInput.value)),
+          y_row: Math.max(0, normalizeInt(dom.yInput.value)),
+          x_col: Math.max(0, normalizeInt(dom.xInput.value)),
+          tile_id: Math.max(0, normalizeInt(dom.tileInput.value || state.selectedTileId)),
+        };
+      }
+
+      function positionKey(item) {
+        return `${item.z_layer},${item.y_row},${item.x_col}`;
+      }
+
+      function findPositionAt(position, ignoreIndex = -1) {
+        const key = positionKey(position);
+        return state.positions.findIndex((item, index) => index !== ignoreIndex && positionKey(item) === key);
+      }
+
+      function pushHistory(label) {
+        if (!state.levelJson) return;
+        state.undoStack.push({
+          label,
+          positions: cloneJson(state.positions),
+          taskOrder: cloneJson(state.taskOrder),
+          selectedTaskIndex: state.selectedTaskIndex,
+          selectedIndex: state.selectedIndex,
+          levelJson: cloneJson(state.levelJson),
+        });
+        if (state.undoStack.length > 80) state.undoStack.shift();
+        state.redoStack = [];
+      }
+
+      function restoreSnapshot(snapshot) {
+        state.positions = cloneJson(snapshot.positions);
+        state.taskOrder = cloneJson(snapshot.taskOrder || []);
+        state.selectedTaskIndex = snapshot.selectedTaskIndex ?? -1;
+        state.selectedIndex = snapshot.selectedIndex;
+        state.levelJson = cloneJson(snapshot.levelJson);
+        renderAll();
+      }
+
+      function undo() {
+        if (state.undoStack.length === 0) return;
+        state.redoStack.push({
+          label: "redo",
+          positions: cloneJson(state.positions),
+          taskOrder: cloneJson(state.taskOrder),
+          selectedTaskIndex: state.selectedTaskIndex,
+          selectedIndex: state.selectedIndex,
+          levelJson: cloneJson(state.levelJson),
+        });
+        restoreSnapshot(state.undoStack.pop());
+        setMessage("已撤销", "ok");
+      }
+
+      function redo() {
+        if (state.redoStack.length === 0) return;
+        state.undoStack.push({
+          label: "undo",
+          positions: cloneJson(state.positions),
+          taskOrder: cloneJson(state.taskOrder),
+          selectedTaskIndex: state.selectedTaskIndex,
+          selectedIndex: state.selectedIndex,
+          levelJson: cloneJson(state.levelJson),
+        });
+        restoreSnapshot(state.redoStack.pop());
+        setMessage("已重做", "ok");
+      }
+
+      function addPosition() {
+        if (!state.levelJson) return;
+        const next = getFormPosition();
+        if (!next.tile_id) {
+          setMessage("请先选择或填写 tile_id", "error");
+          return;
+        }
+        if (findPositionAt(next) >= 0) {
+          setMessage(`坐标 z${next.z_layer}, y${next.y_row}, x${next.x_col} 已有牌`, "error");
+          return;
+        }
+        pushHistory("add");
+        state.positions.push(next);
+        state.selectedIndex = state.positions.length - 1;
+        renderAll();
+        setMessage("已添加", "ok");
+      }
+
+      function replaceSelected() {
+        if (!state.levelJson) return;
+        const current = state.positions[state.selectedIndex];
+        if (!current) {
+          setMessage("请先选中要替换的牌", "error");
+          return;
+        }
+        const next = getFormPosition();
+        if (!next.tile_id) {
+          setMessage("请先选择或填写 tile_id", "error");
+          return;
+        }
+        if (findPositionAt(next, state.selectedIndex) >= 0) {
+          setMessage(`坐标 z${next.z_layer}, y${next.y_row}, x${next.x_col} 已有牌`, "error");
+          return;
+        }
+        pushHistory("replace");
+        state.positions[state.selectedIndex] = next;
+        renderAll();
+        setMessage("已替换", "ok");
+      }
+
+      function deleteSelected() {
+        if (!state.levelJson) return;
+        if (!state.positions[state.selectedIndex]) {
+          setMessage("请先选中要删除的牌", "error");
+          return;
+        }
+        pushHistory("delete");
+        state.positions.splice(state.selectedIndex, 1);
+        state.selectedIndex = -1;
+        renderAll();
+        setMessage("已删除", "ok");
+      }
+
+      function replaceSelectedTask() {
+        if (!state.levelJson) return;
+        const task = getExportTaskOrder();
+        if (state.selectedTaskIndex < 0 || !task[state.selectedTaskIndex]) {
+          setTaskMessage("请先选中任务项", "error");
+          return;
+        }
+        const nextId = normalizeInt(state.selectedTileId || dom.tileInput.value);
+        if (!nextId) {
+          setTaskMessage("请先在牌库选择新任务牌", "error");
+          return;
+        }
+        pushHistory("replace-task");
+        state.taskOrder = task;
+        state.taskOrder[state.selectedTaskIndex] = nextId;
+        renderAll();
+        refreshTaskMessage("任务已修改");
+      }
+
+      function deleteSelectedTask() {
+        if (!state.levelJson) return;
+        const task = getExportTaskOrder();
+        if (state.selectedTaskIndex < 0 || !task[state.selectedTaskIndex]) {
+          setTaskMessage("请先选中任务项", "error");
+          return;
+        }
+        pushHistory("delete-task");
+        state.taskOrder = task;
+        state.taskOrder.splice(state.selectedTaskIndex, 1);
+        state.selectedTaskIndex = -1;
+        renderAll();
+        refreshTaskMessage("任务已删除");
+      }
+
+      function rebuildTaskOrder() {
+        if (!state.levelJson) return;
+        pushHistory("rebuild-task");
+        state.taskOrder = buildAutoTaskSequence(getTileCounts(state.positions), []);
+        state.selectedTaskIndex = -1;
+        renderAll();
+        refreshTaskMessage("已按牌型数量重建任务");
+      }
+
+      function setMode(mode) {
+        state.mode = mode;
+        for (const button of dom.modeRow.querySelectorAll("button")) {
+          button.classList.toggle("active", button.dataset.mode === mode);
+        }
+        const hints = {
+          select: "选择模式：点击预览牌查看坐标",
+          replace: "替换模式：选牌库，再点预览牌替换",
+          add: "添加模式：选牌库，填写坐标后添加",
+          delete: "删除模式：点击预览牌直接删除",
+        };
+        setMessage(hints[mode] || "模式已切换");
+      }
+
+      function getTileCounts(positions) {
+        const counts = new Map();
+        for (const item of positions) {
+          const id = String(item.tile_id);
+          counts.set(id, (counts.get(id) || 0) + 1);
+        }
+        return counts;
+      }
+
+      function getOriginalTaskOrder() {
+        return state.taskOrder.map((id) => String(id));
+      }
+
+      function buildAutoTaskSequence(counts, originalOrder) {
+        const used = new Set();
+        const tasks = [];
+        for (const id of originalOrder) {
+          if (used.has(id)) continue;
+          const count = counts.get(id) || 0;
+          const groups = Math.floor(count / 3);
+          for (let i = 0; i < groups; i++) tasks.push(Number(id));
+          used.add(id);
+        }
+        const extras = Array.from(counts.keys())
+          .filter((id) => !used.has(id))
+          .sort((a, b) => Number(a) - Number(b));
+        for (const id of extras) {
+          const groups = Math.floor((counts.get(id) || 0) / 3);
+          for (let i = 0; i < groups; i++) tasks.push(Number(id));
+        }
+        return tasks;
+      }
+
+      function getExportTaskOrder() {
+        return state.taskOrder.slice();
+      }
+
+      function validateTaskOrderAgainstCounts(task, counts) {
+        const errors = [];
+        const required = new Map();
+        for (const id of task) {
+          const key = String(id);
+          required.set(key, (required.get(key) || 0) + 3);
+        }
+        for (const [id, count] of counts.entries()) {
+          const expected = count;
+          const actual = required.get(id) || 0;
+          if (actual !== expected) errors.push(`任务 ${id} 需要 ${actual} 张，棋盘有 ${expected} 张`);
+        }
+        for (const [id, actual] of required.entries()) {
+          if (!counts.has(id)) errors.push(`任务 ${id} 不在棋盘中`);
+        }
+        return errors;
+      }
+
+      function validatePositions() {
+        if (!state.levelJson) return { ok: false, errors: ["请先加载关卡"] };
+        const errors = [];
+        const occupied = new Map();
+        for (let i = 0; i < state.positions.length; i++) {
+          const item = state.positions[i];
+          if (!Number.isInteger(item.z_layer) || !Number.isInteger(item.y_row) || !Number.isInteger(item.x_col) || !Number.isInteger(item.tile_id)) {
+            errors.push(`第 ${i + 1} 张牌坐标或 tile_id 不是整数`);
+          }
+          if (item.z_layer < 0 || item.y_row < 0 || item.x_col < 0 || item.tile_id <= 0) {
+            errors.push(`第 ${i + 1} 张牌存在非法数值`);
+          }
+          const key = positionKey(item);
+          if (occupied.has(key)) {
+            errors.push(`坐标重复: ${key}`);
+          }
+          occupied.set(key, i);
+        }
+        const counts = getTileCounts(state.positions);
+        for (const [id, count] of counts.entries()) {
+          if (count % 3 !== 0) errors.push(`牌型 ${id} 数量 ${count} 不是 3 的倍数`);
+        }
+        errors.push(...validateTaskOrderAgainstCounts(getExportTaskOrder(), counts));
+        return { ok: errors.length === 0, errors };
+      }
+
+      function rebuildLevelJson() {
+        const validation = validatePositions();
+        if (!validation.ok) {
+          throw new Error(validation.errors.join("；"));
+        }
+        const next = cloneJson(state.levelJson);
+        next.level_no = normalizeInt(next.level_no, state.currentLevel);
+        next.positions = state.positions
+          .map((item) => ({
+            z_layer: item.z_layer,
+            y_row: item.y_row,
+            x_col: item.x_col,
+            tile_id: item.tile_id,
+          }))
+          .sort((a, b) => a.z_layer - b.z_layer || a.y_row - b.y_row || a.x_col - b.x_col || a.tile_id - b.tile_id);
+
+        const counts = getTileCounts(next.positions);
+        const data = buildDataArray(next.positions);
+        const task = getExportTaskOrder();
+        const taskNum = task.map(() => 3);
+        const summary = buildSummary(next.positions, counts, task);
+
+        next.decoded_config = {
+          ...(next.decoded_config || {}),
+          data,
+          task: [task],
+          taskNum: [taskNum],
+          hard: next.decoded_config?.hard ?? next.summary?.hard ?? next.index_config?.base_diff ?? 0,
+        };
+        if (!Array.isArray(next.decoded_config.chain)) next.decoded_config.chain = [];
+        next.summary = {
+          ...(next.summary || {}),
+          ...summary,
+        };
+        if (next.index_config) {
+          next.index_config.level_json = next.index_config.level_json || next.level_json || `level_${next.level_no}`;
+        }
+        return next;
+      }
+
+      function buildDataArray(positions) {
+        const maxLayer = Math.max(0, ...positions.map((item) => item.z_layer));
+        const maxRow = Math.max(0, ...positions.map((item) => item.y_row));
+        const maxCol = Math.max(0, ...positions.map((item) => item.x_col));
+        const data = [];
+        for (let z = 0; z <= maxLayer; z++) {
+          const layer = [];
+          for (let y = 0; y <= maxRow; y++) {
+            layer.push(Array(maxCol + 1).fill(0));
+          }
+          data.push(layer);
+        }
+        for (const item of positions) {
+          data[item.z_layer][item.y_row][item.x_col] = item.tile_id;
+        }
+        return data;
+      }
+
+      function buildSummary(positions, counts, task) {
+        const layers = uniqueLayersFromPositions(positions);
+        const rowsPerLayer = [];
+        const colsPerRowMinmax = [];
+        for (const layer of layers) {
+          const layerItems = positions.filter((item) => item.z_layer === layer);
+          const rows = layerItems.map((item) => item.y_row);
+          const cols = layerItems.map((item) => item.x_col);
+          const rowCount = rows.length > 0 ? Math.max(...rows) + 1 : 0;
+          const colCount = cols.length > 0 ? Math.max(...cols) + 1 : 0;
+          rowsPerLayer.push(rowCount);
+          colsPerRowMinmax.push([colCount, colCount]);
+        }
+        const tileCounts = {};
+        for (const [id, count] of Array.from(counts.entries()).sort((a, b) => Number(a[0]) - Number(b[0]))) {
+          tileCounts[id] = count;
+        }
+        return {
+          data_layers: layers.length,
+          rows_per_layer: rowsPerLayer,
+          cols_per_row_minmax: colsPerRowMinmax,
+          non_zero_tiles: positions.length,
+          tile_counts: tileCounts,
+          hard: state.levelJson?.summary?.hard ?? state.levelJson?.decoded_config?.hard ?? state.levelJson?.index_config?.base_diff ?? 0,
+          task_count: task.length,
+          chain_count: Array.isArray(state.levelJson?.decoded_config?.chain) ? state.levelJson.decoded_config.chain.length : 0,
+        };
+      }
+
+      function uniqueLayersFromPositions(positions) {
+        return Array.from(new Set(positions.map((item) => item.z_layer))).sort((a, b) => a - b);
+      }
+
+      function validateCurrent() {
+        const validation = validatePositions();
+        if (validation.ok) {
+          setMessage("校验通过，可以导出", "ok");
+          renderMetrics();
+        } else {
+          setMessage(validation.errors[0], "error");
+          setCountsMessage(validation.errors.join("；"), "error");
+        }
+        return validation.ok;
+      }
+
+      function exportJson() {
+        try {
+          const json = rebuildLevelJson();
+          const text = JSON.stringify(json, null, 2);
+          const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `pure_level${json.level_no}_config.json`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+          setMessage("已导出 JSON", "ok");
+        } catch (error) {
+          setMessage(error.message, "error");
+        }
+      }
+
+      async function importJson(file) {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        if (typeof json.level_no !== "number" || !Array.isArray(json.positions)) {
+          throw new Error("导入文件不是有效关卡 JSON");
+        }
+        pushHistory("import");
+        state.currentLevel = json.level_no;
+        state.levelJson = cloneJson(json);
+        state.positions = normalizePositions(json.positions);
+        const loadedTask = normalizeTaskOrder(json.decoded_config?.task?.[0]);
+        state.taskOrder = loadedTask.length > 0 ? loadedTask : buildAutoTaskSequence(getTileCounts(state.positions), []);
+        state.selectedTaskIndex = -1;
+        state.selectedIndex = -1;
+        dom.levelInput.value = String(json.level_no);
+        dom.previewSub.textContent = `${file.name}，${state.positions.length} 张牌`;
+        renderAll();
+        setMessage("导入完成", "ok");
+      }
+
+      async function boot() {
+        if (state.loading) return;
+        state.loading = true;
+        try {
+          setStatus("正在加载构建资源");
+          await loadManifest();
+          setStatus(`已加载 ${state.levels.size} 个关卡，${state.tileIds.length} 张牌`);
+          await loadLevel(normalizeInt(dom.levelInput.value, 0));
+          setStatus(`关卡 ${state.currentLevel} 已就绪`);
+        } catch (error) {
+          setStatus("加载失败");
+          setMessage(error.message, "error");
+        } finally {
+          state.loading = false;
+          updateButtons();
+        }
+      }
+
+      function bindEvents() {
+        dom.loadBtn.addEventListener("click", async () => {
+          try {
+            await loadLevel(normalizeInt(dom.levelInput.value, state.currentLevel));
+            setStatus(`关卡 ${state.currentLevel} 已就绪`);
+          } catch (error) {
+            setMessage(error.message, "error");
+          }
+        });
+        dom.prevBtn.addEventListener("click", async () => {
+          const level = Math.max(0, normalizeInt(dom.levelInput.value, state.currentLevel) - 1);
+          dom.levelInput.value = String(level);
+          dom.loadBtn.click();
+        });
+        dom.nextBtn.addEventListener("click", async () => {
+          const level = normalizeInt(dom.levelInput.value, state.currentLevel) + 1;
+          dom.levelInput.value = String(level);
+          dom.loadBtn.click();
+        });
+        dom.reloadBtn.addEventListener("click", boot);
+        dom.modeRow.addEventListener("click", (event) => {
+          const button = event.target.closest("button[data-mode]");
+          if (button) setMode(button.dataset.mode);
+        });
+        dom.layerFilter.addEventListener("change", () => {
+          state.layerFilter = dom.layerFilter.value;
+          renderBoard();
+        });
+        dom.zoomInput.addEventListener("input", () => {
+          state.zoom = normalizeInt(dom.zoomInput.value, 100) / 100;
+          renderBoard();
+        });
+        dom.fitBtn.addEventListener("click", fitZoom);
+        dom.addBtn.addEventListener("click", addPosition);
+        dom.replaceBtn.addEventListener("click", replaceSelected);
+        dom.deleteBtn.addEventListener("click", deleteSelected);
+        dom.validateBtn.addEventListener("click", validateCurrent);
+        dom.taskReplaceBtn.addEventListener("click", replaceSelectedTask);
+        dom.taskDeleteBtn.addEventListener("click", deleteSelectedTask);
+        dom.taskRebuildBtn.addEventListener("click", rebuildTaskOrder);
+        dom.undoBtn.addEventListener("click", undo);
+        dom.redoBtn.addEventListener("click", redo);
+        dom.importBtn.addEventListener("click", () => dom.fileInput.click());
+        dom.fileInput.addEventListener("change", async () => {
+          const file = dom.fileInput.files && dom.fileInput.files[0];
+          dom.fileInput.value = "";
+          if (!file) return;
+          try {
+            await importJson(file);
+          } catch (error) {
+            setMessage(error.message, "error");
+          }
+        });
+        dom.exportBtn.addEventListener("click", exportJson);
+        for (const input of [dom.zInput, dom.yInput, dom.xInput, dom.tileInput]) {
+          input.addEventListener("change", () => {
+            if (input === dom.tileInput) state.selectedTileId = dom.tileInput.value;
+            renderPalette();
+          });
+        }
+        document.addEventListener("keydown", (event) => {
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+            event.preventDefault();
+            if (event.shiftKey) redo();
+            else undo();
+          }
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+            event.preventDefault();
+            redo();
+          }
+        });
+      }
+
+      function fitZoom() {
+        const boardRect = dom.board.getBoundingClientRect();
+        const wrapRect = dom.previewWrap.getBoundingClientRect();
+        if (!boardRect.width || !boardRect.height) return;
+        const currentZoom = state.zoom || 1;
+        const naturalW = boardRect.width / currentZoom;
+        const naturalH = boardRect.height / currentZoom;
+        const nextZoom = Math.max(0.35, Math.min(1.5, Math.min((wrapRect.width - 36) / naturalW, (wrapRect.height - 36) / naturalH)));
+        state.zoom = nextZoom;
+        dom.zoomInput.value = String(Math.round(nextZoom * 100));
+        renderBoard();
+      }
+
+      bindEvents();
+      setMode("select");
+      boot();
+    })();
+  </script>
+</body>
+</html>

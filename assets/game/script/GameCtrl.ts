@@ -79,6 +79,7 @@ export class GameCtrl extends Component {
     private slotPositions: Vec3[] = [];
     private slotCapacity = 7;
     private uidSeed = 1;
+    private boardFitRatio = 1;
 
     private remainTime = 0;
     private elapsedTime = 0;
@@ -96,6 +97,7 @@ export class GameCtrl extends Component {
     // 提示动画播放期间(tipsActive=true)点牌不重启计时,等 UI 通知 End 才解除
     private tipsActive = false;
     private static readonly IDLE_TIPS_SECONDS = 10;
+    private static readonly GUIDE_LEVEL = 0;
 
     // UI 相关 —— targetLabel/statusLabel/comboLabel/toastLabel 已搬到 UIGameLayer，
     // levelLabel 是 @property 由场景绑定，留在这里直接读写
@@ -126,8 +128,10 @@ export class GameCtrl extends Component {
                     mahjongItem: this.mahjongItem,
                     iconFrames: this.iconFrames,
                 });
-                this.startLevel(this.nowLevel);
-                this.hasStarted = true;
+                this.scheduleOnce(() => {
+                    this.startLevel(this.nowLevel);
+                    this.hasStarted = true;
+                }, 0);
             });
         });
     }
@@ -153,7 +157,7 @@ export class GameCtrl extends Component {
         const currentSecond = Math.ceil(this.remainTime);
         if (currentSecond !== this.lastTickSecond) {
             this.lastTickSecond = currentSecond;
-            this.updateHud();
+            //this.updateHud();
         }
         if (this.remainTime <= 0) this.failLevel('时间到');
     }
@@ -161,6 +165,7 @@ export class GameCtrl extends Component {
     private startLevel(level: number) {
         this.gameState = 'playing';
         this.nowLevel = level;
+        director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -205,12 +210,13 @@ export class GameCtrl extends Component {
         if (positions.length === 0) return;
 
         // 不同关卡 JSON 半格跨度差异很大(level1=10×10,level9=14×16,level10=14×8)。
-        // 这里按 bbox 同时调 pNode 边框大小(更美观,小关不显得旷)和整体缩放(超大关卡兜底)
-        //this.fitBoardAndResizePnode(positions);
+        // 这里按 bbox 计算本关棋盘缩放:少牌/小跨度放大,多牌/大跨度缩小。
+        this.fitBoardAndResizePnode(positions);
 
         const { cx, cy } = this.computeBoardCenter(positions);
-        const halfStepX = Constants.MahjongBoard.TileStepX / 2;
-        const halfStepY = Constants.MahjongBoard.TileStepY / 2;
+        const halfStepX = Constants.MahjongBoard.TileStepX * this.boardFitRatio / 2;
+        const halfStepY = Constants.MahjongBoard.TileStepY * this.boardFitRatio / 2;
+        const boardScale = this.getBoardTileScale();
 
         const sortedPositions = positions
             .slice()
@@ -234,10 +240,11 @@ export class GameCtrl extends Component {
             node.layer = this.mahjongPnode.layer;
             // 初始在屏幕上方，用于进场动画
             node.setPosition(boardPos.x, boardPos.y + 760, boardPos.z);
-            node.setScale(Constants.MahjongBoard.BoardScale, Constants.MahjongBoard.BoardScale, 1);
+            node.setScale(boardScale, boardScale, 1);
             this.getOrCreateLayerContainer(p.z_layer).addChild(node);
 
             const item = node.getComponent(MahjongItem) || node.addComponent(MahjongItem);
+            item.setBoardScale(boardScale);
             item.setData(type, p.y_row, p.x_col, p.z_layer, this.iconFrames.get(type) || null);
 
             const tile: TileRecord = {
@@ -294,13 +301,16 @@ export class GameCtrl extends Component {
         return json.decoded_config.task[0].map((id) => String(id));
     }
 
-    // 棋盘自适应(固定尺寸方案):
-    // pNode 视觉尺寸对所有关卡固定为 IdealPnodeWidth × IdealPnodeHeight,
-    // setScale 让 board+padding 装进 (Ideal - 2×padding) 的可用区域。
-    // 所有关卡边框看起来一致(同一矩形),只有牌大小随关卡变化。
+    private getBoardTileScale(): number {
+        return Constants.MahjongBoard.BoardScale * this.boardFitRatio;
+    }
+
+    // 棋盘自适应:
+    // 优先读取 pNode 经过 Widget/屏幕适配后的真实 UITransform 尺寸,
+    // 再按关卡 bbox 算 fitRatio。牌位置和大小随关卡 bbox 同比变化。
     // 棋盘 anchor 0.5 居中,小棋盘四周自然形成对称留白。
-    // (Sprite 是 9-slice + CUSTOM sizeMode,父节点 gameLayer 无 Layout,改 contentSize 安全)
     private fitBoardAndResizePnode(positions: LevelJsonPosition[]) {
+        this.boardFitRatio = 1;
         const ui = this.mahjongPnode.getComponent(UITransform);
         if (!ui || positions.length === 0) return;
 
@@ -314,35 +324,73 @@ export class GameCtrl extends Component {
 
         const halfStepX = Constants.MahjongBoard.TileStepX / 2;
         const halfStepY = Constants.MahjongBoard.TileStepY / 2;
-        // 一张牌在 BoardScale 下的视觉占位,作 bbox 端点的留白
-        const tileVisualW = Constants.MahjongBoard.TileStepX * Constants.MahjongBoard.BoardScale;
-        const tileVisualH = Constants.MahjongBoard.TileStepY * Constants.MahjongBoard.BoardScale;
+        // 用真实牌预制体尺寸估算 bbox 端点留白,避免按步距低估牌宽高导致默认分辨率溢出。
+        const tileSize = this.getMahjongItemVisualSize();
+        const tileVisualW = tileSize.width * Constants.MahjongBoard.BoardScale;
+        const tileVisualH = tileSize.height * Constants.MahjongBoard.BoardScale;
         const boardW = (maxHC - minHC) * halfStepX + tileVisualW;
         const boardH = (maxHR - minHR) * halfStepY + tileVisualH;
 
-        const idealW = Constants.MahjongBoard.IdealPnodeWidth;
-        const idealH = Constants.MahjongBoard.IdealPnodeHeight;
+        const area = this.getBoardFitArea(ui);
         const padding = Constants.MahjongBoard.BoardPadding;
-        // 棋盘可占用区域 = 视觉尺寸去掉 padding
-        const usableW = idealW - padding * 2;
-        const usableH = idealH - padding * 2;
+        // 棋盘可占用区域 = 运行时真实尺寸去掉 padding
+        const usableW = Math.max(1, area.width - padding * 2);
+        const usableH = Math.max(1, area.height - padding * 2);
 
-        // scale 让棋盘装进可用区。小棋盘 ≤1 不放大,只可能缩小;clamp 到下限防糊
-        let scale = Math.min(usableW / boardW, usableH / boardH, 1);
-        scale = Math.max(scale, Constants.MahjongBoard.MinBoardFitRatio);
+        // fitRatio 让棋盘尽量填满可用区,再用上下限限制极端关卡的视觉跳变。
+        const fitRatio = Utils.clamp(
+            Math.min(usableW / boardW, usableH / boardH),
+            Constants.MahjongBoard.MinBoardFitRatio,
+            Constants.MahjongBoard.MaxBoardFitRatio,
+        );
+        this.boardFitRatio = fitRatio;
 
-        this.mahjongPnode.setScale(scale, scale, 1);
-        // pNode 视觉尺寸固定 = ideal,而视觉 = contentSize × scale,所以 contentSize = ideal / scale
-        ui.setContentSize(idealW / scale, idealH / scale);
+        // 不缩放 pNode 本身,避免棋盘牌飞到 flyLayer/slot 时因换父节点产生缩放跳变。
+        this.mahjongPnode.setScale(1, 1, 1);
 
         console.log(
             `[BoardFit] level=${this.nowLevel} ` +
             `halfSpan=(${maxHC - minHC}×${maxHR - minHR}) ` +
             `boardPx=(${boardW.toFixed(1)}×${boardH.toFixed(1)}) ` +
-            `scale=${scale.toFixed(3)} ` +
-            `boardVisible=(${(boardW * scale).toFixed(1)}×${(boardH * scale).toFixed(1)}) ` +
-            `pNodeVisible=(${idealW}×${idealH})`
+            `tilePx=(${tileVisualW.toFixed(1)}×${tileVisualH.toFixed(1)}) ` +
+            `fitArea=(${area.width.toFixed(1)}×${area.height.toFixed(1)}) ` +
+            `fitRatio=${fitRatio.toFixed(3)} ` +
+            `boardVisible=(${(boardW * fitRatio).toFixed(1)}×${(boardH * fitRatio).toFixed(1)}) ` +
+            `usable=(${usableW.toFixed(1)}×${usableH.toFixed(1)})`
         );
+    }
+
+    private getMahjongItemVisualSize(): { width: number; height: number } {
+        const prefabNode = this.mahjongItem?.data as Node | null;
+        const bgNode = prefabNode?.getChildByName('bg');
+        const ui = bgNode?.getComponent(UITransform) || prefabNode?.getComponent(UITransform);
+        if (ui && ui.contentSize.width > 0 && ui.contentSize.height > 0) {
+            return {
+                width: ui.contentSize.width,
+                height: ui.contentSize.height,
+            };
+        }
+
+        return {
+            width: Constants.MahjongBoard.FallbackTileWidth,
+            height: Constants.MahjongBoard.FallbackTileHeight,
+        };
+    }
+
+    private getBoardFitArea(ui: UITransform): { width: number; height: number } {
+        let width = ui.contentSize.width;
+        let height = ui.contentSize.height;
+        const parentUi = this.mahjongPnode.parent?.getComponent(UITransform);
+        if (parentUi && parentUi.contentSize.width > 0 && parentUi.contentSize.height > 0) {
+            width = Math.max(width, parentUi.contentSize.width);
+            height = Math.max(height, parentUi.contentSize.height);
+        }
+        if (width > 0 && height > 0) return { width, height };
+
+        return {
+            width: Constants.MahjongBoard.FallbackFitWidth,
+            height: Constants.MahjongBoard.FallbackFitHeight,
+        };
     }
 
     // ==========================================
@@ -352,12 +400,24 @@ export class GameCtrl extends Component {
     // 闲置 10s 后被 scheduleOnce 调起,随机挑一个引导按钮触发 UI 提示动画。
     // 用 arrow function 保证 this 绑定 + 引用稳定,这样 unschedule 能按引用命中
     private triggerHelpTips = () => {
-        if (this.gameState !== 'playing' || this.tipsActive) return;
+        if (!this.shouldUseIdleTips() || this.gameState !== 'playing' || this.tipsActive) return;
         this.tipsActive = true;
         // 1=解锁槽位按钮,2=换牌按钮,随机选一个
         const tipsIndex = Math.random() < 0.5 ? 1 : 2;
         director.emit(Constants.eventNames.EventShowTipsAnimator, tipsIndex);
     };
+
+    private isGuideLevel(): boolean {
+        return this.nowLevel === GameCtrl.GUIDE_LEVEL;
+    }
+
+    private shouldUseCombo(): boolean {
+        return !this.isGuideLevel();
+    }
+
+    private shouldUseIdleTips(): boolean {
+        return !this.isGuideLevel();
+    }
 
     // UI 端玩家点击提示按钮后回传,解锁"动画中不重启计时"的状态;
     // 下次玩家点牌时 onTileTap 会重新排 10s schedule
@@ -376,33 +436,39 @@ export class GameCtrl extends Component {
         if (this.gameState !== 'playing' || this.dealingTiles || this.shuffleAnimating || tile.collected || tile.removed) {
             return;
         }
-        const blocker = this.findBlockerTile(tile);
-        if (blocker) {
-            console.log(
-                `[TapBlocked] tile uid=${tile.uid} type=${tile.type} ` +
-                `xyz=(col=${tile.col}, row=${tile.row}, z=${tile.layer}) ` +
-                `nodePos=(${tile.boardPos.x.toFixed(2)}, ${tile.boardPos.y.toFixed(2)}) ` +
-                `<-- blocker uid=${blocker.uid} type=${blocker.type} ` +
-                `xyz=(col=${blocker.col}, row=${blocker.row}, z=${blocker.layer}) ` +
-                `nodePos=(${blocker.boardPos.x.toFixed(2)}, ${blocker.boardPos.y.toFixed(2)}) ` +
-                `delta=(${(blocker.boardPos.x - tile.boardPos.x).toFixed(2)}, ${(blocker.boardPos.y - tile.boardPos.y).toFixed(2)})`
-            );
-            return;
-        }
+        // const blocker = this.findBlockerTile(tile);
+        // if (blocker) {
+        //     console.log(
+        //         `[TapBlocked] tile uid=${tile.uid} type=${tile.type} ` +
+        //         `xyz=(col=${tile.col}, row=${tile.row}, z=${tile.layer}) ` +
+        //         `nodePos=(${tile.boardPos.x.toFixed(2)}, ${tile.boardPos.y.toFixed(2)}) ` +
+        //         `<-- blocker uid=${blocker.uid} type=${blocker.type} ` +
+        //         `xyz=(col=${blocker.col}, row=${blocker.row}, z=${blocker.layer}) ` +
+        //         `nodePos=(${blocker.boardPos.x.toFixed(2)}, ${blocker.boardPos.y.toFixed(2)}) ` +
+        //         `delta=(${(blocker.boardPos.x - tile.boardPos.x).toFixed(2)}, ${(blocker.boardPos.y - tile.boardPos.y).toFixed(2)})`
+        //     );
+        //     return;
+        // }
 
         // 提示动画播放期间玩家点了牌:中断呼吸动画并解锁计时,然后跟正常点牌一样重排 10s 闲置计时
-        if (this.tipsActive) {
-            this.tipsActive = false;
-            director.emit(Constants.eventNames.EventStopTipsAnimator);
+        if (this.shouldUseIdleTips()) {
+            if (this.tipsActive) {
+                this.tipsActive = false;
+                director.emit(Constants.eventNames.EventStopTipsAnimator);
+            }
+            this.unschedule(this.triggerHelpTips);
+            this.scheduleOnce(this.triggerHelpTips, GameCtrl.IDLE_TIPS_SECONDS);
+        } else {
+            this.clearIdleTips();
         }
-        this.unschedule(this.triggerHelpTips);
-        this.scheduleOnce(this.triggerHelpTips, GameCtrl.IDLE_TIPS_SECONDS);
 
         if (tile.item.playTapFeedback) tile.item.playTapFeedback();
 
         const targetBox = this.findMatchingTargetBox(tile.type);
         if (targetBox) {
             this.moveTileToTarget(tile, targetBox);
+        } else if (this.isGuideLevel()) {
+            tile.item.playErrorFeedback();
         } else {
             this.moveTileToSlot(tile);
         }
@@ -410,6 +476,10 @@ export class GameCtrl extends Component {
 
     private moveTileToTarget(tile: TileRecord, box: TargetBox) {
         if (box.refreshing || box.progress + box.pending >= box.required) {
+            if (this.isGuideLevel()) {
+                tile.item.playErrorFeedback();
+                return;
+            }
             if (this.slots.indexOf(tile) < 0) this.moveTileToSlot(tile);
             return;
         }
@@ -453,6 +523,7 @@ export class GameCtrl extends Component {
                 tile.node.setSiblingIndex(160 + box.progress + 1);
                 //屏蔽触摸方法
                 tile.item.disableTileTouch();
+                Utils.onVibrationShort();
 
                 this.onTargetCollected(box);
             })
@@ -522,6 +593,8 @@ export class GameCtrl extends Component {
                         //屏蔽触摸方法
                         tile.item.disableTileTouch();
                         tile.node.setSiblingIndex(100 + this.slots.indexOf(tile));
+                        // 只有真正"飞进来"的那张牌算落位反馈,其余靠 reparent/位移补位的牌不算
+                        if (tile === flyingTile) Utils.onVibrationShort();
                     })
                     .start();
                 continue;
@@ -567,6 +640,9 @@ export class GameCtrl extends Component {
         box.progress = Math.min(box.required, box.progress + 1);
 
         if (box.progress >= box.required) {
+            if (this.isGuideLevel()) {
+                director.emit(Constants.eventNames.EventHideGuide);
+            }
             this.updateCombo();
             // 等抖动峰值过去再触发槽位移出,避免完成那一下还没看清就被移出。
             // 不提前置 refreshing:progress 已等于 required,findMatchingTargetBox 和 moveTileToTarget
@@ -683,6 +759,12 @@ export class GameCtrl extends Component {
     private winLevel() {
         this.gameState = 'win';
         this.clearIdleTips();
+        if (this.nowLevel == 0) {//引导关卡直接下一关
+            this.scheduleOnce(() => {
+                this.onEventWinNextLevel();
+            }, 0.8)
+            return;
+        }
         LayerManager.instance.showUI('win', this.elapsedTime);
     }
 
@@ -697,7 +779,7 @@ export class GameCtrl extends Component {
             // opentype 为空 = 还有未解锁的槽位,"继续游戏" 帮玩家解锁一个槽位
             // opentype 非空 = 所有槽位都解锁了,"继续游戏" 清空底部 slot
             const opentype = allUnlocked ? 'clearSlot' : null;
-            LayerManager.instance.showUI('failure', opentype,this.slotNode);
+            LayerManager.instance.showUI('failure', opentype, this.slotNode);
             return;
         }
 
@@ -779,8 +861,8 @@ export class GameCtrl extends Component {
         for (const other of this.tiles) {
             if (other === tile || other.collected || other.removed || other.layer <= tile.layer) continue;
             // 判断是否在同层级上方遮挡 (物理碰撞盒检查)
-            if (Math.abs(other.boardPos.x - tile.boardPos.x) < Constants.MahjongBoard.TileStepX * 0.82 &&
-                Math.abs(other.boardPos.y - tile.boardPos.y) < Constants.MahjongBoard.TileStepY * 0.82) {
+            if (Math.abs(other.boardPos.x - tile.boardPos.x) < Constants.MahjongBoard.TileStepX * this.boardFitRatio * 0.82 &&
+                Math.abs(other.boardPos.y - tile.boardPos.y) < Constants.MahjongBoard.TileStepY * this.boardFitRatio * 0.82) {
                 return other;
             }
         }
@@ -818,6 +900,7 @@ export class GameCtrl extends Component {
 
         for (let i = 0; i < this.tiles.length; i++) {
             const tile = this.tiles[i];
+            const boardScale = this.getBoardTileScale();
             // 计算当前这张牌的启动延迟
             const delay = startDelayTime + i * startAddMoveTime;
 
@@ -827,14 +910,14 @@ export class GameCtrl extends Component {
 
             // 初始状态：放置在屏幕左右两侧，Y 轴保持与目标一致，稍微缩小
             tile.node.setPosition(startX, tile.boardPos.y, tile.boardPos.z);
-            tile.node.setScale(Constants.MahjongBoard.BoardScale * 0.92, Constants.MahjongBoard.BoardScale * 0.92, 1);
+            tile.node.setScale(boardScale * 0.92, boardScale * 0.92, 1);
 
             // 执行横向飞入缓动
             tween(tile.node)
                 .delay(delay)
                 .to(startMoveTime, {
                     position: tile.boardPos,
-                    scale: new Vec3(Constants.MahjongBoard.BoardScale, Constants.MahjongBoard.BoardScale, 1)
+                    scale: new Vec3(boardScale, boardScale, 1)
                 }, {}) // 横向飞入配合 backOut 会有一种发牌“急停撞击”的干脆手感，如果不喜欢可以改为 'quadOut'
                 .start();
         }
@@ -1148,6 +1231,13 @@ export class GameCtrl extends Component {
     }
 
     private updateCombo() {
+        if (!this.shouldUseCombo()) {
+            this.comboTimes = 0;
+            this.lastComboAt = 0;
+            this.comboEmitPending = false;
+            return;
+        }
+
         const now = Date.now();
         this.comboTimes = (now - this.lastComboAt <= 5000) ? this.comboTimes + 1 : 1;
         this.lastComboAt = now;
@@ -1297,8 +1387,9 @@ export class GameCtrl extends Component {
         // 撤回飞回棋盘的飞行声,跟 tween 起手对齐
         AudioManager.instance.playOneShot(AudioClipNames.taskFly);
 
+        const boardScale = this.getBoardTileScale();
         tween(tile.node)
-            .to(0.16, { position: tile.boardPos, scale: new Vec3(Constants.MahjongBoard.BoardScale, Constants.MahjongBoard.BoardScale, 1) })
+            .to(0.16, { position: tile.boardPos, scale: new Vec3(boardScale, boardScale, 1) })
             .call(() => {
                 // 撤回落定后再标记可点击 + 重新启用触摸
                 tile.collected = false;
@@ -1308,6 +1399,7 @@ export class GameCtrl extends Component {
                 this.updatePlayableStates();
                 this.updateHud();
                 this.checkEndState();
+                Utils.onVibrationShort();
             })
             .start();
         this.arrangeSlotTiles(0.12 + 0.1);
@@ -1387,7 +1479,7 @@ export class GameCtrl extends Component {
         this.shuffleAnimating = true;
         director.emit(Constants.eventNames.EventShowShuffleTileEffect, {
             worldPosition: topTile.node.worldPosition.clone(),
-            scale: Constants.MahjongBoard.BoardScale,
+            scale: this.getBoardTileScale(),
             duration,
         });
 

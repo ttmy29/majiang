@@ -25,6 +25,7 @@ export class MahjongItem extends Component {
     // start() 跑过一次后置 true。用于区分"首次激活（由 start 接管阴影挂载）"
     // 和"节点池/父节点反激活后重启（onEnable 需要主动挂回）"两种场景
     private _started: boolean = false;
+    private boardScale = Constants.MahjongBoard.BoardScale;
 
     // 同 z 层容器内的深度排序。row+col 合成单一深度键:
     // 屏幕越靠"下+右"(row+col 越大)画得越在前面。
@@ -256,6 +257,10 @@ export class MahjongItem extends Component {
         this.setPlayable(true);
     }
 
+    setBoardScale(scale: number) {
+        this.boardScale = scale;
+    }
+
     private hideLegacyIcon() {
         const iconSprite = this.iconNode?.getComponent(Sprite);
         if (iconSprite?.isValid) iconSprite.spriteFrame = null;
@@ -336,8 +341,9 @@ export class MahjongItem extends Component {
         // 之前这里写死的 80/100 是按 BoardScale=0.75 时手调出来的像素值,
         // 跟 GameCtrl 的 TileStepX*0.82=62.3 / TileStepY*0.82=77.9 略有出入,
         // 会出现"GameCtrl 算挡 / MahjongItem 算不挡"的判定不一致,统一掉。
-        const blockLimitX = Constants.MahjongBoard.TileStepX * 0.82;
-        const blockLimitY = Constants.MahjongBoard.TileStepY * 0.82;
+        const fitRatio = this.boardScale / Constants.MahjongBoard.BoardScale;
+        const blockLimitX = Constants.MahjongBoard.TileStepX * fitRatio * 0.82;
+        const blockLimitY = Constants.MahjongBoard.TileStepY * fitRatio * 0.82;
 
         // 容器化后只能从同层容器看到同层 tiles,上层 tile 在兄弟 _layer_<M>_ 容器里
         for (const layerContainer of pNode.children) {
@@ -364,6 +370,10 @@ export class MahjongItem extends Component {
 
     playTapFeedback() {
         this.stopTouchTween();
+    }
+
+    playErrorFeedback() {
+        this.playBlockedFeedback();
     }
 
     /**
@@ -495,8 +505,7 @@ export class MahjongItem extends Component {
     }
 
     private getBoardScale(): Vec3 {
-        const scale = Constants.MahjongBoard.BoardScale;
-        return new Vec3(scale, scale, 1);
+        return new Vec3(this.boardScale, this.boardScale, 1);
     }
 
     private bringToTop() {

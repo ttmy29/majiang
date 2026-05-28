@@ -1,4 +1,5 @@
-import { Node, UITransform, Vec3 } from 'cc';
+import { Node, sys, UITransform, Vec3 } from 'cc';
+import { StorageKey, StorageManager } from '../manager/StorageManager';
 
 // 项目通用工具方法集合：
 // - 纯函数/纯节点操作，零业务状态
@@ -58,5 +59,34 @@ export class Utils {
             items[j] = tmp;
         }
         return items;
+    }
+
+    // 震动开关 + 平台支持都缓存在内存里:开关由设置面板的 setVibrateEnabled 同步更新,
+    // 平台/wx 探测是恒定的,首次调用时一次性求值。这样每次落位回调只比两个 bool,
+    // 不再走 sys.localStorage 和 sys.platform 那条链
+    private static _vibrateEnabled: boolean | null = null;
+    private static _vibrateSupported: boolean | null = null;
+
+    public static onVibrationShort() {
+        if (Utils._vibrateSupported === null) {
+            //@ts-ignore
+            Utils._vibrateSupported = sys.platform === sys.Platform.WECHAT_GAME && typeof wx !== 'undefined' && !!wx.vibrateShort;
+        }
+        if (!Utils._vibrateSupported) return;
+
+        if (Utils._vibrateEnabled === null) {
+            Utils._vibrateEnabled = StorageManager.instance.getBoolean(StorageKey.Vibrate, true);
+        }
+        if (!Utils._vibrateEnabled) return;
+
+        //@ts-ignore
+        wx.vibrateShort({ type: 'light' });
+    }
+
+    // 设置面板切换震动开关时调用:同步内存缓存 + 持久化到 localStorage,
+    // 让 UI 层不必直接戳 StorageManager,也避免下一次震动还得回查存储
+    public static setVibrateEnabled(enabled: boolean) {
+        Utils._vibrateEnabled = enabled;
+        StorageManager.instance.setBoolean(StorageKey.Vibrate, enabled);
     }
 }

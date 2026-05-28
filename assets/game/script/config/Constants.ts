@@ -7,6 +7,8 @@ const Constants = {
         // —— 以下事件由 GameCtrl emit、UIGameLayer 渲染 ——
         // 一次性初始化，把 GameCtrl 的 mahjongItem 预制体和 iconFrames 资源 map 交给 UI 层
         EventGameUiInit: 'GameUiInit',
+        // 关卡开始:payload 是当前关卡值
+        EventLevelStart: 'LevelStart',
         // HUD（关卡 / 剩余 / 槽位 / 倒计时）
         EventHudUpdate: 'HudUpdate',
         // Toast 文案
@@ -26,6 +28,7 @@ const Constants = {
         // 闲置帮助提示:payload 是 index(1=解锁槽位按钮,2=换牌按钮)
         EventShowTipsAnimator: 'ShowTipsAnimator',
         EventShowShuffleTileEffect: 'ShowShuffleTileEffect',
+        EventHideGuide: 'HideGuide',
         // 帮助提示动画结束:UI -> GameCtrl,玩家点击提示按钮后通知,用于解除"动画中不重启计时"的锁
         EventTipsAnimatorEnd: 'TipsAnimatorEnd',
         // 强制中断帮助提示:GameCtrl -> UI,玩家在动画播放中点了麻将牌,停止呼吸动画
@@ -60,7 +63,8 @@ const Constants = {
     prefab: {
         setting: 'prefab/setting',
         failure: 'prefab/failure',
-        win: 'prefab/win'
+        win: 'prefab/win',
+        guide: 'prefab/guide'
     },
     GameBundleName: 'game',
     MahjongBoard: {
@@ -106,16 +110,22 @@ const Constants = {
         // 槽位麻将牌实例的统一缩放比例 36。
         SlotScale: 0.32,
         // ==================== 棋盘自适应布局 ====================
-        // 思路:pNode 边框对所有关卡固定显示 IdealPnodeWidth × IdealPnodeHeight,
-        // 棋盘按 setScale 缩到能装进 (Ideal - 2*Padding) 的可用区域。
-        // 小关 scale=1 不缩牌、大关 scale<1 缩牌,但边框视觉永远是同一个矩形 ——
+        // 思路:优先读取 pNode 运行时真实尺寸,再用关卡 bbox 计算 fitRatio。
+        // 棋盘按 fitRatio 缩放牌的位置和大小,装进真实尺寸 - 2*Padding 的可用区域。
+        // 小关允许适当放大,大关允许适当缩小,但边框视觉永远是同一个矩形 ——
         // 关与关之间布局一致,不会出现"小关旷/大关瘦"的尺寸跳变。
-        IdealPnodeWidth: 600,
-        IdealPnodeHeight: 580,
-        // 棋盘到边框的视觉内边距(像素,在 pNode 视觉尺度下)
-        BoardPadding: 50,
+        // 只有运行时取不到 UITransform 尺寸时才使用兜底值。
+        FallbackFitWidth: 600,
+        FallbackFitHeight: 580,
+        // 只有取不到麻将牌预制体尺寸时才使用兜底值。
+        FallbackTileWidth: 149,
+        FallbackTileHeight: 186,
+        // 棋盘到边框的视觉内边距(像素,在 pNode 视觉尺度下)。调大更留白,调小牌更大。
+        BoardPadding: 0,
         // 极端关卡(超大 bbox)缩放下限,避免牌缩得看不清。低于这个值就不再缩了(容许略微溢出)
         MinBoardFitRatio: 0.5,
+        // 小棋盘放大上限,避免少牌关被放得过满或飞牌手感跳变太大
+        MaxBoardFitRatio: 1.18,
     },
 };
 

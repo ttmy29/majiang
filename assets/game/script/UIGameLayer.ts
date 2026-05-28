@@ -1,4 +1,4 @@
-import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, Widget } from 'cc';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
@@ -67,9 +67,9 @@ export class UIGameLayer extends Component {
     @property(Node)
     switchTipsNode: Node = null!;
     @property(Node)
-    comboNode:Node = null!;
+    comboNode: Node = null!;
     @property(Node)
-    comboLabelNode:Node = null!;
+    comboLabelNode: Node = null!;
 
     // 每个槽位在场景里的原始位置，MoveIn 时回到自己的原点而不是写死坐标
     private slotOriginPositions: Vec3[] = [];
@@ -111,10 +111,15 @@ export class UIGameLayer extends Component {
     private shuffleEffectOpacity: UIOpacity | null = null;
     private shuffleEffectClip: AnimationClip | null = null;
     private shuffleEffectSeq = 0;
+    private isGuideLevel = false;
+    private hasLevelUiMode = false;
+    private slotRootTop = 0;
+    private guideNode: Node | null = null;
 
     protected onLoad() {
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
-        this.setupHudLabels();
+        this.slotRootTop = this.getSlotRootWidget()?.top ?? 0;
+        //this.setupHudLabels();
         this.setupComboNode();
         this.preloadShuffleEffectClip();
     }
@@ -177,6 +182,7 @@ export class UIGameLayer extends Component {
 
     onEnable() {
         this.registerGlobalEvent(true);
+        if (this.hasLevelUiMode) this.applyLevelUiMode();
     }
 
 
@@ -190,6 +196,7 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventComboUpdate, this.onEventComboUpdate, this);
             director.on(Constants.eventNames.EventShowToast, this.onEventShowToast, this);
             director.on(Constants.eventNames.EventGameUiInit, this.onEventGameUiInit, this);
+            director.on(Constants.eventNames.EventLevelStart, this.onEventLevelStart, this);
             director.on(Constants.eventNames.EventRenderSlot, this.onEventRenderSlot, this);
             director.on(Constants.eventNames.EventClearSlot, this.onEventClearSlot, this);
             director.on(Constants.eventNames.EventResetSlots, this.onEventResetSlots, this);
@@ -197,6 +204,7 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
             director.on(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
             director.on(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
+            director.on(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
             director.on(Constants.eventNames.EventStopTipsAnimator, this.onStopTipsAnimator, this);
         } else {
             director.off(Constants.eventNames.EventShowSlotShake, this.onEventShowSlotShake, this);
@@ -207,6 +215,7 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventComboUpdate, this.onEventComboUpdate, this);
             director.off(Constants.eventNames.EventShowToast, this.onEventShowToast, this);
             director.off(Constants.eventNames.EventGameUiInit, this.onEventGameUiInit, this);
+            director.off(Constants.eventNames.EventLevelStart, this.onEventLevelStart, this);
             director.off(Constants.eventNames.EventRenderSlot, this.onEventRenderSlot, this);
             director.off(Constants.eventNames.EventClearSlot, this.onEventClearSlot, this);
             director.off(Constants.eventNames.EventResetSlots, this.onEventResetSlots, this);
@@ -214,6 +223,7 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
             director.off(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
             director.off(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
+            director.off(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
             director.off(Constants.eventNames.EventStopTipsAnimator, this.onStopTipsAnimator, this);
         }
     }
@@ -221,6 +231,59 @@ export class UIGameLayer extends Component {
     onEventGameUiInit(payload: GameUiInitPayload) {
         this.mahjongItem = payload.mahjongItem;
         this.iconFrames = payload.iconFrames;
+    }
+
+    onEventLevelStart(level: number) {
+        this.hasLevelUiMode = true;
+        this.isGuideLevel = level === 0;
+        this.applyLevelUiMode();
+        this.setGuideVisible(this.isGuideLevel, level);
+    }
+
+    private onEventHideGuide() {
+        this.setGuideVisible(false, 0);
+    }
+
+    private getSlotRootWidget(): Widget | null {
+        return this.slotNodeArr[0]?.parent?.getComponent(Widget) || null;
+    }
+
+    private applyLevelUiMode() {
+        if (this.isGuideLevel) {
+            this.resetComboNode();
+            this.onStopTipsAnimator();
+        }
+
+        if (this.slotNodeArr[0]) this.slotNodeArr[0].active = !this.isGuideLevel;
+        if (this.slotNodeArr[3]) this.slotNodeArr[3].active = !this.isGuideLevel;
+        if (this.slotNodeArr[4]) this.slotNodeArr[4].active = !this.isGuideLevel;
+
+        const levelNode = this.node.getChildByName('levelLabel');
+        if (levelNode) levelNode.active = !this.isGuideLevel;
+
+        const widget = this.getSlotRootWidget();
+        if (widget) {
+            widget.top = this.isGuideLevel ? 300 : this.slotRootTop;
+            widget.updateAlignment();
+        }
+
+        if (this.undoButton) this.undoButton.active = !this.isGuideLevel;
+        if (this.unlockButton) this.unlockButton.active = !this.isGuideLevel;
+        if (this.switchButton) this.switchButton.active = !this.isGuideLevel;
+    }
+
+    private setGuideVisible(visible: boolean, level: number) {
+        if (visible) {
+            if (!this.guideNode?.isValid) {
+                this.guideNode = LayerManager.instance.showUI('guide', level);
+            }
+            return;
+        }
+
+        if (this.guideNode?.isValid) {
+            this.guideNode.destroy();
+        }
+        this.guideNode = null;
     }
 
     onEventRenderSlot(payload: RenderSlotPayload) {
@@ -364,7 +427,7 @@ export class UIGameLayer extends Component {
     // 同时把 slot3/slot4 的 box_2/lock 重新点亮(被 onEventResetSlots 翻成 unlocked 时关掉的),
     // 让锁着的两个槽位回到"盖着箱子+挂锁"的初始外观,lock 顶到最上层避免被 box_2 盖住
     onEventCleanSlotContainers() {
-        const keep = ['item1', 'item2', 'item3', 'item4', 'box_2', 'lock'];
+        const keep = ['item1', 'item2', 'item3', 'item4', 'box_2', 'lock',"motionStreak"];
         for (let i = 1; i <= 4; i++) {
             const slot = this.slotNodeArr[i];
             if (!slot) continue;
@@ -384,9 +447,11 @@ export class UIGameLayer extends Component {
                 }
             }
         }
+        this.applyLevelUiMode();
     }
 
     onEventHudUpdate(payload: HudPayload) {
+        return
         this.targetLabel.string = '';
         this.targetLabel.node.active = true;
 
@@ -523,17 +588,17 @@ export class UIGameLayer extends Component {
         //     .start();
 
 
-       tween(targetNode)
-        .delay(startDelay)
-        // 第一段：大幅缩短到 0.05s。由于速度极快，1.2% 的形变会一闪而过，形成清脆的硬质弹性
-        .to(0.05, { scale: new Vec3(1.012, 0.988, 1) }, { easing: 'sineOut' })
+        tween(targetNode)
+            .delay(startDelay)
+            // 第一段：大幅缩短到 0.05s。由于速度极快，1.2% 的形变会一闪而过，形成清脆的硬质弹性
+            .to(0.05, { scale: new Vec3(1.012, 0.988, 1) }, { easing: 'sineOut' })
 
-        // 第二段：0.08s 快速反弹，形变压到极其微弱的 0.2%
-        .to(0.08, { scale: new Vec3(0.998, 1.002, 1) }, { easing: 'sineInOut' })
+            // 第二段：0.08s 快速反弹，形变压到极其微弱的 0.2%
+            .to(0.08, { scale: new Vec3(0.998, 1.002, 1) }, { easing: 'sineInOut' })
 
-        // 第三段：0.06s 迅速归位
-        .to(0.06, { scale: new Vec3(1, 1, 1) }, { easing: 'sineOut' })
-        .start();     
+            // 第三段：0.06s 迅速归位
+            .to(0.06, { scale: new Vec3(1, 1, 1) }, { easing: 'sineOut' })
+            .start();
 
     }
 
@@ -595,7 +660,7 @@ export class UIGameLayer extends Component {
                 lockTips.active = false;
             })
             .delay(0.2)
-            .call(()=>{
+            .call(() => {
                 lockTips.setPosition(new Vec3(0, 0, 0));
                 lockTips.setScale(new Vec3(1, 1, 1));
                 uiOpacity.opacity = 255;
@@ -628,6 +693,10 @@ export class UIGameLayer extends Component {
             console.warn(`[UIGameLayer] onEventShowSlotMoveOut 找不到 slotID 为 ${slotID} 的节点`);
             return;
         }
+        let  motionStreakNode = targetNode.getChildByName('motionStreak');
+        motionStreakNode.setPosition(new Vec3(140, 0, 0));
+        motionStreakNode.active = false;
+
 
         // 1. 停止当前节点的所有动画
         Tween.stopAllByTarget(targetNode);
@@ -658,6 +727,7 @@ export class UIGameLayer extends Component {
                 .call(() => {
                     // 盖子贴合的瞬间播放音效,跟视觉节奏对齐
                     AudioManager.instance.playOneShot(AudioClipNames.gaigaizi);
+             
                 })
                 .start();
 
@@ -681,6 +751,9 @@ export class UIGameLayer extends Component {
         tween(targetNode)
             .delay(0.3333)
             .to(0.3000, { position: new Vec3(targetPosX, targetNode.y, 0) }) // 大幅度斜向退场，飞出屏幕
+            .call(() => {
+                motionStreakNode.active = false;
+            })
             .start();
     }
 
@@ -690,6 +763,9 @@ export class UIGameLayer extends Component {
             console.warn(`[UIGameLayer] onEventShowSlotMoveIn 找不到 slotID 为 ${slotID} 的节点`);
             return;
         }
+        let  motionStreakNode = targetNode.getChildByName('motionStreak');
+        motionStreakNode.setPosition(new Vec3(-140, 0, 0));
+        motionStreakNode.active = false;
         targetNode.getChildByName('box_2').active = false;
         // 1. 停止 MoveOut 可能带来的遗留动画
         Tween.stopAllByTarget(targetNode);
@@ -701,11 +777,13 @@ export class UIGameLayer extends Component {
             .to(0.3, { position: originPos.clone() }, { easing: 'quadOut' })
             .call(() => {
                 targetNode.setPosition(originPos.clone());
+                motionStreakNode.active = false;
             })
             .start();
     }
 
     onSetUndoButtonStatus(status: boolean) {
+        if (this.isGuideLevel) return;
         if (status) {
             //this.undoButton.getComponent(Button)!.interactable = true;
             //this.undoButton.getChildByName("chehui").getComponent(Sprite)!.customMaterial = builtinResMgr.get<Material>('ui-sprite-gray-material');
