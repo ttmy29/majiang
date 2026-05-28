@@ -29,6 +29,8 @@ const Constants = {
         EventShowTipsAnimator: 'ShowTipsAnimator',
         EventShowShuffleTileEffect: 'ShowShuffleTileEffect',
         EventHideGuide: 'HideGuide',
+        // 引导关玩家成功点中一张目标牌:payload 是引导期间累计的成功点击数(从 1 开始)
+        EventGuideTileTapped: 'GuideTileTapped',
         // 帮助提示动画结束:UI -> GameCtrl,玩家点击提示按钮后通知,用于解除"动画中不重启计时"的锁
         EventTipsAnimatorEnd: 'TipsAnimatorEnd',
         // 强制中断帮助提示:GameCtrl -> UI,玩家在动画播放中点了麻将牌,停止呼吸动画

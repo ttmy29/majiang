@@ -93,6 +93,7 @@ export class GameCtrl extends Component {
     private hasStarted = false;
     private shuffleAnimating = false;
     private shuffleSeq = 0;
+    private _guideTapCount = 0;
     // 闲置帮助提示:玩家点牌后开始 10s 计时,期间没新点击就触发一次提示;
     // 提示动画播放期间(tipsActive=true)点牌不重启计时,等 UI 通知 End 才解除
     private tipsActive = false;
@@ -165,6 +166,7 @@ export class GameCtrl extends Component {
     private startLevel(level: number) {
         this.gameState = 'playing';
         this.nowLevel = level;
+        this._guideTapCount = 0;
         director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
         this.uidSeed = 1;
         this.tiles = [];
@@ -436,19 +438,9 @@ export class GameCtrl extends Component {
         if (this.gameState !== 'playing' || this.dealingTiles || this.shuffleAnimating || tile.collected || tile.removed) {
             return;
         }
-        // const blocker = this.findBlockerTile(tile);
-        // if (blocker) {
-        //     console.log(
-        //         `[TapBlocked] tile uid=${tile.uid} type=${tile.type} ` +
-        //         `xyz=(col=${tile.col}, row=${tile.row}, z=${tile.layer}) ` +
-        //         `nodePos=(${tile.boardPos.x.toFixed(2)}, ${tile.boardPos.y.toFixed(2)}) ` +
-        //         `<-- blocker uid=${blocker.uid} type=${blocker.type} ` +
-        //         `xyz=(col=${blocker.col}, row=${blocker.row}, z=${blocker.layer}) ` +
-        //         `nodePos=(${blocker.boardPos.x.toFixed(2)}, ${blocker.boardPos.y.toFixed(2)}) ` +
-        //         `delta=(${(blocker.boardPos.x - tile.boardPos.x).toFixed(2)}, ${(blocker.boardPos.y - tile.boardPos.y).toFixed(2)})`
-        //     );
-        //     return;
-        // }
+        if (this.isTileBlocked(tile)) {
+            return;
+        }
 
         // 提示动画播放期间玩家点了牌:中断呼吸动画并解锁计时,然后跟正常点牌一样重排 10s 闲置计时
         if (this.shouldUseIdleTips()) {
@@ -466,6 +458,17 @@ export class GameCtrl extends Component {
 
         const targetBox = this.findMatchingTargetBox(tile.type);
         if (targetBox) {
+            if (this.isGuideLevel()) {
+                this._guideTapCount += 1;
+                director.emit(Constants.eventNames.EventGuideTileTapped, {
+                    count: this._guideTapCount,
+                    type: tile.type,
+                    col: tile.col,
+                    row: tile.row,
+                    layer: tile.layer,
+                    worldPos: tile.node.worldPosition.clone(),
+                });
+            }
             this.moveTileToTarget(tile, targetBox);
         } else if (this.isGuideLevel()) {
             tile.item.playErrorFeedback();

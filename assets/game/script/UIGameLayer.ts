@@ -694,8 +694,10 @@ export class UIGameLayer extends Component {
             return;
         }
         let  motionStreakNode = targetNode.getChildByName('motionStreak');
-        motionStreakNode.setPosition(new Vec3(140, 0, 0));
-        motionStreakNode.active = false;
+        if (motionStreakNode) {
+            motionStreakNode.setPosition(new Vec3(140, 0, 0));
+            motionStreakNode.active = false;
+        }
 
 
         // 1. 停止当前节点的所有动画
@@ -752,7 +754,7 @@ export class UIGameLayer extends Component {
             .delay(0.3333)
             .to(0.3000, { position: new Vec3(targetPosX, targetNode.y, 0) }) // 大幅度斜向退场，飞出屏幕
             .call(() => {
-                motionStreakNode.active = false;
+                if (motionStreakNode) motionStreakNode.active = false;
             })
             .start();
     }
@@ -764,9 +766,12 @@ export class UIGameLayer extends Component {
             return;
         }
         let  motionStreakNode = targetNode.getChildByName('motionStreak');
-        motionStreakNode.setPosition(new Vec3(-140, 0, 0));
-        motionStreakNode.active = false;
-        targetNode.getChildByName('box_2').active = false;
+        if (motionStreakNode) {
+            motionStreakNode.setPosition(new Vec3(-140, 0, 0));
+            motionStreakNode.active = false;
+        }
+        const box2Node = targetNode.getChildByName('box_2');
+        if (box2Node) box2Node.active = false;
         // 1. 停止 MoveOut 可能带来的遗留动画
         Tween.stopAllByTarget(targetNode);
         // 任务箱滑回的起手音效
@@ -777,7 +782,7 @@ export class UIGameLayer extends Component {
             .to(0.3, { position: originPos.clone() }, { easing: 'quadOut' })
             .call(() => {
                 targetNode.setPosition(originPos.clone());
-                motionStreakNode.active = false;
+                if (motionStreakNode) motionStreakNode.active = false;
             })
             .start();
     }

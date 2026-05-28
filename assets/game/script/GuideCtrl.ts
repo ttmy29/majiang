@@ -1,4 +1,5 @@
-import { _decorator, Color, Component, find, Graphics, Node, Sprite, tween, UITransform, Vec3, Tween } from 'cc';
+import { _decorator, Color, Component, director, find, Graphics, Node, Sprite, tween, UITransform, Vec3, Tween } from 'cc';
+import { Constants } from './config/Constants';
 const { ccclass, property } = _decorator;
 
 interface HighlightRect {
@@ -67,18 +68,84 @@ export class GuideCtrl extends Component {
     @property
     reboundScale: number = 1.05;
 
+  
+
+    @property
+    tapMoveDuration: number = 0.15;
+
     private _initScale: Vec3 = new Vec3();
     private _initPos: Vec3 = new Vec3();
+    private _basePos: Vec3 = new Vec3();
     private _shadowRoot: Node | null = null;
     private _shadowGraphics: Graphics | null = null;
 
     start() {
         this._initScale.set(this.fingerNode.scale);
         this._initPos.set(this.fingerNode.position);
+        this._basePos.set(this._initPos);
 
         this.refreshGuideMask();
         this.scheduleOnce(() => this.refreshGuideMask(), 0);
         this.playSlideAndClickAnim();
+    }
+
+    onEnable() {
+        director.on(Constants.eventNames.EventGuideTileTapped, this.onGuideTileTapped, this);
+        find('Canvas/gameLayer/Game_btn_shezhi').active = false;
+    }
+
+    onDisable() {
+        director.off(Constants.eventNames.EventGuideTileTapped, this.onGuideTileTapped, this);
+        find('Canvas/gameLayer/Game_btn_shezhi').active = true;
+    }
+
+    private onGuideTileTapped(payload: { count: number; type: string; col: number; row: number; layer: number; worldPos: Vec3 }) {
+        const offset = this.getTapOffset(payload);
+        //console.log('onGuideTileTapped', payload);
+        if (!offset) return;
+        this._basePos.set(
+            this._initPos.x + offset.x,
+            this._initPos.y + offset.y,
+            this._initPos.z,
+        );
+        this.moveFingerTo(this._basePos);
+    }
+
+    private getTapOffset(payload: { count: number; type: string; col: number; row: number; layer: number; worldPos: Vec3 }): { x: number; y: number } | null {
+        if(payload.type == '4005' ){
+            if(payload .col == 4){ //点的是左边边的一个
+                if(payload.count == 1){
+                    return {
+                        x: -80,
+                        y: 0,
+                    };
+                }
+                if(payload.count == 2){
+                    return {
+                        x: -60,
+                        y: -120,
+                    };
+                }
+            }
+            if(payload .row == 3){ //点的是右边的一个
+                 if(payload.count == 2){
+                    return {
+                        x: -60,
+                        y: -120,
+                    };
+                }
+            }
+        }
+        return null;
+    }
+
+    private moveFingerTo(target: Vec3) {
+        Tween.stopAllByTarget(this.fingerNode);
+        const dest = target.clone();
+        tween(this.fingerNode)
+            .to(this.tapMoveDuration, { position: dest }, { easing: 'sineOut' })
+            .call(() => this.playSlideAndClickAnim())
+            .start();
     }
 
     public refresh() {
@@ -261,14 +328,14 @@ export class GuideCtrl extends Component {
         Tween.stopAllByTarget(this.fingerNode);
 
         const pressPos = new Vec3(
-            this._initPos.x + this.pressOffsetX,
-            this._initPos.y + this.pressOffsetY,
-            this._initPos.z,
+            this._basePos.x + this.pressOffsetX,
+            this._basePos.y + this.pressOffsetY,
+            this._basePos.z,
         );
         const reboundPos = new Vec3(
-            this._initPos.x + this.reboundOffsetX,
-            this._initPos.y + this.reboundOffsetY,
-            this._initPos.z,
+            this._basePos.x + this.reboundOffsetX,
+            this._basePos.y + this.reboundOffsetY,
+            this._basePos.z,
         );
         const pressScale = new Vec3(
             this._initScale.x * this.pressScale,
@@ -283,12 +350,12 @@ export class GuideCtrl extends Component {
 
         tween(this.fingerNode)
             .sequence(
-                tween(this.fingerNode).set({ position: this._initPos, scale: this._initScale }),
+                tween(this.fingerNode).set({ position: this._basePos, scale: this._initScale }),
                 // Match the reference tap: quick press, slight hold, elastic rebound, then settle.
                 tween(this.fingerNode).to(0.08, { position: pressPos, scale: pressScale }, { easing: 'sineIn' }),
                 tween(this.fingerNode).delay(0.04),
                 tween(this.fingerNode).to(0.2, { position: reboundPos, scale: reboundScale }, { easing: 'backOut' }),
-                tween(this.fingerNode).to(0.16, { position: this._initPos, scale: this._initScale }, { easing: 'sineInOut' }),
+                tween(this.fingerNode).to(0.16, { position: this._basePos, scale: this._initScale }, { easing: 'sineInOut' }),
                 tween(this.fingerNode).delay(0.5)
             )
             .repeatForever()
