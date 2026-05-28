@@ -104,8 +104,12 @@ export class MahjongItem extends Component {
         }
 
         // 把阴影抽到独立渲染层：所有阴影先于所有牌身渲染，
-        // 相邻牌的阴影会被对方的牌身自然遮住，消除相邻处的暗带
-        this.attachShadowToLayer();
+        // 相邻牌的阴影会被对方的牌身自然遮住，消除相邻处的暗带。
+        // 只有真正落在棋盘上的 tile 才挂阴影 —— 进度恢复时 slot/target 上的牌
+        // 也会走 start(),若无条件挂阴影会把 shadowNode 误挂进 slot/target 容器里
+        if (this.isOnBoard()) {
+            this.attachShadowToLayer();
+        }
 
         // 延迟一帧计算阴影状态，确保周围的兄弟节点都已经完全实例化并绑定了行列数据
         this.scheduleOnce(() => {

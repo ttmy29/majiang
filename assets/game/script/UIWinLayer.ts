@@ -2,6 +2,7 @@ import { _decorator, Color, Component, director, Label, Node, sp, tween, UIOpaci
 import { LayerManager } from './manager/LayerManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
+import { ProgressManager } from './manager/ProgressManager';
 const { ccclass, property } = _decorator;
 
 @ccclass('UIWinLayer')
@@ -142,6 +143,8 @@ export class UIWinLayer extends Component {
     OnBtoonGoHomeClick() {
         AudioManager.instance.playClick();
         this.onButonCloseClick();
+        // 胜利已经在 winLevel 里 saveLevel(next)+clearSnapshot,这里再清一次防御
+        ProgressManager.clearSnapshot();
         LayerManager.instance.showStartLayer();
     }
 }

@@ -2,6 +2,7 @@ import { _decorator, Component, director, Label, Node, tween, UIOpacity, Vec3 } 
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
+import { ProgressManager } from './manager/ProgressManager';
 const { ccclass, property } = _decorator;
 
 @ccclass('UIFailureLayer')
@@ -127,6 +128,8 @@ export class UIFailureLayer extends Component {
     onButonCloseClick() {
         AudioManager.instance.playClick();
         this.playCloseAnimation();
+        // 关失败弹窗回主菜单 = 放弃本局 → 清掉中途快照,下次从这关 fresh 开始
+        ProgressManager.clearSnapshot();
         LayerManager.instance.showStartLayer();
     }
 

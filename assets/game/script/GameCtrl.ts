@@ -1,10 +1,11 @@
-import { _decorator, assetManager, Component, director, instantiate, Label, Node, Prefab, SpriteFrame, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, Component, director, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
 import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAllLevels } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
+import { ProgressManager, ProgressSnapshot, TileKey, TileSnap } from './manager/ProgressManager';
 import { Utils } from './util/Utils';
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
@@ -93,6 +94,9 @@ export class GameCtrl extends Component {
     private hasStarted = false;
     private shuffleAnimating = false;
     private shuffleSeq = 0;
+    // 中途快照保存标记：每次玩家操作 settle 后置 true,下一帧统一写入 localStorage 合批
+    private snapshotDirty = false;
+    private snapshotFlushScheduled = false;
     private _guideTapCount = 0;
     // 闲置帮助提示:玩家点牌后开始 10s 计时,期间没新点击就触发一次提示;
     // 提示动画播放期间(tipsActive=true)点牌不重启计时,等 UI 通知 End 才解除
@@ -112,6 +116,8 @@ export class GameCtrl extends Component {
         director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
         director.on(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
         director.on(Constants.eventNames.EventWinNextLevel, this.onEventWinNextLevel, this);
+        // 切后台/关闭浏览器时强制同步一次快照,作为 checkpoint 保存的兜底
+        game.on(Game.EVENT_HIDE, this.onAppHide, this);
         this.initSceneRefs();
         this.preloadMahjongFrames(() => {
             if (this.iconIds.length === 0) {
@@ -130,7 +136,8 @@ export class GameCtrl extends Component {
                     iconFrames: this.iconFrames,
                 });
                 this.scheduleOnce(() => {
-                    this.startLevel(this.nowLevel);
+                    const { level, snapshot } = this.loadSavedProgress();
+                    this.startLevel(level, snapshot);
                     this.hasStarted = true;
                 }, 0);
             });
@@ -140,11 +147,31 @@ export class GameCtrl extends Component {
     // 退到 start 层后再点开始，靠 onEnable 触发整局重开
     protected onEnable() {
         if (!this.hasStarted) return;
-        this.startLevel(this.nowLevel);
+        // 必须每次重读 — 胜利后玩家回主页再进入,内存里的 nowLevel 还是旧值
+        const { level, snapshot } = this.loadSavedProgress();
+        this.startLevel(level, snapshot);
     }
 
     protected onDisable(): void {
     }
+
+    // 读关卡号 + 中途快照。引导关永远忽略快照(也清掉防御性 dump)
+    private loadSavedProgress(): { level: number; snapshot: ProgressSnapshot | null } {
+        const level = ProgressManager.loadLevel();
+        if (level === 0) {
+            ProgressManager.clearSnapshot();
+            return { level, snapshot: null };
+        }
+        const snapshot = ProgressManager.loadSnapshot();
+        return { level, snapshot };
+    }
+
+    private onAppHide = () => {
+        if (this.gameState !== 'playing' || this.isGuideLevel()) return;
+        // 切后台时 scheduleOnce 不再 tick,直接同步 flush
+        this.snapshotDirty = true;
+        this.flushSnapshot();
+    };
 
     update(deltaTime: number) {
         if (this.gameState !== 'playing' || !this.config) return;
@@ -163,7 +190,7 @@ export class GameCtrl extends Component {
         if (this.remainTime <= 0) this.failLevel('时间到');
     }
 
-    private startLevel(level: number) {
+    private startLevel(level: number, snapshot: ProgressSnapshot | null = null) {
         this.gameState = 'playing';
         this.nowLevel = level;
         this._guideTapCount = 0;
@@ -173,6 +200,8 @@ export class GameCtrl extends Component {
         this.slots = [];
         this.discardedTiles = [];
         this.actionHistory = [];
+        this.snapshotDirty = false;
+        this.snapshotFlushScheduled = false;
         this.refreshUndoButtonStatus();
         this.clearIdleTips();
         this.onUpDateUiInit();
@@ -199,10 +228,24 @@ export class GameCtrl extends Component {
 
         this.clearBoard();
         this.generateBoard();
-        this.playDealAnimation();
+
+        // 引导关永不恢复快照,确保引导流程从头跑一遍
+        const useSnapshot =
+            !this.isGuideLevel()
+            && snapshot
+            && snapshot.level === level
+            && snapshot.tiles.length === this.tiles.length;
+        if (useSnapshot) {
+            this.applySnapshot(snapshot!);
+        } else {
+            // 全新开局:写入关卡号 + 清掉旧快照,然后正常发牌
+            ProgressManager.saveLevel(level);
+            ProgressManager.clearSnapshot();
+            this.playDealAnimation();
+        }
         this.updatePlayableStates();
         this.updateHud();
-        this.showToast('关卡开始', 1);
+        if (!useSnapshot) this.showToast('关卡开始', 1);
     }
 
     private generateBoard() {
@@ -558,7 +601,10 @@ export class GameCtrl extends Component {
 
         // 满槽情况下也走完整飞行动画,等牌真正落进槽位再判失败,
         // 否则失败弹窗会在牌还没飞过去时就盖上来
-        this.scheduleOnce(() => this.checkEndState(), isSlotFull ? 0.16 + 0.1 + 0.05 : 0.18);
+        this.scheduleOnce(() => {
+            this.checkEndState();
+            this.saveProgressDeferred();
+        }, isSlotFull ? 0.16 + 0.1 + 0.05 : 0.18);
     }
 
     private arrangeSlotTiles(duration = 0.08, flyingTile: TileRecord | null = null) {
@@ -665,6 +711,7 @@ export class GameCtrl extends Component {
         this.updatePlayableStates();
         this.updateHud();
         this.checkEndState();
+        this.saveProgressDeferred();
     }
 
     private collectStoredTargets() {
@@ -715,6 +762,7 @@ export class GameCtrl extends Component {
             this.fillEmptyTargetBoxes();
             this.updateHud();
             this.checkEndState();
+            this.saveProgressDeferred();
         }, 0.22);
     }
 
@@ -762,6 +810,10 @@ export class GameCtrl extends Component {
     private winLevel() {
         this.gameState = 'win';
         this.clearIdleTips();
+        // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
+        // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
+        ProgressManager.saveLevel(this.nowLevel + 1);
+        ProgressManager.clearSnapshot();
         if (this.nowLevel == 0) {//引导关卡直接下一关
             this.scheduleOnce(() => {
                 this.onEventWinNextLevel();
@@ -787,10 +839,13 @@ export class GameCtrl extends Component {
         }
 
         this.showToast(`${reason}，重开本关`);
+        ProgressManager.clearSnapshot();
         this.scheduleOnce(() => this.startLevel(this.nowLevel), 1.5);
     }
 
     private onEventFailureRestart() {
+        // 重开必须 fresh — 显式清掉旧快照,避免 startLevel 内部判错 level 后又被恢复
+        ProgressManager.clearSnapshot();
         this.startLevel(this.nowLevel);
     }
 
@@ -822,6 +877,7 @@ export class GameCtrl extends Component {
             this.assignNewTarget(box);
             this.collectStoredTargets();
             this.updateHud();
+            this.saveProgressDeferred();
         }, Constants.slotAnim.UnlockWait);
     }
 
@@ -841,6 +897,7 @@ export class GameCtrl extends Component {
         this.refreshUndoButtonStatus();
         // 当前目标若已经能消化这些牌(例如本次失败前的 refresh 已给出新 type),立即试一次回收
         this.collectStoredTargets();
+        this.saveProgressDeferred();
     }
 
     // ==========================================
@@ -930,6 +987,7 @@ export class GameCtrl extends Component {
             this.dealingTiles = false;
             this.updatePlayableStates();
             this.initializeTargetsAfterDeal();
+            this.saveProgressDeferred();
         }, totalDuration);
     }
 
@@ -1093,6 +1151,7 @@ export class GameCtrl extends Component {
             this.updatePlayableStates();
             this.updateHud();
             this.checkEndState();
+            this.saveProgressDeferred();
         }, Constants.slotAnim.MoveOutWait);
     }
 
@@ -1403,6 +1462,7 @@ export class GameCtrl extends Component {
                 this.updateHud();
                 this.checkEndState();
                 Utils.onVibrationShort();
+                this.saveProgressDeferred();
             })
             .start();
         this.arrangeSlotTiles(0.12 + 0.1);
@@ -1440,6 +1500,7 @@ export class GameCtrl extends Component {
             this.assignNewTarget(box);
             this.collectStoredTargets();
             this.updateHud();
+            this.saveProgressDeferred();
         }, Constants.slotAnim.UnlockWait);
     }
 
@@ -1507,6 +1568,7 @@ export class GameCtrl extends Component {
             this.updatePlayableStates();
             this.updateHud();
             this.showToast('已换牌', 0.8);
+            this.saveProgressDeferred();
         }, duration);
     }
 
@@ -1521,5 +1583,213 @@ export class GameCtrl extends Component {
     private onUpDateUiInit() {
         director.emit(Constants.eventNames.EventCleanSlotContainers);
         this.resetTargetBoxes();
+    }
+
+    // ==========================================
+    // 关卡进度持久化
+    // ==========================================
+
+    private tileKey(tile: TileRecord): TileKey {
+        return { layer: tile.layer, row: tile.row, col: tile.col };
+    }
+
+    private buildSnapshot(): ProgressSnapshot {
+        // 反向索引: tile -> 它在 slot/box/discarded 里的位置,避免重复扫描
+        const slotIndexByTile = new Map<TileRecord, number>();
+        this.slots.forEach((t, i) => slotIndexByTile.set(t, i));
+        const discardedSet = new Set(this.discardedTiles);
+        const tileToBoxIndex = new Map<TileRecord, number>();
+        this.targetBoxes.forEach((box, boxIdx) => {
+            for (const child of box.node.children) {
+                if (!child.name.startsWith('targetTile_')) continue;
+                // node 没有反向指针,匹配方式:遍历当前 tiles,看哪个 tile.node === child
+                const tile = this.tiles.find((t) => t.node === child);
+                if (tile) tileToBoxIndex.set(tile, boxIdx);
+            }
+        });
+
+        const tileSnaps: TileSnap[] = this.tiles.map((tile) => {
+            let location: TileSnap['location'] = 'board';
+            if (slotIndexByTile.has(tile)) location = 'slot';
+            else if (discardedSet.has(tile)) location = 'discarded';
+            else if (tileToBoxIndex.has(tile)) location = 'target';
+            return {
+                layer: tile.layer,
+                row: tile.row,
+                col: tile.col,
+                type: tile.type,
+                collected: tile.collected,
+                removed: tile.removed,
+                location,
+            };
+        });
+
+        // box.tileKeys 按 sibling 顺序导出,恢复时按同样顺序写回 itemNodes[1..progress]
+        const boxes = this.targetBoxes.map((box) => {
+            const tileKeys: TileKey[] = box.node.children
+                .filter((c) => c.name.startsWith('targetTile_'))
+                .map((c) => this.tiles.find((t) => t.node === c))
+                .filter((t): t is TileRecord => !!t)
+                .map((t) => this.tileKey(t));
+            return {
+                type: box.type,
+                progress: box.progress,
+                unlocked: box.unlocked,
+                required: box.required,
+                tileKeys,
+            };
+        });
+
+        return {
+            version: 1,
+            level: this.nowLevel,
+            taskQueue: this.taskQueue.slice(),
+            tiles: tileSnaps,
+            slotKeys: this.slots.map((t) => this.tileKey(t)),
+            discardedKeys: this.discardedTiles.map((t) => this.tileKey(t)),
+            actionHistoryKeys: this.actionHistory.map((t) => this.tileKey(t)),
+            boxes,
+            remainTime: this.remainTime,
+            elapsedTime: this.elapsedTime,
+        };
+    }
+
+    private applySnapshot(snap: ProgressSnapshot) {
+        // 关掉发牌动画的 off-screen 初始坐标,所有牌马上回到 boardPos
+        const boardScale = this.getBoardTileScale();
+        for (const tile of this.tiles) {
+            tile.node.setPosition(tile.boardPos);
+            tile.node.setScale(boardScale, boardScale, 1);
+        }
+
+        // 索引: (layer,row,col) -> TileRecord
+        const tileByKey = new Map<string, TileRecord>();
+        for (const tile of this.tiles) {
+            tileByKey.set(`${tile.layer}|${tile.row}|${tile.col}`, tile);
+        }
+        const lookup = (k: TileKey): TileRecord | null => tileByKey.get(`${k.layer}|${k.row}|${k.col}`) || null;
+
+        // 1. 覆盖 taskQueue (buildTaskQueue 已先填了原始队列)
+        this.taskQueue = snap.taskQueue.slice();
+
+        // 2. 还原每张牌的 type/collected/removed (type 可能被 shuffle 改过)
+        for (const snapTile of snap.tiles) {
+            const tile = lookup(snapTile);
+            if (!tile) continue;
+            if (snapTile.type !== tile.type) {
+                tile.type = snapTile.type;
+                tile.item.setData(snapTile.type, tile.row, tile.col, tile.layer, this.iconFrames.get(snapTile.type) || null);
+            }
+            tile.collected = snapTile.collected;
+            tile.removed = snapTile.removed;
+            // removed 表示这张牌已不在棋盘上(进 box 或被消掉)
+            if (snapTile.removed && snapTile.location === 'board') {
+                // 异常情况:被标 removed 但 location 还在 board → 隐藏
+                tile.node.active = false;
+            }
+        }
+
+        // 3. 底部 slot
+        this.slots = [];
+        const slotTileScale = Constants.MahjongBoard.SlotScale - 0.05;
+        for (let i = 0; i < snap.slotKeys.length; i++) {
+            const tile = lookup(snap.slotKeys[i]);
+            if (!tile) continue;
+            this.slots.push(tile);
+            tile.node.name = `slotTile_${tile.uid}`;
+            tile.node.setParent(this.slotNode);
+            tile.node.setPosition(this.getSlotTargetPosition(i));
+            tile.node.setScale(slotTileScale, slotTileScale, 1);
+            tile.node.setSiblingIndex(100 + i);
+            tile.item.disableTileTouch();
+        }
+
+        // 4. 目标槽 + 落入的 tiles
+        for (let i = 0; i < this.targetBoxes.length && i < snap.boxes.length; i++) {
+            const box = this.targetBoxes[i];
+            const boxSnap = snap.boxes[i];
+            box.type = boxSnap.type;
+            box.progress = boxSnap.progress;
+            box.unlocked = boxSnap.unlocked;
+            box.required = boxSnap.required;
+            box.pending = 0;
+            box.refreshing = false;
+            box.movedOut = false;
+            box.movingIn = false;
+
+            for (let j = 0; j < boxSnap.tileKeys.length; j++) {
+                const tile = lookup(boxSnap.tileKeys[j]);
+                if (!tile) continue;
+                tile.node.name = `targetTile_${tile.uid}`;
+                const targetCell = box.itemNodes[j + 1] || box.iconNode;
+                const cellPos = targetCell ? targetCell.position.clone() : new Vec3();
+                tile.node.setParent(box.node);
+                tile.node.setPosition(cellPos);
+                tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
+                tile.node.setSiblingIndex(160 + j + 1);
+                tile.item.disableTileTouch();
+            }
+            // 同步 UI(预览图/锁状态),覆盖 resetTargetBoxes 写入的初始状态
+            this.emitRenderSlot(box);
+        }
+
+        // 5. 失败弹窗清空后备栏后挂起的牌
+        this.discardedTiles = [];
+        for (const key of snap.discardedKeys) {
+            const tile = lookup(key);
+            if (!tile) continue;
+            this.discardedTiles.push(tile);
+            tile.node.setParent(this.slotNode);
+            tile.node.active = false;
+            tile.item.disableTileTouch();
+        }
+
+        // 6. 撤回栈:只保留确实在 slots 里的(防御性 - clearBottomSlot 可能已过滤过,但 snapshot 跨会话防呆)
+        const slotSet = new Set(this.slots);
+        this.actionHistory = snap.actionHistoryKeys
+            .map((k) => lookup(k))
+            .filter((t): t is TileRecord => !!t && slotSet.has(t));
+
+        // 7. 计时与状态
+        this.remainTime = snap.remainTime;
+        this.elapsedTime = snap.elapsedTime;
+        this.lastTickSecond = -1;
+        this.comboTimes = 0;
+        this.lastComboAt = 0;
+        this.targetsInitialized = true;
+        this.dealingTiles = false;
+        this.gameState = 'playing';
+
+        // 8. 板上 shadow 需重算(slot/target 上的牌 MahjongItem.start 已被守卫,不会误挂)
+        this.refreshUndoButtonStatus();
+        // 板上所有 layer 容器重排一次,保证渲染顺序
+        const layers = new Set<number>();
+        for (const tile of this.tiles) layers.add(tile.layer);
+        layers.forEach((layer) => this.refreshLayerDisplayOrder(this.getOrCreateLayerContainer(layer)));
+        this.updateBoardTileShadows();
+
+        // 9. 若恢复的 slot 牌刚好匹配某个 box.type,立刻飞过去补单
+        this.collectStoredTargets();
+    }
+
+    private saveProgressDeferred() {
+        if (this.isGuideLevel()) return;
+        this.snapshotDirty = true;
+        if (this.snapshotFlushScheduled) return;
+        this.snapshotFlushScheduled = true;
+        this.scheduleOnce(() => {
+            this.snapshotFlushScheduled = false;
+            this.flushSnapshot();
+        }, 0);
+    }
+
+    private flushSnapshot() {
+        if (!this.snapshotDirty) return;
+        if (this.gameState !== 'playing') return;
+        if (this.resolvingMatch || this.dealingTiles || this.shuffleAnimating) return;
+        if (this.targetBoxes.some((b) => b.pending > 0 || b.refreshing || b.movingIn || b.movedOut)) return;
+        if (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)) return;
+        ProgressManager.saveSnapshot(this.buildSnapshot());
+        this.snapshotDirty = false;
     }
 }

@@ -4,6 +4,8 @@ export enum StorageKey {
     Music = 'mahjong_match_music',
     Audio = 'mahjong_match_audio',
     Vibrate = 'mahjong_match_vibrate',
+    CurrentLevel = 'mahjong_match_current_level',
+    LevelSnapshot = 'mahjong_match_level_snapshot',
 }
 
 export class StorageManager {
