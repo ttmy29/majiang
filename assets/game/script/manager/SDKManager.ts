@@ -274,12 +274,13 @@ export class SDKManager {
      * 处理登录事件
      */
     private handleLoginEvent(data: any, isNowSend: boolean): void {
-        if (data.userId) {
-            SDKManager.openid = data.userId;
-            this.send(data, isNowSend);
-        } else {
-            this.log('Error: userId is required for login event');
-        }
+        // if (data.userId) {
+        //     SDKManager.openid = data.userId;
+        //     this.send(data, isNowSend);
+        // } else {
+        //     this.log('Error: userId is required for login event');
+        // }
+        this.send(data, isNowSend)
     }
 
     /**
@@ -316,11 +317,10 @@ export class SDKManager {
 
         // 合并自定义参数
         Object.keys(data).forEach(key => {
-            if (!param[key] && key !== 'event') {
+            if (!param[key] && key !== 'event' && key !== 'isNowSend') {
                 param[key] = data[key];
             }
         });
-
         if (isNowSend) {
             // 生成签名
             //const signStr = this.object2String(param, '&') + '&' + SDKManager.secret;
@@ -792,6 +792,7 @@ export class SDKManager {
             str += data[key] + '=' + param[data[key]] + '&';
         }
         str += secret;
+        console.log('[SDKManager] createSign', str);
         return this.getMD5(str);
     }
 }

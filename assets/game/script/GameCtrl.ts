@@ -206,7 +206,7 @@ export class GameCtrl extends Component {
         this._guideTapCount = 0;
         director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
         // 上报关卡进入事件
-        SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
+        SDKManager.instance.report({ event: SDKEvent.level, len: this.nowLevel });
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -826,7 +826,7 @@ export class GameCtrl extends Component {
         this.gameState = 'win';
         this.clearIdleTips();
         // 上报关卡成功事件
-        SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: this.elapsedTime });
+        SDKManager.instance.report({ event: SDKEvent.level, len: this.nowLevel, time: this.elapsedTime });
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -845,7 +845,7 @@ export class GameCtrl extends Component {
         this.gameState = 'fail';
         this.clearIdleTips();
         // 上报关卡失败事件
-        SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
+        SDKManager.instance.report({ event: SDKEvent.level, len: this.nowLevel, reason });
 
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {

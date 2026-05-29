@@ -14,7 +14,7 @@ export class GameLaunch extends Component {
         this.initSDK();
         SDKManager.instance.wxLogin((userId) => {
             //console.log('wxLogin success:', userId);
-            SDKManager.instance.report({ event: SDKEvent.login});
+            SDKManager.instance.report({ event: SDKEvent.login,isNowSend:true});
         }, (err) => {
             //console.log('wxLogin failed:', err);
         });
