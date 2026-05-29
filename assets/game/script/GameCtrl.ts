@@ -7,7 +7,7 @@ import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { Utils } from './util/Utils';
-import { SDKManager } from './manager/SDKManager';
+import { SDKManager, SDKEvent } from './manager/SDKManager';
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
     baseDiff: number;
@@ -95,6 +95,9 @@ export class GameCtrl extends Component {
     private hasStarted = false;
     private shuffleAnimating = false;
     private shuffleSeq = 0;
+    // 道具(撤回/换牌)剩余次数:>0 直接消耗使用,==0 时点击改为看广告 +3 补充。永久保存(ProgressManager)
+    private undoCount = 0;
+    private switchCount = 0;
     // 中途快照保存标记：每次玩家操作 settle 后置 true,下一帧统一写入 localStorage 合批
     private snapshotDirty = false;
     private snapshotFlushScheduled = false;
@@ -202,6 +205,8 @@ export class GameCtrl extends Component {
         this.nowLevel = level;
         this._guideTapCount = 0;
         director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
+        // 上报关卡进入事件
+        SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -210,6 +215,9 @@ export class GameCtrl extends Component {
         this.snapshotDirty = false;
         this.snapshotFlushScheduled = false;
         this.refreshUndoButtonStatus();
+        // 读取并推送道具(撤回/换牌)剩余次数,刷新按钮 di/countLabel/ad1 显示
+        this.loadPropCounts();
+        this.emitPropCounts();
         this.clearIdleTips();
         this.onUpDateUiInit();
         const rootSlotNode = Utils.findChildDeep(this.node, 'slotNode');
@@ -817,6 +825,8 @@ export class GameCtrl extends Component {
     private winLevel() {
         this.gameState = 'win';
         this.clearIdleTips();
+        // 上报关卡成功事件
+        SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: this.elapsedTime });
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -834,6 +844,8 @@ export class GameCtrl extends Component {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
         this.clearIdleTips();
+        // 上报关卡失败事件
+        SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
 
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
@@ -1418,6 +1430,16 @@ export class GameCtrl extends Component {
         AudioManager.instance.playClick();
         if (this.gameState !== 'playing' || this.resolvingMatch) return;
 
+        // 次数用完:点击=看广告补充次数(refill only,不撤回、不动 actionHistory)
+        if (this.undoCount <= 0) {
+            SDKManager.instance.showVideoAd(() => {
+                this.setUndoCount(this.undoCount + 3);
+            }, () => {
+                LayerManager.instance.showToast("视频播放未完成！")
+            }, 'undo');
+            return;
+        }
+
         let tile: TileRecord | null = null;
         while (this.actionHistory.length > 0) {
             const candidate = this.actionHistory.pop()!;
@@ -1427,25 +1449,23 @@ export class GameCtrl extends Component {
             }
         }
         if (!tile) {
+            LayerManager.instance.showToast('无可撤回');
             this.refreshUndoButtonStatus();
             return;
         }
 
-        //if (!tile) return this.showToast('无可撤回', 0.8);
+        //if (!tile) return LayerManager.instance.showToast('无可撤回');
 
         const index = this.slots.indexOf(tile);
-        //if (index < 0) return this.showToast('无可撤回', 0.8);
+        if (index < 0) return LayerManager.instance.showToast('无可撤回');
         if (index < 0) {
             this.refreshUndoButtonStatus();
             return;
         }
 
-        // 看视频广告
-        SDKManager.instance.showVideoAd(() => {
-            this.executeUndo(tile, index);
-        },()=>{
-            LayerManager.instance.showToast("视频播放未完成！")
-        }, 'undo');
+        // 有次数:消耗 1 次并直接撤回(不再看广告)
+        this.setUndoCount(this.undoCount - 1);
+        this.executeUndo(tile, index);
     }
 
     private executeUndo(tile: TileRecord, index: number) {
@@ -1490,6 +1510,29 @@ export class GameCtrl extends Component {
     private refreshUndoButtonStatus() {
         const empty = this.actionHistory.length === 0;
         director.emit(Constants.eventNames.EventSetUndoButtonStatus, empty);
+    }
+
+    // 从本地存储读取两个道具的剩余次数(首次默认 1)
+    private loadPropCounts() {
+        this.undoCount = ProgressManager.loadUndoCount();
+        this.switchCount = ProgressManager.loadSwitchCount();
+    }
+
+    // 通知 UI 刷新道具次数显示(di+countLabel / ad1)
+    private emitPropCounts() {
+        director.emit(Constants.eventNames.EventSetPropCount, { undo: this.undoCount, switch: this.switchCount });
+    }
+
+    private setUndoCount(v: number) {
+        this.undoCount = Math.max(0, v);
+        ProgressManager.saveUndoCount(this.undoCount);
+        this.emitPropCounts();
+    }
+
+    private setSwitchCount(v: number) {
+        this.switchCount = Math.max(0, v);
+        ProgressManager.saveSwitchCount(this.switchCount);
+        this.emitPropCounts();
     }
 
     private onBtnUnlockClick(event) {
@@ -1547,18 +1590,26 @@ export class GameCtrl extends Component {
 
     private onBtnShuffleBoardClick() {
         if (this.gameState !== 'playing' || this.shuffleAnimating) return;
+
+        // 次数用完:点击=看广告补充次数(refill only,不换牌)
+        if (this.switchCount <= 0) {
+            SDKManager.instance.showVideoAd(() => {
+                this.setSwitchCount(this.switchCount + 3);
+            }, () => {
+                LayerManager.instance.showToast("视频播放未完成！")
+            }, 'shuffle');
+            return;
+        }
+
         const activeTiles = this.tiles.filter((t) => !t.collected && !t.removed);
         if (activeTiles.length === 0) return;
 
         const topCandidates = activeTiles.filter((t) => !this.isTileBlocked(t));
         if (topCandidates.length === 0) return;
 
-        // 看视频广告
-        SDKManager.instance.showVideoAd(() => {
-            this.executeShuffle(activeTiles, topCandidates);
-        }, () => {
-            LayerManager.instance.showToast("视频播放未完成！")
-        }, 'shuffle');
+        // 有次数:消耗 1 次并直接换牌(不再看广告)
+        this.setSwitchCount(this.switchCount - 1);
+        this.executeShuffle(activeTiles, topCandidates);
     }
 
     private executeShuffle(activeTiles: TileRecord[], topCandidates: TileRecord[]) {

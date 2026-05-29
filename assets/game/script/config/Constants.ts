@@ -25,6 +25,8 @@ const Constants = {
         EventCleanSlotContainers: 'CleanSlotContainers',
         // 撤回按钮置灰状态:true=灰(无可撤回),false=彩(有可撤回)
         EventSetUndoButtonStatus: 'SetUndoButtonStatus',
+        // 道具剩余次数:GameCtrl -> UI,payload {undo, switch},>0 显示 di+countLabel,==0 显示 ad1
+        EventSetPropCount: 'SetPropCount',
         // 闲置帮助提示:payload 是 index(1=解锁槽位按钮,2=换牌按钮)
         EventShowTipsAnimator: 'ShowTipsAnimator',
         EventShowShuffleTileEffect: 'ShowShuffleTileEffect',

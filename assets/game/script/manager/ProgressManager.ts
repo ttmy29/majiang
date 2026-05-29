@@ -48,6 +48,34 @@ export class ProgressManager {
         StorageManager.instance.setItem(StorageKey.CurrentLevel, level);
     }
 
+    // —— 道具(撤回/换牌)剩余次数,永久保存,首次默认 1 ——
+    static loadUndoCount(): number {
+        return this.loadCount(StorageKey.UndoCount);
+    }
+
+    static saveUndoCount(count: number): void {
+        this.saveCount(StorageKey.UndoCount, count);
+    }
+
+    static loadSwitchCount(): number {
+        return this.loadCount(StorageKey.SwitchCount);
+    }
+
+    static saveSwitchCount(count: number): void {
+        this.saveCount(StorageKey.SwitchCount, count);
+    }
+
+    private static loadCount(key: StorageKey): number {
+        const raw = StorageManager.instance.getItem(key);
+        if (raw === null) return 1; // key 从未写过 => 首次默认 1
+        const value = parseInt(raw, 10);
+        return Number.isFinite(value) && value >= 0 ? value : 1;
+    }
+
+    private static saveCount(key: StorageKey, count: number): void {
+        StorageManager.instance.setItem(key, Math.max(0, Math.floor(count)));
+    }
+
     static loadSnapshot(): ProgressSnapshot | null {
         const raw = StorageManager.instance.getItem(StorageKey.LevelSnapshot);
         if (!raw) return null;

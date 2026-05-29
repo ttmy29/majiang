@@ -2,7 +2,7 @@ import { _decorator, AudioClip, AudioSource, Component, assetManager, Prefab } f
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
-import { SDKManager } from './manager/SDKManager';
+import { SDKEvent, SDKManager } from './manager/SDKManager';
 
 const { ccclass, property } = _decorator;
 
@@ -10,9 +10,14 @@ const { ccclass, property } = _decorator;
 export class GameLaunch extends Component {
 
     start() {
-        // 初始化 SDK
+        // 初始化 SDK（必须先 init 配置好 apiUrl/appId/secret，再调用 wxLogin）
         this.initSDK();
-
+        SDKManager.instance.wxLogin((userId) => {
+            //console.log('wxLogin success:', userId);
+            SDKManager.instance.report({ event: SDKEvent.login});
+        }, (err) => {
+            //console.log('wxLogin failed:', err);
+        });
         LayerManager.instance.init();
         LayerManager.instance.showStartLayer();
         this.initAudioManager();

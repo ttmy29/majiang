@@ -6,6 +6,8 @@ export enum StorageKey {
     Vibrate = 'mahjong_match_vibrate',
     CurrentLevel = 'mahjong_match_current_level',
     LevelSnapshot = 'mahjong_match_level_snapshot',
+    UndoCount = 'mahjong_match_undo_count',
+    SwitchCount = 'mahjong_match_switch_count',
 }
 
 export class StorageManager {

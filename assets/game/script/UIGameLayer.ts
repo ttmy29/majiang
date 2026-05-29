@@ -237,6 +237,7 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventResetSlots, this.onEventResetSlots, this);
             director.on(Constants.eventNames.EventCleanSlotContainers, this.onEventCleanSlotContainers, this);
             director.on(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
+            director.on(Constants.eventNames.EventSetPropCount, this.onSetPropCount, this);
             director.on(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
             director.on(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.on(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
@@ -256,6 +257,7 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventResetSlots, this.onEventResetSlots, this);
             director.off(Constants.eventNames.EventCleanSlotContainers, this.onEventCleanSlotContainers, this);
             director.off(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
+            director.off(Constants.eventNames.EventSetPropCount, this.onSetPropCount, this);
             director.off(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
             director.off(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.off(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
@@ -833,6 +835,29 @@ export class UIGameLayer extends Component {
             //this.undoButton.getChildByName("chehui").getComponent(Sprite)!.customMaterial = null;
             this.undoButton.getChildByName("mask").active = false;
         }
+    }
+
+    // 刷新道具(撤回/换牌)剩余次数显示:>0 显示 di+countLabel(次数),==0 显示 ad1(看广告)
+    onSetPropCount(payload: { undo: number; switch: number }) {
+        this.applyPropCount(this.undoButton, payload.undo);
+        this.applyPropCount(this.switchButton, payload.switch);
+    }
+
+    private applyPropCount(button: Node, count: number) {
+        if (!button) return;
+        const hasCount = count > 0;
+        const di = button.getChildByName('di');
+        const countLabel = button.getChildByName('countLabel');
+        const ad1 = button.getChildByName('ad1');
+        if (di) di.active = hasCount;
+        if (countLabel) {
+            countLabel.active = hasCount;
+            if (hasCount) {
+                const label = countLabel.getComponent(Label);
+                if (label) label.string = String(count);
+            }
+        }
+        if (ad1) ad1.active = !hasCount;
     }
 
     onClickSetButton() {

@@ -65,6 +65,10 @@ export class SDKManager {
     public callBack: Function = null
     public fcallBack: Function = null
     private currentVideoKey: string = "default"  // 当前播放的视频广告标识
+    private isVideoShowing: boolean = false
+    private isVideoPlaying: boolean = false
+    private videoSettled: boolean = false
+    private videoShowReported: boolean = false
     public static get instance(): SDKManager {
         if (!this._instance) {
             this._instance = new SDKManager();
@@ -91,39 +95,25 @@ export class SDKManager {
         this.startOnlineTimeReport();
         SDKManager.adsVideoId = "adunit-938e509f0347335b";
 
+        return;
         if (sys.platform === sys.Platform.WECHAT_GAME) {
             SDKManager.rewardedVideoAd = wx.createRewardedVideoAd({ adUnitId: SDKManager.adsVideoId })
 
             // 监听广告加载错误
             SDKManager.rewardedVideoAd.onError((err) => {
                 this.log('Video ad error:', err);
-                // 广告加载失败，执行失败回调
-                if (SDKManager._instance.fcallBack) {
-                    SDKManager._instance.fcallBack();
+                if (SDKManager._instance.isVideoPlaying) {
+                    SDKManager._instance.handleVideoAdFail();
                 }
-                game.resume();
             });
 
             // 监听广告关闭
             SDKManager.rewardedVideoAd.onClose((res) => {
                 if (res && res.isEnded || res === undefined) {
-                    // 正常播放结束，可以下发游戏奖励
-                    game.resume();
-
-                    // 上报播放成功事件
-                    SDKManager._instance.report({
-                        event: SDKEvent.video,
-                        cid: SDKManager._instance.currentVideoKey,
-                        type: 3  // 3:播放成功
-                    });
-
-                    SDKManager._instance.callBack && SDKManager._instance.callBack();
+                    SDKManager._instance.handleVideoAdSuccess();
+                    return;
                 }
-                else {
-                    game.resume();
-                    // 播放中途退出，不下发游戏奖励
-                    SDKManager._instance.fcallBack && SDKManager._instance.fcallBack();
-                }
+                SDKManager._instance.handleVideoAdFail();
             })
         }
     }
@@ -133,6 +123,87 @@ export class SDKManager {
      */
     public getOpenid(): string {
         return SDKManager.openid;
+    }
+
+    /**
+     * 微信登录
+     * 调用 wx.login 获取 code，并用 code 向后台换取 userId
+     * @param callback 登录成功回调，返回 userId
+     * @param fcallback 登录失败回调，返回错误信息
+     */
+    public wxLogin(callback?: (userId: string) => void, fcallback?: (err: any) => void): void {
+        if (sys.platform !== sys.Platform.WECHAT_GAME) {
+            this.log('wxLogin only available on WeChat platform');
+            fcallback && fcallback('not wechat platform');
+            return;
+        }
+
+        wx.login({
+            success: (res: any) => {
+                if (res.code) {
+                    //this.loginWithCode(res.code, callback, fcallback);
+                    this.loginGetOpenid(res.code, callback, fcallback);
+                } else {
+                    this.log('wx.login failed:', res.errMsg);
+                    fcallback && fcallback(res.errMsg);
+                }
+            },
+            fail: (err: any) => {
+                this.log('wx.login failed:', err);
+                fcallback && fcallback(err);
+            }
+        });
+    }
+
+    private loginGetOpenid(code: string, callback?: (userId: string) => void, fcallback?: (err: any) => void): void {
+        if (!SDKManager.isOpen) return;
+
+        let param: any = {
+            token:code,
+            appid:SDKManager.appId,
+        };
+
+
+        const url = "https://shufen.shenzhenyuren.com/channel/getUserInfo";
+        let body = '';
+        for (let item in param) {
+            if (body) body += '&';
+            body += item + '=' + param[item];
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.timeout = SDKManager.timeout;
+        xhr.onreadystatechange = () => {
+            if (xhr.readyState !== 4) return;
+
+            if (xhr.status >= 200 && xhr.status < 400) {
+                this.log('Login response:', xhr.responseText);
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    // 后台返回的 userId 字段（如字段名不同请按实际调整）
+                    const userId = res && res.data ? res.data.userId : (res ? res.userId : null);
+                    if (userId) {
+                        SDKManager.openid = userId;
+                        callback && callback(userId);
+                    } else {
+                        this.log('Login failed:', xhr.responseText);
+                        fcallback && fcallback(res);
+                    }
+                } catch (e) {
+                    this.log('Login parse error:', e);
+                    fcallback && fcallback(e);
+                }
+            } else {
+                this.log('Login request failed:', xhr.status);
+                fcallback && fcallback(xhr.status);
+            }
+        };
+
+        xhr.open('POST', url, true);
+        xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+        xhr.send(body);
+
+        this.log('Login request sent:', url, body);
     }
 
     /**
@@ -252,8 +323,9 @@ export class SDKManager {
 
         if (isNowSend) {
             // 生成签名
-            const signStr = this.object2String(param, '&') + '&' + SDKManager.secret;
-            param.sign = this.getMD5(signStr);
+            //const signStr = this.object2String(param, '&') + '&' + SDKManager.secret;
+            //param.sign = this.getMD5(signStr);
+            param.sign = this.createSign(param,SDKManager.secret);
             this.httpRequest(url, param);
         } else {
             if (SDKManager.sendDataList.length > 0) {
@@ -602,8 +674,10 @@ export class SDKManager {
      * @param videoKey 视频广告标识
      */
     public showVideoAd(callback?: Function, fcallback?: Function, videoKey: string = "default") {
-        // 保存当前视频广告标识
-        this.currentVideoKey = videoKey;
+        if (this.isVideoShowing) {
+            this.log('Video ad is already showing');
+            return;
+        }
 
         // 上报视频广告拉取事件
         this.report({
@@ -614,30 +688,110 @@ export class SDKManager {
 
         // 微信小游戏
         if (sys.platform === sys.Platform.WECHAT_GAME && SDKManager.rewardedVideoAd !== null) {
-            game.pause();
+            // 保存当前视频广告标识
+            this.currentVideoKey = videoKey;
             this.callBack = callback;
             this.fcallBack = fcallback;
+            this.isVideoShowing = true;
+            this.isVideoPlaying = false;
+            this.videoSettled = false;
+            this.videoShowReported = false;
+            game.pause();
 
-            SDKManager.rewardedVideoAd.show()
-                .then(() => {
-                    // 广告显示成功，上报拉取成功事件
-                    this.report({
-                        event: SDKEvent.video,
-                        cid: videoKey,
-                        type: 2  // 2:拉取成功
-                    });
-                })
-                .catch(err => {
-                    this.log('Video ad show failed:', err);
-                    fcallback && fcallback();
-                    game.resume();
-                    SDKManager.rewardedVideoAd.load();
-                });
+            this.showRewardedVideoAd(videoKey, true);
             return;
         }
 
         // 测试环境或非微信平台，直接执行成功回调
         this.log('Video ad not available, executing callback directly');
         callback && callback();
+    }
+
+    private showRewardedVideoAd(videoKey: string, retryWhenNotReady: boolean): void {
+        SDKManager.rewardedVideoAd.show()
+            .then(() => {
+                this.reportVideoAdShow(videoKey);
+            })
+            .catch(err => {
+                this.log('Video ad show failed:', err);
+                if (!retryWhenNotReady) {
+                    this.handleVideoAdFail();
+                    return;
+                }
+
+                SDKManager.rewardedVideoAd.load()
+                    .then(() => {
+                        if (!this.isVideoShowing || this.videoSettled) return false;
+                        return SDKManager.rewardedVideoAd.show().then(() => true);
+                    })
+                    .then((shown) => {
+                        if (!this.isVideoShowing || this.videoSettled) return;
+                        if (shown) this.reportVideoAdShow(videoKey);
+                    })
+                    .catch(loadErr => {
+                        this.log('Video ad reload failed:', loadErr);
+                        this.handleVideoAdFail();
+                    });
+            });
+    }
+
+    private reportVideoAdShow(videoKey: string): void {
+        if (this.videoShowReported) return;
+        this.videoShowReported = true;
+        this.isVideoPlaying = true;
+        // 广告显示成功，上报拉取成功事件
+        this.report({
+            event: SDKEvent.video,
+            cid: videoKey,
+            type: 2  // 2:拉取成功
+        });
+    }
+
+    private handleVideoAdSuccess(): void {
+        if (this.videoSettled) return;
+        this.videoSettled = true;
+        const callback = this.callBack;
+        const videoKey = this.currentVideoKey;
+        this.clearVideoAdState();
+        game.resume();
+
+        // 上报播放成功事件
+        this.report({
+            event: SDKEvent.video,
+            cid: videoKey,
+            type: 3  // 3:播放成功
+        });
+
+        callback && callback();
+    }
+
+    private handleVideoAdFail(): void {
+        if (!this.isVideoShowing || this.videoSettled) return;
+        this.videoSettled = true;
+        const fcallback = this.fcallBack;
+        this.clearVideoAdState();
+        game.resume();
+        fcallback && fcallback();
+    }
+
+    private clearVideoAdState(): void {
+        this.isVideoShowing = false;
+        this.isVideoPlaying = false;
+        this.callBack = null;
+        this.fcallBack = null;
+        this.currentVideoKey = "default";
+        this.videoShowReported = false;
+    }
+
+
+    private createSign(param, secret) {
+        let str = '';
+        let data = Object.keys(param).sort();
+        for (let key in data) {
+            if (key === 'sign') continue
+            str += data[key] + '=' + param[data[key]] + '&';
+        }
+        str += secret;
+        return this.getMD5(str);
     }
 }
