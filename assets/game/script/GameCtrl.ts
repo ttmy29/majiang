@@ -7,6 +7,7 @@ import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { Utils } from './util/Utils';
+import { SDKManager } from './manager/SDKManager';
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
     baseDiff: number;
@@ -1438,6 +1439,16 @@ export class GameCtrl extends Component {
             this.refreshUndoButtonStatus();
             return;
         }
+
+        // 看视频广告
+        SDKManager.instance.showVideoAd(() => {
+            this.executeUndo(tile, index);
+        },()=>{
+            LayerManager.instance.showToast("视频播放未完成！")
+        }, 'undo');
+    }
+
+    private executeUndo(tile: TileRecord, index: number) {
         this.slots.splice(index, 1);
         // 注意:collected 此处先保留 true,等飞回 tween 跑完再置 false。
         // 否则飞行 0.16s 期间用户点击会触发 GameCtrl 的 TOUCH_END → onTileTap → moveTileToSlot,
@@ -1481,12 +1492,20 @@ export class GameCtrl extends Component {
         director.emit(Constants.eventNames.EventSetUndoButtonStatus, empty);
     }
 
-
     private onBtnUnlockClick(event) {
         if (this.gameState !== 'playing') return;
         const box = this.targetBoxes.find((i) => !i.unlocked);
         if (!box) return this.showToast('槽位已满', 0.8);
 
+        // 看视频广告
+        SDKManager.instance.showVideoAd(() => {
+            this.executeUnlock(box);
+        }, () => {
+            LayerManager.instance.showToast("视频播放未完成！")
+        }, 'unlock');
+    }
+
+    private executeUnlock(box: TargetBox) {
         box.unlocked = true;
         // 用 refreshing 当锁，挡住 fillEmptyTargetBoxes 在动画期间抢先塞目标
         box.refreshing = true;
@@ -1534,13 +1553,47 @@ export class GameCtrl extends Component {
         const topCandidates = activeTiles.filter((t) => !this.isTileBlocked(t));
         if (topCandidates.length === 0) return;
 
+        // 看视频广告
+        SDKManager.instance.showVideoAd(() => {
+            this.executeShuffle(activeTiles, topCandidates);
+        }, () => {
+            LayerManager.instance.showToast("视频播放未完成！")
+        }, 'shuffle');
+    }
+
+    private executeShuffle(activeTiles: TileRecord[], topCandidates: TileRecord[]) {
         // 换牌道具的提示音
         AudioManager.instance.playOneShot(AudioClipNames.prop_tips);
 
         const random = Utils.createRandom(Date.now() + activeTiles.length * 31);
-        const topTile = topCandidates[Math.floor(random() * topCandidates.length)];
-        const lowerTiles = activeTiles.filter((t) => t.layer < topTile.layer);
-        const lowerTile = lowerTiles.length > 0 ? lowerTiles[Math.floor(random() * lowerTiles.length)] : null;
+
+        // 优化：优先选择当前目标类型的牌进行交换
+        const currentTargetTypes = new Set(this.targetBoxes.map(box => box.type));
+
+        // 1. 找出被压在下层的目标牌（被阻挡的目标牌）
+        const blockedTargetTiles = activeTiles.filter((t) =>
+            currentTargetTypes.has(t.type) && this.isTileBlocked(t)
+        );
+
+        // 2. 找出可点击的非目标牌（用于和目标牌交换）
+        const topNonTargetTiles = topCandidates.filter((t) => !currentTargetTypes.has(t.type));
+
+        let topTile: TileRecord;
+        let lowerTile: TileRecord | null = null;
+
+        // 优先策略：如果有被阻挡的目标牌，将其与上层的非目标牌交换
+        if (blockedTargetTiles.length > 0 && topNonTargetTiles.length > 0) {
+            // 随机选一个被阻挡的目标牌
+            lowerTile = blockedTargetTiles[Math.floor(random() * blockedTargetTiles.length)];
+            // 随机选一个可点击的非目标牌
+            topTile = topNonTargetTiles[Math.floor(random() * topNonTargetTiles.length)];
+        } else {
+            // 降级策略：如果没有合适的目标牌交换，使用原有逻辑
+            topTile = topCandidates[Math.floor(random() * topCandidates.length)];
+            const lowerTiles = activeTiles.filter((t) => t.layer < topTile.layer);
+            lowerTile = lowerTiles.length > 0 ? lowerTiles[Math.floor(random() * lowerTiles.length)] : null;
+        }
+
         const duration = Constants.shuffleAnim.Duration;
         const swapAt = Math.min(Constants.shuffleAnim.SwapAt, duration);
         const shuffleSeq = ++this.shuffleSeq;

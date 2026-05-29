@@ -2,6 +2,7 @@ import { _decorator, AudioClip, AudioSource, Component, assetManager, Prefab } f
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
+import { SDKManager } from './manager/SDKManager';
 
 const { ccclass, property } = _decorator;
 
@@ -9,6 +10,9 @@ const { ccclass, property } = _decorator;
 export class GameLaunch extends Component {
 
     start() {
+        // 初始化 SDK
+        this.initSDK();
+
         LayerManager.instance.init();
         LayerManager.instance.showStartLayer();
         this.initAudioManager();
@@ -16,27 +20,40 @@ export class GameLaunch extends Component {
         this.initAudioResources();
     }
 
-    private initAudioManager() {
-        const bundle = assetManager.getBundle(Constants.GameBundleName);
-        bundle.load<AudioClip>('bgm/01_bgmusic', AudioClip, (err, clip: AudioClip) => {
-            if (err) {
-                console.error('加载音频失败', err);
-                return;
-            }
-
-            const bgmSource = this.node.addComponent(AudioSource);
-            bgmSource.clip = clip;
-            bgmSource.loop = true;
-
-            const effectSourceCount = 4;
-            const effectSources: AudioSource[] = [];
-            for (let i = 0; i < effectSourceCount; i++) {
-                effectSources.push(this.node.addComponent(AudioSource));
-            }
-
-            AudioManager.instance.init([bgmSource, ...effectSources]);
+    /**
+     * 初始化 SDK
+     */
+    private initSDK() {
+        SDKManager.instance.init({
+            apiUrl: 'https://shufen.shenzhenyuren.com/v1',
+            appId: 'yrRaAGjYBpxS98Mf1s3c',
+            secret: 'ZOZxZroOf3JSQ1bgrwluQqEKdEiXI1Lz',
+            timeout: 10000,
+            enableLog: true  // 生产环境建议设为 false
         });
+    }
 
+    private initAudioManager() {
+        assetManager.loadBundle(Constants.BgmBundleName, (err, bundle) => {
+            bundle.load<AudioClip>('mj_bgm', AudioClip, (err, clip: AudioClip) => {
+                if (err) {
+                    console.error('加载音频失败', err);
+                    return;
+                }
+
+                const bgmSource = this.node.addComponent(AudioSource);
+                bgmSource.clip = clip;
+                bgmSource.loop = true;
+
+                const effectSourceCount = 4;
+                const effectSources: AudioSource[] = [];
+                for (let i = 0; i < effectSourceCount; i++) {
+                    effectSources.push(this.node.addComponent(AudioSource));
+                }
+
+                AudioManager.instance.init([bgmSource, ...effectSources]);
+            });
+        });
     }
 
     initPrefabResources() {
@@ -72,15 +89,16 @@ export class GameLaunch extends Component {
     }
 
     initAudioResources() {
-        const bundle = assetManager.getBundle(Constants.GameBundleName);
-        bundle.loadDir('audio', AudioClip, (err, clipArray: AudioClip[]) => {
-            if (err) {
-                console.error('加载音频失败', err);
-                return;
-            }
-            // 把加载到的 clip 注册到单例,clip.name 不带扩展名,跟 AudioClipNames 里的字符串对齐即可命中
-            AudioManager.instance.initAudioClips(clipArray);
-            console.log('加载音频成功', clipArray.length);
+        assetManager.loadBundle(Constants.AudioBundleName, (err, bundle) => {
+            bundle.loadDir('/', AudioClip, (err, clipArray: AudioClip[]) => {
+                if (err) {
+                    console.error('加载音频失败', err);
+                    return;
+                }
+                // 把加载到的 clip 注册到单例,clip.name 不带扩展名,跟 AudioClipNames 里的字符串对齐即可命中
+                AudioManager.instance.initAudioClips(clipArray);
+                console.log('加载音频成功', clipArray.length);
+            });
         });
     }
 }

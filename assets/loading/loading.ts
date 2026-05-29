@@ -1,4 +1,5 @@
 import { _decorator, assetManager, Component, director, Label, Node, ProgressBar, SpriteFrame } from 'cc';
+
 const { ccclass, property } = _decorator;
 
 @ccclass('loading')
@@ -11,23 +12,38 @@ export class loading extends Component {
     @property(Label)
     progressLabel: Label = null!;
 
+    private loadStartTime: number = 0;
+
     onLoad() {
         this.progressBar.progress = 0;
     }
 
     start() {
+        this.loadStartTime = Date.now();
+
         //console.time("时间");
         assetManager.loadBundle("game", (err, bundle) => {
-            if (err) { console.error(err); return; }
+            if (err) {
+                console.error(err);
+                return;
+            }
+
             this.loadMahjongFrames(bundle, () => {
             bundle.preloadScene("game", (finished, total) => {
                 const progress = finished / total;
                 this.progressBar.progress = progress;
                 this.progressLabel.string = `${Math.floor(progress * 100)}%`;
             }, (err) => {
-                if (err) { console.error(err); return; }
+                if (err) {
+                    console.error(err);
+                    return;
+                }
                 bundle.loadScene("game", (err, scene) => {
-                    if (err) { console.error(err); return; }
+                    if (err) {
+                        console.error(err);
+                        return;
+                    }
+
                     //console.timeEnd("时间");
                     director.runScene(scene);
                 });
@@ -41,7 +57,6 @@ export class loading extends Component {
              done();
         });
     }
-
 
     update(deltaTime: number) {
 

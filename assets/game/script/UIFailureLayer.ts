@@ -3,6 +3,7 @@ import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
+import { SDKManager } from './manager/SDKManager';
 const { ccclass, property } = _decorator;
 
 @ccclass('UIFailureLayer')
@@ -141,7 +142,13 @@ export class UIFailureLayer extends Component {
 
     onButtonContinueClick() {
         AudioManager.instance.playClick();
-        director.emit(Constants.eventNames.EventFailureContinue, this.isMax);
-        this.playCloseAnimation();
+
+        // 看视频广告
+        SDKManager.instance.showVideoAd(() => {
+            director.emit(Constants.eventNames.EventFailureContinue, this.isMax);
+            this.playCloseAnimation();
+        }, () => {
+            LayerManager.instance.showToast("视频播放未完成！");
+        }, 'continue');
     }
 }

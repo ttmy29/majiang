@@ -69,6 +69,8 @@ const Constants = {
         guide: 'prefab/guide'
     },
     GameBundleName: 'game',
+    AudioBundleName: 'audio',
+    BgmBundleName: 'bgm',
     MahjongBoard: {
         // 麻将牌面资源所在目录，只加载该目录下的数字牌面作为棋盘牌型。
         ResourceDir: 'resources/mahjong',
