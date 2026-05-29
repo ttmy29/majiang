@@ -181,6 +181,10 @@ export class MahjongItem extends Component {
     }
 
     onTouchstart() {
+        // 牌被点中飞向槽位/目标的途中仍保留着触摸回调(disableTileTouch 要等落位才执行)。
+        // 此时再响应按下,会在 flyLayer 里用错坐标系跑 isBlockedByUpperMahjong,误弹"被上方块锁住"
+        // 并让飞行中的牌抖动。与 onTouchend / onTouchcancel 的 isOnBoard 守卫保持一致。
+        if (!this.isOnBoard()) return;
         this.click();
     }
 

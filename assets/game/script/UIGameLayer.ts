@@ -85,23 +85,24 @@ export class UIGameLayer extends Component {
     // comboNode 下的进度条 fill 节点和连击计数文本
     private comboBarSprite: Sprite = null!;
     private comboCountLabel: Label = null!;
-    // comboLabelNode 上挂的 Label,显示 "不错/厉害/..." 这种连击口号
-    private comboTextLabel: Label = null!;
+    private comboLevelNodes: Node[] = [];
+    private comboLevelOriginPositions: Vec3[] = [];
+    private comboLevelOriginScales: Vec3[] = [];
+    private comboLevelOpacities: UIOpacity[] = [];
     // 当前已经播放到的连击口号下标(0~7),combo 中断或窗口到期时清零
     private comboAudioLevel = 0;
     // 每 3 次连击解锁下一级口号,与 COMBO_AUDIOS 长度对应,超过 7 后不再升级
     private static readonly COMBO_STEP = 3;
     // 连击窗口时长（秒），与 GameCtrl.updateCombo 中的 5000ms 保持一致
     private static readonly COMBO_DURATION = 5;
-    // 连击口号:每 3 次连击按顺序播一个,同步在 comboLabelNode 上显示对应文本
-    private static readonly COMBO_AUDIOS: { audio: AudioClipNames; text: string }[] = [
-        { audio: AudioClipNames.combo_level1, text: '不错' },
-        { audio: AudioClipNames.combo_level2, text: '厉害' },
-        { audio: AudioClipNames.combo_level3, text: '牛的' },
-        { audio: AudioClipNames.combo_level4, text: '绝了!' },
-        { audio: AudioClipNames.combo_level5, text: '太强了!' },
-        { audio: AudioClipNames.combo_level6, text: '赢麻了!' },
-        { audio: AudioClipNames.combo_level7, text: '无敌了!' },
+    private static readonly COMBO_AUDIOS: { audio: AudioClipNames }[] = [
+        { audio: AudioClipNames.combo_level1 },
+        { audio: AudioClipNames.combo_level2 },
+        { audio: AudioClipNames.combo_level3 },
+        { audio: AudioClipNames.combo_level4 },
+        { audio: AudioClipNames.combo_level5 },
+        { audio: AudioClipNames.combo_level6 },
+        { audio: AudioClipNames.combo_level7 },
     ];
 
     // 目标槽预览相关 —— 由 EventGameUiInit 注入 prefab + 资源 map，EventRenderSlot 触发渲染
@@ -132,7 +133,7 @@ export class UIGameLayer extends Component {
     adaptBackground() {
         // 1. 获取当前屏幕可视区域大小 (实际设备的屏幕尺寸)
         const visibleSize = view.getVisibleSize();
-        
+
         // 2. 获取项目设置中的原始设计分辨率 (你在 Cocos 项目设置里填的宽高)
         const designSize = this.bgNode.getComponent(UITransform).contentSize;
 
@@ -166,9 +167,17 @@ export class UIGameLayer extends Component {
         if (bar) this.comboBarSprite = bar.getComponent(Sprite)!;
         const countNode = this.comboNode.getChildByName('countLabel');
         if (countNode) this.comboCountLabel = countNode.getComponent(Label)!;
-        if (this.comboLabelNode) {
-            this.comboTextLabel = this.comboLabelNode.getComponent(Label)!;
-            this.comboLabelNode.active = false;
+        if (this.comboLabelNode) this.comboLabelNode.active = false;
+        for (let i = 0; i < UIGameLayer.COMBO_AUDIOS.length; i++) {
+            const levelNode = this.comboNode.getChildByName(`${i + 1}`);
+            if (!levelNode) continue;
+            const opacity = levelNode.getComponent(UIOpacity) || levelNode.addComponent(UIOpacity);
+            this.comboLevelNodes[i] = levelNode;
+            this.comboLevelOriginPositions[i] = levelNode.position.clone();
+            this.comboLevelOriginScales[i] = levelNode.scale.clone();
+            this.comboLevelOpacities[i] = opacity;
+            opacity.opacity = 0;
+            levelNode.active = false;
         }
         this.comboNode.active = false;
     }
@@ -457,6 +466,11 @@ export class UIGameLayer extends Component {
             box2.setRotationFromEuler(new Vec3(0, 0, 0));
             box2.active = locked;
         }
+        this.slotNodeArr.forEach((node, index) => {
+            if (node && this.slotOriginPositions[index]) {
+                node.position.set(this.slotOriginPositions[index]);
+            }
+        });
     }
 
     // 清理槽位容器: slot1~4 下面除了 item1~4/box_2/lock 这些 prefab 自带的锚点和锁,
@@ -464,7 +478,7 @@ export class UIGameLayer extends Component {
     // 同时把 slot3/slot4 的 box_2/lock 重新点亮(被 onEventResetSlots 翻成 unlocked 时关掉的),
     // 让锁着的两个槽位回到"盖着箱子+挂锁"的初始外观,lock 顶到最上层避免被 box_2 盖住
     onEventCleanSlotContainers() {
-        const keep = ['item1', 'item2', 'item3', 'item4', 'box_2', 'lock',"motionStreak"];
+        const keep = ['item1', 'item2', 'item3', 'item4', 'box_2', 'lock', "motionStreak"];
         for (let i = 1; i <= 4; i++) {
             const slot = this.slotNodeArr[i];
             if (!slot) continue;
@@ -511,7 +525,7 @@ export class UIGameLayer extends Component {
         // 已播放过的口号等级要从头来过,旧的 comboLabel 文本也要先收掉
         if (comboTimes <= 1) {
             this.comboAudioLevel = 0;
-            if (this.comboLabelNode) this.comboLabelNode.active = false;
+            this.hideComboLevelNodes();
         }
 
         // 每 COMBO_STEP 次连击解锁下一级口号:第 3/6/9/... 次时按顺序播一个
@@ -530,29 +544,73 @@ export class UIGameLayer extends Component {
                 if (this.comboNode?.isValid) this.comboNode.active = false;
                 // 窗口走完意味着这一轮 combo 结束,下一次匹配再从 level1 开始
                 this.comboAudioLevel = 0;
-                if (this.comboLabelNode?.isValid) this.comboLabelNode.active = false;
+                this.hideComboLevelNodes();
             })
             .start();
     }
 
-    // 播放对应等级的连击口号音效,同步在 comboLabelNode 上弹一下文本
-    // 文本只跟着这次音效出现:弹入 → 短暂停留 → 自动收起,下次音效再播再显示
+    // Hide legacy text and every prebuilt combo image node.
+    private hideComboLevelNodes(exceptIndex: number = -1) {
+        if (this.comboLabelNode?.isValid) this.comboLabelNode.active = false;
+        for (let i = 0; i < this.comboLevelNodes.length; i++) {
+            if (i === exceptIndex) continue;
+            const levelNode = this.comboLevelNodes[i];
+            if (!levelNode?.isValid) continue;
+            const opacity = this.comboLevelOpacities[i];
+            Tween.stopAllByTarget(levelNode);
+            if (opacity?.isValid) {
+                Tween.stopAllByTarget(opacity);
+                opacity.opacity = 0;
+            }
+            const originPosition = this.comboLevelOriginPositions[i];
+            const originScale = this.comboLevelOriginScales[i];
+            if (originPosition) levelNode.setPosition(originPosition);
+            if (originScale) levelNode.setScale(originScale);
+            levelNode.active = false;
+        }
+    }
+
     private playComboLevel(index: number) {
         const entry = UIGameLayer.COMBO_AUDIOS[index];
         if (!entry) return;
         AudioManager.instance.playOneShot(entry.audio);
-        if (!this.comboLabelNode) return;
-        if (this.comboTextLabel) this.comboTextLabel.string = entry.text;
-        Tween.stopAllByTarget(this.comboLabelNode);
-        this.comboLabelNode.active = true;
-        this.comboLabelNode.setScale(0.6, 0.6, 1);
-        tween(this.comboLabelNode)
-            .to(0.12, { scale: new Vec3(1.15, 1.15, 1) }, { easing: 'sineOut' })
-            .to(0.08, { scale: new Vec3(1, 1, 1) }, { easing: 'sineInOut' })
-            .delay(0.9)
+        const levelNode = this.comboLevelNodes[index];
+        if (!levelNode?.isValid) return;
+
+        this.hideComboLevelNodes(index);
+        const opacity = this.comboLevelOpacities[index] || levelNode.getComponent(UIOpacity) || levelNode.addComponent(UIOpacity);
+        this.comboLevelOpacities[index] = opacity;
+        const originPosition = this.comboLevelOriginPositions[index] || levelNode.position.clone();
+        const originScale = this.comboLevelOriginScales[index] || levelNode.scale.clone();
+        const dropStartPosition = new Vec3(originPosition.x, originPosition.y + 24, originPosition.z);
+        const impactPosition = new Vec3(originPosition.x, originPosition.y - 6, originPosition.z);
+        const fadePosition = new Vec3(originPosition.x, originPosition.y - 16, originPosition.z);
+        const startScale = new Vec3(originScale.x * 1.04, originScale.y * 1.04, originScale.z);
+        const impactScale = new Vec3(originScale.x * 1.08, originScale.y * 0.92, originScale.z);
+
+        Tween.stopAllByTarget(levelNode);
+        Tween.stopAllByTarget(opacity);
+        levelNode.active = true;
+        levelNode.setPosition(dropStartPosition);
+        levelNode.setScale(startScale);
+        opacity.opacity = 255;
+
+        tween(levelNode)
+            .to(0.1, { position: impactPosition, scale: impactScale }, { easing: 'quadIn' })
+            .to(0.08, { position: originPosition, scale: originScale }, { easing: 'backOut' })
+            .delay(0.35)
+            .to(0.38, { position: fadePosition }, { easing: 'sineIn' })
             .call(() => {
-                if (this.comboLabelNode?.isValid) this.comboLabelNode.active = false;
+                if (!levelNode.isValid) return;
+                levelNode.setPosition(originPosition);
+                levelNode.setScale(originScale);
+                if (opacity.isValid) opacity.opacity = 0;
+                levelNode.active = false;
             })
+            .start();
+        tween(opacity)
+            .delay(0.44)
+            .to(0.38, { opacity: 0 }, { easing: 'sineIn' })
             .start();
     }
 
@@ -562,6 +620,7 @@ export class UIGameLayer extends Component {
             this.comboBarSprite.fillRange = 1;
         }
         if (this.comboNode?.isValid) this.comboNode.active = false;
+        this.hideComboLevelNodes();
     }
 
     onEventShowToast(payload: ToastPayload) {
@@ -730,7 +789,7 @@ export class UIGameLayer extends Component {
             console.warn(`[UIGameLayer] onEventShowSlotMoveOut 找不到 slotID 为 ${slotID} 的节点`);
             return;
         }
-        let  motionStreakNode = targetNode.getChildByName('motionStreak');
+        let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
             motionStreakNode.setPosition(new Vec3(140, 0, 0));
             motionStreakNode.active = false;
@@ -766,7 +825,7 @@ export class UIGameLayer extends Component {
                 .call(() => {
                     // 盖子贴合的瞬间播放音效,跟视觉节奏对齐
                     AudioManager.instance.playOneShot(AudioClipNames.gaigaizi);
-             
+
                 })
                 .start();
 
@@ -802,7 +861,7 @@ export class UIGameLayer extends Component {
             console.warn(`[UIGameLayer] onEventShowSlotMoveIn 找不到 slotID 为 ${slotID} 的节点`);
             return;
         }
-        let  motionStreakNode = targetNode.getChildByName('motionStreak');
+        let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
             motionStreakNode.setPosition(new Vec3(-140, 0, 0));
             motionStreakNode.active = false;

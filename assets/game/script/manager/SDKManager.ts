@@ -46,7 +46,7 @@ export class SDKManager {
     private static secret: string = "";
     private static apiUrl: string = "";
     private static timeout: number = 10000;
-    private static enableLog: boolean = true;
+    private static enableLog: boolean = false;
     private static isOpen: boolean = true;
 
     // 运行时数据

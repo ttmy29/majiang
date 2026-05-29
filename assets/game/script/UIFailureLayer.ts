@@ -34,7 +34,12 @@ export class UIFailureLayer extends Component {
             let idx = 1;
             const tiles = this.soltNode.children.filter((item) => item.getChildByName("bg"));
             tiles.forEach((item) => {
-                item.setPosition(this.iconNode2.getChildByName(`item${idx}`).getPosition());
+                if (!item.active) return;
+                // iconNode2 只有 item1~item6 六个占位,而底部 slot 可能因历史挂起的牌多于 6 张。
+                // 占位取不到时直接跳过,避免 setPosition(undefined) 崩溃。
+                const slot = this.iconNode2.getChildByName(`item${idx}`);
+                if (!slot) return;
+                item.setPosition(slot.getPosition());
                 item.parent = this.iconNode2;
                 item.setScale(Constants.MahjongBoard.SlotScale + 0.06, Constants.MahjongBoard.SlotScale + 0.06, 1);
                 idx += 1;

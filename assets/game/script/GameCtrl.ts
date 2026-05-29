@@ -107,6 +107,7 @@ export class GameCtrl extends Component {
     private tipsActive = false;
     private static readonly IDLE_TIPS_SECONDS = 10;
     private static readonly GUIDE_LEVEL = 0;
+    private static readonly FAILURE_POPUP_DELAY = 1.25;
 
     // UI 相关 —— targetLabel/statusLabel/comboLabel/toastLabel 已搬到 UIGameLayer，
     // levelLabel 是 @property 由场景绑定，留在这里直接读写
@@ -173,6 +174,8 @@ export class GameCtrl extends Component {
             return { level, snapshot: null };
         }
         const snapshot = ProgressManager.loadSnapshot();
+        console.log("!111111111")
+        console.log(snapshot)
         return { level, snapshot };
     }
 
@@ -408,16 +411,16 @@ export class GameCtrl extends Component {
         // 不缩放 pNode 本身,避免棋盘牌飞到 flyLayer/slot 时因换父节点产生缩放跳变。
         this.mahjongPnode.setScale(1, 1, 1);
 
-        console.log(
-            `[BoardFit] level=${this.nowLevel} ` +
-            `halfSpan=(${maxHC - minHC}×${maxHR - minHR}) ` +
-            `boardPx=(${boardW.toFixed(1)}×${boardH.toFixed(1)}) ` +
-            `tilePx=(${tileVisualW.toFixed(1)}×${tileVisualH.toFixed(1)}) ` +
-            `fitArea=(${area.width.toFixed(1)}×${area.height.toFixed(1)}) ` +
-            `fitRatio=${fitRatio.toFixed(3)} ` +
-            `boardVisible=(${(boardW * fitRatio).toFixed(1)}×${(boardH * fitRatio).toFixed(1)}) ` +
-            `usable=(${usableW.toFixed(1)}×${usableH.toFixed(1)})`
-        );
+        // console.log(
+        //     `[BoardFit] level=${this.nowLevel} ` +
+        //     `halfSpan=(${maxHC - minHC}×${maxHR - minHR}) ` +
+        //     `boardPx=(${boardW.toFixed(1)}×${boardH.toFixed(1)}) ` +
+        //     `tilePx=(${tileVisualW.toFixed(1)}×${tileVisualH.toFixed(1)}) ` +
+        //     `fitArea=(${area.width.toFixed(1)}×${area.height.toFixed(1)}) ` +
+        //     `fitRatio=${fitRatio.toFixed(3)} ` +
+        //     `boardVisible=(${(boardW * fitRatio).toFixed(1)}×${(boardH * fitRatio).toFixed(1)}) ` +
+        //     `usable=(${usableW.toFixed(1)}×${usableH.toFixed(1)})`
+        // );
     }
 
     private getMahjongItemVisualSize(): { width: number; height: number } {
@@ -853,7 +856,11 @@ export class GameCtrl extends Component {
             // opentype 为空 = 还有未解锁的槽位,"继续游戏" 帮玩家解锁一个槽位
             // opentype 非空 = 所有槽位都解锁了,"继续游戏" 清空底部 slot
             const opentype = allUnlocked ? 'clearSlot' : null;
-            LayerManager.instance.showUI('failure', opentype, this.slotNode);
+            this.setBoardTileTouchEnabled(false);
+            this.scheduleOnce(() => {
+                if (this.gameState !== 'fail') return;
+                LayerManager.instance.showUI('failure', opentype, this.slotNode);
+            }, GameCtrl.FAILURE_POPUP_DELAY);
             return;
         }
 
@@ -874,12 +881,24 @@ export class GameCtrl extends Component {
     private onEventFailureContinue(opentype: string | null) {
         if (this.gameState !== 'fail') return;
         this.gameState = 'playing';
+        this.setBoardTileTouchEnabled(true);
         if (opentype) {
             this.clearBottomSlot();
         } else {
             this.unlockNextSlotForContinue();
         }
         this.updateHud();
+    }
+
+    private setBoardTileTouchEnabled(enabled: boolean) {
+        for (const tile of this.tiles) {
+            if (tile.collected || tile.removed || !tile.node?.activeInHierarchy) continue;
+            if (enabled) {
+                tile.item.enableTileTouch();
+            } else {
+                tile.item.disableTileTouch();
+            }
+        }
     }
 
     // 失败弹窗"继续游戏(还有锁着的槽位)":解锁下一个槽位,并在动画结束后给它分配新目标
@@ -913,9 +932,69 @@ export class GameCtrl extends Component {
         // 丢进回收站的牌不再能被撤回
         this.actionHistory = this.actionHistory.filter((t) => !discardedSet.has(t));
         this.refreshUndoButtonStatus();
+        const clearedTriplets = this.clearCompletedDiscardedTriplets();
+        if (clearedTriplets) this.fillEmptyTargetBoxes();
         // 当前目标若已经能消化这些牌(例如本次失败前的 refresh 已给出新 type),立即试一次回收
         this.collectStoredTargets();
+        if (!this.resolvingMatch) this.checkEndState();
         this.saveProgressDeferred();
+    }
+
+    private clearCompletedDiscardedTriplets(): boolean {
+        if (this.discardedTiles.length < 3) return false;
+
+        const byType = new Map<string, TileRecord[]>();
+        for (const tile of this.discardedTiles) {
+            if (tile.removed || !tile.node?.isValid) continue;
+            const list = byType.get(tile.type) || [];
+            list.push(tile);
+            byType.set(tile.type, list);
+        }
+
+        let cleared = false;
+        for (const [type, tiles] of byType) {
+            while (tiles.length >= 3) {
+                if (!this.consumeTargetForDiscardedTriplet(type)) break;
+
+                const consumed = tiles.splice(0, 3);
+                for (const tile of consumed) {
+                    const index = this.discardedTiles.indexOf(tile);
+                    if (index >= 0) this.discardedTiles.splice(index, 1);
+
+                    tile.collected = true;
+                    tile.removed = true;
+                    tile.item.disableTileTouch();
+                    if (tile.node?.isValid) tile.node.destroy();
+                }
+                cleared = true;
+            }
+        }
+        return cleared;
+    }
+
+    private consumeTargetForDiscardedTriplet(type: string): boolean {
+        const box = this.targetBoxes.find((b) =>
+            b.unlocked &&
+            !b.refreshing &&
+            !b.movingIn &&
+            b.type === type &&
+            b.progress === 0 &&
+            b.pending === 0
+        );
+
+        if (box) {
+            this.emitClearSlot(box);
+            box.type = '';
+            box.progress = 0;
+            box.pending = 0;
+            this.emitRenderSlot(box);
+            return true;
+        }
+
+        const taskIndex = this.taskQueue.indexOf(type);
+        if (taskIndex < 0) return false;
+        this.taskQueue.splice(taskIndex, 1);
+        return true;
     }
 
     // ==========================================
@@ -938,6 +1017,11 @@ export class GameCtrl extends Component {
     private findBlockerTile(tile: TileRecord): TileRecord | null {
         for (const other of this.tiles) {
             if (other === tile || other.collected || other.removed || other.layer <= tile.layer) continue;
+            // 失败弹窗"清空后备栏"挂起的 discardedTiles 仍是 collected=false/removed=false,
+            // 但已被移出棋盘(setParent 到 slotNode 且 active=false)。它们不在棋盘上,不能再算遮挡——
+            // 否则恢复进度后,被它们盖过的底层牌会被永久判为"被锁住"(mask 透明,玩家看不到遮挡物)。
+            // 用 activeInHierarchy 与 MahjongItem.isBlockedByUpperMahjong 保持同一判定口径。
+            if (!other.node?.activeInHierarchy) continue;
             // 判断是否在同层级上方遮挡 (物理碰撞盒检查)
             if (Math.abs(other.boardPos.x - tile.boardPos.x) < Constants.MahjongBoard.TileStepX * this.boardFitRatio * 0.82 &&
                 Math.abs(other.boardPos.y - tile.boardPos.y) < Constants.MahjongBoard.TileStepY * this.boardFitRatio * 0.82) {
@@ -1844,9 +1928,14 @@ export class GameCtrl extends Component {
                 tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
                 tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + j + 1);
                 tile.item.disableTileTouch();
+                if (box.node.name == "slot3" || box.node.name == "slot4") {
+                    box.node.getChildByName("box_2").active = false;
+                }
+
             }
             // 同步 UI(预览图/锁状态),覆盖 resetTargetBoxes 写入的初始状态
             this.emitRenderSlot(box);
+
         }
 
         // 6. 失败弹窗清空后备栏后挂起的牌
