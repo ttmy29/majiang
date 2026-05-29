@@ -159,8 +159,8 @@ export class SDKManager {
         if (!SDKManager.isOpen) return;
 
         let param: any = {
-            token:code,
-            appid:SDKManager.appId,
+            token: code,
+            appid: SDKManager.appId,
         };
 
 
@@ -221,6 +221,24 @@ export class SDKManager {
             this.handleLoadEvent(data, isNowSend);
         } else if (data.event === SDKEvent.login) {
             this.handleLoginEvent(data, isNowSend);
+        } else if (data.event === SDKEvent.level) {
+            let param: any = {
+                event: "",
+                len: data.level,
+            };
+            if(data.type == 1){
+                param.event = "lv_start";
+                this.send(param, isNowSend);
+            }else if(data.type == 2){
+                param.event = "lv_success";
+                this.send(param, isNowSend);
+                setTimeout(()=>{
+                    param.event = `lv_time_` + data.level;
+                    param.len = data.time;
+                    this.send(param, isNowSend);
+                }, 1000);
+            }
+
         } else {
             this.send(data, isNowSend);
         }
@@ -325,7 +343,7 @@ export class SDKManager {
             // 生成签名
             //const signStr = this.object2String(param, '&') + '&' + SDKManager.secret;
             //param.sign = this.getMD5(signStr);
-            param.sign = this.createSign(param,SDKManager.secret);
+            param.sign = this.createSign(param, SDKManager.secret);
             this.httpRequest(url, param);
         } else {
             if (SDKManager.sendDataList.length > 0) {
