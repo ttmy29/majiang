@@ -95,7 +95,6 @@ export class SDKManager {
         this.startOnlineTimeReport();
         SDKManager.adsVideoId = "adunit-938e509f0347335b";
 
-        return;
         if (sys.platform === sys.Platform.WECHAT_GAME) {
             SDKManager.rewardedVideoAd = wx.createRewardedVideoAd({ adUnitId: SDKManager.adsVideoId })
 
@@ -115,6 +114,31 @@ export class SDKManager {
                 }
                 SDKManager._instance.handleVideoAdFail();
             })
+
+            wx.showShareMenu({
+                withShareTicket: true,
+                menus: ['shareAppMessage', 'shareTimeline']
+            });
+            // wx.shareAppMessage({
+            //     title: "上头小游戏（15个好友在玩）",
+            //     imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
+            // });
+            // 好友点击回调
+            wx.onShareAppMessage(() => {
+                return {
+                    // 转发标题, 没有则默认使用小游戏的昵称
+                    title: "上头小游戏（15个好友在玩）",
+                    // 图片链接，
+                    imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
+                };
+            });
+            // 朋友圈点击回调
+            wx.onShareTimeline(() => {
+                return {
+                    title: '上头小游戏（15个好友在玩）',
+                    imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
+                };
+            });
         }
     }
 
@@ -226,13 +250,13 @@ export class SDKManager {
                 event: "",
                 len: data.level,
             };
-            if(data.type == 1){
+            if (data.type == 1) {
                 param.event = "lv_start";
                 this.send(param, isNowSend);
-            }else if(data.type == 2){
+            } else if (data.type == 2) {
                 param.event = "lv_success";
                 this.send(param, isNowSend);
-                setTimeout(()=>{
+                setTimeout(() => {
                     param.event = `lv_time_` + data.level;
                     param.len = data.time;
                     this.send(param, isNowSend);

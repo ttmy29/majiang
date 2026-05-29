@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, director, Label, Node, sp, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Color, Component, director, Label, Node, sp, sys, tween, UIOpacity, Vec3 } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
@@ -26,27 +26,33 @@ export class UIWinLayer extends Component {
     }
 
     public playSingleAnimation() {
-        // 1. 注册动画完成监听器
-        this.skeleton.setCompleteListener((trackEntry: sp.spine.TrackEntry) => {
-            // 获取当前播放完成的动画名称
-            const animationName = trackEntry.animation ? trackEntry.animation.name : "";
+        // // 1. 注册动画完成监听器
+        // this.skeleton.setCompleteListener((trackEntry: sp.spine.TrackEntry) => {
+        //     // 获取当前播放完成的动画名称
+        //     const animationName = trackEntry.animation ? trackEntry.animation.name : "";
 
-            // 判断是否是你想要监听的那个动画
-            if (animationName === 'open') {
-                console.log('attack 动画播放了一次并完成了！');
+        //     // 判断是否是你想要监听的那个动画
+        //     if (animationName === 'open') {
+        //         console.log('attack 动画播放了一次并完成了！');
 
-                this.skeleton.animation = 'idle';
-                this.skeleton.loop = true;
-                this.skeleton.setCompleteListener(null);
+        //         this.skeleton.animation = 'idle';
+        //         this.skeleton.loop = true;
+        //         this.skeleton.setCompleteListener(null);
 
 
-            }
-        });
+        //     }
+        // });
+
+        // this.scheduleOnce(() => {
+        //         this.skeleton.animation = 'idle';
+        //         this.skeleton.loop = true;
+        // }, 3.5);
+
 
         // 2. 播放动画
         // 参数依次为：trackIndex(轨道索引), animationName(动画名), loop(是否循环)
         // 注意：要监听“一次播放完成”，这里的 loop 必须设置为 false
-        this.skeleton.setAnimation(0, 'attack', false);
+        //this.skeleton.setAnimation(0, 'attack', false);
     }
 
 
@@ -130,7 +136,12 @@ export class UIWinLayer extends Component {
 
     onButtonShareClick() {
         AudioManager.instance.playClick();
-
+        if (sys.platform === sys.Platform.WECHAT_GAME) {
+            wx.shareAppMessage({
+                title: "上头小游戏（15个好友在玩）",
+                imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
+            });
+        }
     }
 
     onButtonNextLevelClick() {

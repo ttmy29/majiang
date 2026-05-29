@@ -14,7 +14,7 @@ export class GameLaunch extends Component {
         this.initSDK();
         SDKManager.instance.wxLogin((userId) => {
             //console.log('wxLogin success:', userId);
-            SDKManager.instance.report({ event: SDKEvent.login,isNowSend:true});
+            SDKManager.instance.report({ event: SDKEvent.login, isNowSend: true });
         }, (err) => {
             //console.log('wxLogin failed:', err);
         });
@@ -39,25 +39,44 @@ export class GameLaunch extends Component {
     }
 
     private initAudioManager() {
-        assetManager.loadBundle(Constants.BgmBundleName, (err, bundle) => {
-            bundle.load<AudioClip>('mj_bgm', AudioClip, (err, clip: AudioClip) => {
-                if (err) {
-                    console.error('加载音频失败', err);
-                    return;
-                }
+        // assetManager.loadBundle(Constants.BgmBundleName, (err, bundle) => {
+        //     bundle.load<AudioClip>('mj_bgm', AudioClip, (err, clip: AudioClip) => {
+        //         if (err) {
+        //             console.error('加载音频失败', err);
+        //             return;
+        //         }
 
-                const bgmSource = this.node.addComponent(AudioSource);
-                bgmSource.clip = clip;
-                bgmSource.loop = true;
+        //         const bgmSource = this.node.addComponent(AudioSource);
+        //         bgmSource.clip = clip;
+        //         bgmSource.loop = true;
 
-                const effectSourceCount = 4;
-                const effectSources: AudioSource[] = [];
-                for (let i = 0; i < effectSourceCount; i++) {
-                    effectSources.push(this.node.addComponent(AudioSource));
-                }
+        //         const effectSourceCount = 4;
+        //         const effectSources: AudioSource[] = [];
+        //         for (let i = 0; i < effectSourceCount; i++) {
+        //             effectSources.push(this.node.addComponent(AudioSource));
+        //         }
 
-                AudioManager.instance.init([bgmSource, ...effectSources]);
-            });
+        //         AudioManager.instance.init([bgmSource, ...effectSources]);
+        //     });
+        // });  
+        const bundle = assetManager.getBundle(Constants.BgmBundleName);
+        bundle.load<AudioClip>('mj_bgm', AudioClip, (err, clip: AudioClip) => {
+            if (err) {
+                console.error('加载音频失败', err);
+                return;
+            }
+
+            const bgmSource = this.node.addComponent(AudioSource);
+            bgmSource.clip = clip;
+            bgmSource.loop = true;
+
+            const effectSourceCount = 4;
+            const effectSources: AudioSource[] = [];
+            for (let i = 0; i < effectSourceCount; i++) {
+                effectSources.push(this.node.addComponent(AudioSource));
+            }
+
+            AudioManager.instance.init([bgmSource, ...effectSources]);
         });
     }
 
@@ -94,16 +113,26 @@ export class GameLaunch extends Component {
     }
 
     initAudioResources() {
-        assetManager.loadBundle(Constants.AudioBundleName, (err, bundle) => {
-            bundle.loadDir('/', AudioClip, (err, clipArray: AudioClip[]) => {
-                if (err) {
-                    console.error('加载音频失败', err);
-                    return;
-                }
-                // 把加载到的 clip 注册到单例,clip.name 不带扩展名,跟 AudioClipNames 里的字符串对齐即可命中
-                AudioManager.instance.initAudioClips(clipArray);
-                console.log('加载音频成功', clipArray.length);
-            });
+        // assetManager.loadBundle(Constants.AudioBundleName, (err, bundle) => {
+        //     bundle.loadDir('/', AudioClip, (err, clipArray: AudioClip[]) => {
+        //         if (err) {
+        //             console.error('加载音频失败', err);
+        //             return;
+        //         }
+        //         // 把加载到的 clip 注册到单例,clip.name 不带扩展名,跟 AudioClipNames 里的字符串对齐即可命中
+        //         AudioManager.instance.initAudioClips(clipArray);
+        //         console.log('加载音频成功', clipArray.length);
+        //     });
+        // });
+        const bundle = assetManager.getBundle(Constants.AudioBundleName);
+        bundle.loadDir('/', AudioClip, (err, clipArray: AudioClip[]) => {
+            if (err) {
+                console.error('加载音频失败', err);
+                return;
+            }
+            // 把加载到的 clip 注册到单例,clip.name 不带扩展名,跟 AudioClipNames 里的字符串对齐即可命中
+            AudioManager.instance.initAudioClips(clipArray);
+            console.log('加载音频成功', clipArray.length);
         });
     }
 }

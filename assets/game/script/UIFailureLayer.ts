@@ -26,18 +26,21 @@ export class UIFailureLayer extends Component {
         tween(this.node)
             .delay(0.5)
             .call(() => {
-                AudioManager.instance.playOneShot(AudioClipNames.game_lose);
+                AudioManager.instance.playOneShotDuckingBgm(AudioClipNames.game_lose);
             })
             .start();
         //显示牌
-        let idx = 1;
-        const tiles = this.soltNode.children.filter((item) => item.getChildByName("bg"));
-        tiles.forEach((item) => {
-            item.setPosition(this.iconNode2.getChildByName(`item${idx}`).getPosition());
-            item.parent = this.iconNode2;
-            item.setScale(Constants.MahjongBoard.SlotScale + 0.06, Constants.MahjongBoard.SlotScale+ 0.06, 1);
-            idx += 1;
-        });
+        if (this.isMax) {
+            let idx = 1;
+            const tiles = this.soltNode.children.filter((item) => item.getChildByName("bg"));
+            tiles.forEach((item) => {
+                item.setPosition(this.iconNode2.getChildByName(`item${idx}`).getPosition());
+                item.parent = this.iconNode2;
+                item.setScale(Constants.MahjongBoard.SlotScale + 0.06, Constants.MahjongBoard.SlotScale + 0.06, 1);
+                idx += 1;
+            });
+        }
+
     }
 
     init(isMax: boolean = false, soltNode: Node = null) {

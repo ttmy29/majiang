@@ -1,4 +1,4 @@
-import { _decorator, AudioClip, AudioSource } from 'cc';
+import { _decorator, AudioClip, AudioSource, tween, Tween } from 'cc';
 import { StorageKey, StorageManager } from './StorageManager';
 
 const { ccclass } = _decorator;
@@ -34,6 +34,9 @@ export class AudioManager {
     private effectSources: AudioSource[] = [];
 
     private effectSourceIndex = 0;
+
+    // BGM 正常音量。播放失败音效等场景会临时压低 bgm(ducking),结束后恢复到这个值
+    private bgmBaseVolume = 1;
 
     public clips: { [name: string]: AudioClip } = {};
 
@@ -80,6 +83,9 @@ export class AudioManager {
     play() {
         if (!this.musicOn || !this.bgmSource) return;
 
+        // 复位音量,避免上一次 ducking 的 tween 被打断后 bgm 停在压低状态
+        Tween.stopAllByTarget(this.bgmSource);
+        this.bgmSource.volume = this.bgmBaseVolume;
         this.bgmSource.play();
     }
 
@@ -121,9 +127,11 @@ export class AudioManager {
         const clip = this.getClip(clipName);
         if (!clip) return;
 
+        Tween.stopAllByTarget(this.bgmSource);
         this.bgmSource.stop();
         this.bgmSource.clip = clip;
         this.bgmSource.loop = loop;
+        this.bgmSource.volume = this.bgmBaseVolume;
         this.bgmSource.play();
     }
 
@@ -139,6 +147,47 @@ export class AudioManager {
 
     playClick(volume = 1) {
         this.playOneShot(AudioClipNames.Click, volume);
+    }
+
+    /**
+     * 播放一个音效,并在其播放期间临时压低 BGM 音量(audio ducking),
+     * 让该音效(如失败提示音)盖过背景音乐更突出。音效放完后 BGM 自动平滑恢复。
+     * @param clipName   音效名
+     * @param volume     音效音量(0~1)
+     * @param duckFactor BGM 压低后的音量系数(0~1),默认 0.2,即压到正常音量的 20%
+     */
+    playOneShotDuckingBgm(clipName: AudioClipName, volume = 1, duckFactor = 0.2) {
+        if (!this.effectOn) return;
+
+        const clip = this.getClip(clipName);
+        const source = this.getEffectSource();
+        if (!clip || !source) return;
+
+        source.playOneShot(clip, volume);
+
+        // 用音效本身的时长作为压低时长,音效放完时 bgm 正好开始恢复
+        const duration = typeof clip.getDuration === 'function' ? clip.getDuration() : 0;
+        this.duckBgm(duckFactor, duration > 0 ? duration : 1.5);
+    }
+
+    /**
+     * 临时压低 BGM 音量并在 holdSeconds 后恢复到正常音量。
+     * 快速压低 + 稍慢恢复,过渡更自然;重复调用会打断上一次重新计时。
+     */
+    duckBgm(duckFactor = 0.2, holdSeconds = 1.5) {
+        if (!this.bgmSource || !this.musicOn) return;
+
+        const fadeIn = 0.08;   // 快速压低
+        const fadeOut = 0.45;  // 稍慢恢复
+        const low = this.bgmBaseVolume * Math.max(0, Math.min(1, duckFactor));
+
+        // 停掉上一次 ducking,避免多次叠加导致音量错乱
+        Tween.stopAllByTarget(this.bgmSource);
+        tween(this.bgmSource)
+            .to(fadeIn, { volume: low })
+            .delay(Math.max(0, holdSeconds))
+            .to(fadeOut, { volume: this.bgmBaseVolume })
+            .start();
     }
 
     private getClip(clipName: AudioClipName): AudioClip | null {

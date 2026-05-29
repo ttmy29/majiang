@@ -21,7 +21,7 @@ export class UIStartLayer extends Component {
 
     onClickSetButton() {
         AudioManager.instance.playClick();
-        // LayerManager.instance.showUI("failure");
+        // LayerManager.instance.showUI("win");
         // return;
         LayerManager.instance.showUI("setting");
     }
