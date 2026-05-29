@@ -181,7 +181,7 @@ export class SDKManager {
                 try {
                     const res = JSON.parse(xhr.responseText);
                     // 后台返回的 userId 字段（如字段名不同请按实际调整）
-                    const userId = res && res.data ? res.data.userId : (res ? res.userId : null);
+                    const userId = res && res.data ? res.data.openid : (res ? res.openid : null);
                     if (userId) {
                         SDKManager.openid = userId;
                         callback && callback(userId);
