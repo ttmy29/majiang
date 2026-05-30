@@ -345,6 +345,12 @@ export class UIGameLayer extends Component {
         if (lockNode) lockNode.active = locked;
         const tipsNode = slotNode.getChildByName('tips');
         if (tipsNode) tipsNode.active = locked;
+        // box_2(锁箱盖子)同样跟随解锁状态显隐;但解锁/移入移出动画进行中(refreshing)时,
+        // box_2 由对应动画自行控制(甩出/盖上),这里不插手,避免把正飞出的盖子提前关掉。
+        // 恢复存档时 refreshing 为 false,这里会把已解锁槽位上残留的 box_2 正确关掉,
+        // 修复"applySnapshot 恢复后已解锁的 slot3/slot4 盖子还盖着"的问题。
+        const box2Node = slotNode.getChildByName('box_2');
+        if (box2Node && !payload.refreshing) box2Node.active = locked;
         for (const child of slotNode.children) {
             const name = child.name.toLowerCase();
             if (child.name === 'tips' || child.name === 'lock' || name.includes('unlock') || child.name.includes('解锁')) {

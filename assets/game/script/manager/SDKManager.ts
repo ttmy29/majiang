@@ -349,6 +349,10 @@ export class SDKManager {
             param.name = data.cid;
             param.type = parseInt(data.type);
             param.unitId = "video";
+            if (param.type != 1 && param.type != 2) {
+                const timestamp = Date.now();
+                param.unitId = timestamp + "";
+            }
         } else if (data.event === SDKEvent.onlineTime) {
             url += "/online_time";
             param.len = data.len;
@@ -359,7 +363,7 @@ export class SDKManager {
 
         // 合并自定义参数
         Object.keys(data).forEach(key => {
-            if (!param[key] && key !== 'event' && key !== 'isNowSend') {
+            if (!param[key] && key !== 'event' && key !== 'isNowSend' && key !== "cid") {
                 param[key] = data[key];
             }
         });

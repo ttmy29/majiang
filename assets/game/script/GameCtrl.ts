@@ -598,6 +598,12 @@ export class GameCtrl extends Component {
     }
 
     private moveTileToSlot(tile: TileRecord) {
+        // 失败判定有 0.18~0.31s 延时(见下方 scheduleOnce -> checkEndState),这期间玩家连点、
+        // 或目标槽满时的回退入槽(moveTileToTarget)会继续往 slots 里塞牌,把长度顶过上限。
+        // slots 的唯一增长点就是下面这次 splice,这里按失败阈值设闸即可封顶,
+        // 保证 slots 不会超过 slotCapacity-1;只拦"要进底部 slot"的牌,匹配目标槽的点击不受影响。
+        if (this.slots.length >= Math.max(1, this.slotCapacity - 1)) return;
+
         tile.collected = true;
         tile.node.name = `slotTile_${tile.uid}`;
         this.actionHistory.push(tile);
@@ -1622,7 +1628,8 @@ export class GameCtrl extends Component {
     private onBtnUnlockClick(event) {
         if (this.gameState !== 'playing') return;
         const box = this.targetBoxes.find((i) => !i.unlocked);
-        if (!box) return this.showToast('槽位已满', 0.8);
+        //if (!box) return this.showToast('槽位已满', 0.8);
+        if (!box) return LayerManager.instance.showToast('槽位已满');
 
         // 看视频广告
         SDKManager.instance.showVideoAd(() => {
@@ -1928,12 +1935,9 @@ export class GameCtrl extends Component {
                 tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
                 tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + j + 1);
                 tile.item.disableTileTouch();
-                if (box.node.name == "slot3" || box.node.name == "slot4") {
-                    box.node.getChildByName("box_2").active = false;
-                }
-
             }
-            // 同步 UI(预览图/锁状态),覆盖 resetTargetBoxes 写入的初始状态
+            // 同步 UI(预览图/锁状态/box_2 盖子),覆盖 resetTargetBoxes 写入的初始状态。
+            // box_2 的显隐统一由 onEventRenderSlot 按 unlocked 处理,无需在此单独关闭。
             this.emitRenderSlot(box);
 
         }
@@ -1996,5 +2000,21 @@ export class GameCtrl extends Component {
         if (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)) return;
         ProgressManager.saveSnapshot(this.buildSnapshot());
         this.snapshotDirty = false;
+    }
+
+    public onBtnSlotUnlockClick(event, data: string) {
+        if (this.gameState !== 'playing') return;
+        // data "1" -> slot3,"2" -> slot4
+        const slotName = data == "1" ? "slot3" : (data == "2" ? "slot4" : "");
+        if (!slotName) return;
+        const box = this.targetBoxes.find((b) => b.node?.name === slotName);
+        if (!box || box.unlocked) return;
+
+        // 看视频广告,播完才解锁(与 onBtnUnlockClick 一致)
+        SDKManager.instance.showVideoAd(() => {
+            this.executeUnlock(box);
+        }, () => {
+            LayerManager.instance.showToast("视频播放未完成！")
+        }, 'unlock');
     }
 }
