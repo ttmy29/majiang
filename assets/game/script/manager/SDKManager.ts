@@ -1,4 +1,4 @@
-import { _decorator, game, sys } from 'cc';
+import { _decorator, game, math, sys } from 'cc';
 
 const { ccclass } = _decorator;
 
@@ -12,7 +12,7 @@ export const SDKEvent = {
     signup: "signup",
     /** 自定义事件 */
     custom: "custom",
-    /** 视频广告事件 type: 1拉取 2拉取成功 3播放成功 */
+    /** 视频广告事件 type: 1展示 2拉取 3拉取成功 4播放完成 */
     video: "video",
     /** 道具产销 type: 1生成 2消费 */
     prop: "prop",
@@ -65,6 +65,7 @@ export class SDKManager {
     public callBack: Function = null
     public fcallBack: Function = null
     private currentVideoKey: string = "default"  // 当前播放的视频广告标识
+    private currentVideoUnitId: string = "video" // 当前广告唯一 unitId(曝光与播放完成共用)
     private isVideoShowing: boolean = false
     private isVideoPlaying: boolean = false
     private videoSettled: boolean = false
@@ -253,14 +254,16 @@ export class SDKManager {
             if (data.type == 1) {
                 param.event = "lv_start";
                 this.send(param, isNowSend);
-            } else if (data.type == 2) {
+            } else if (data.type == 3) {
                 param.event = "lv_success";
                 this.send(param, isNowSend);
                 setTimeout(() => {
                     param.event = `lv_time_` + data.level;
-                    param.len = data.time;
+                    param.len = Math.ceil(data.time);
                     this.send(param, isNowSend);
                 }, 1000);
+            }else if (data.type == 2) {
+                return;
             }
 
         } else {
@@ -348,11 +351,8 @@ export class SDKManager {
             url += "/video";
             param.name = data.cid;
             param.type = parseInt(data.type);
-            param.unitId = "video";
-            if (param.type != 1 && param.type != 2) {
-                const timestamp = Date.now();
-                param.unitId = timestamp + "";
-            }
+            // type 1/2 用默认 "video";type 3/4 由调用方传入本次广告唯一 unitId(曝光与播放完成共用)
+            param.unitId = data.unitId || "video";
         } else if (data.event === SDKEvent.onlineTime) {
             url += "/online_time";
             param.len = data.len;
@@ -725,11 +725,16 @@ export class SDKManager {
             return;
         }
 
-        // 上报视频广告拉取事件
+        // 上报视频广告"展示"(1)与"拉取"(2)事件(unitId 用默认 "video")
         this.report({
             event: SDKEvent.video,
             cid: videoKey,
-            type: 1  // 1:拉取
+            type: 1  // 1:展示
+        });
+        this.report({
+            event: SDKEvent.video,
+            cid: videoKey,
+            type: 2  // 2:拉取
         });
 
         // 微信小游戏
@@ -785,11 +790,13 @@ export class SDKManager {
         if (this.videoShowReported) return;
         this.videoShowReported = true;
         this.isVideoPlaying = true;
-        // 广告显示成功，上报拉取成功事件
+        // 广告曝光成功:生成本次广告唯一 unitId(与"播放完成"共用),上报"拉取成功"
+        this.currentVideoUnitId = this.genVideoUnitId();
         this.report({
             event: SDKEvent.video,
             cid: videoKey,
-            type: 2  // 2:拉取成功
+            type: 3,  // 3:拉取成功
+            unitId: this.currentVideoUnitId
         });
     }
 
@@ -798,14 +805,16 @@ export class SDKManager {
         this.videoSettled = true;
         const callback = this.callBack;
         const videoKey = this.currentVideoKey;
+        const unitId = this.currentVideoUnitId; // 复用曝光(拉取成功)时生成的 unitId
         this.clearVideoAdState();
         game.resume();
 
-        // 上报播放成功事件
+        // 上报"播放完成",复用曝光时的 unitId
         this.report({
             event: SDKEvent.video,
             cid: videoKey,
-            type: 3  // 3:播放成功
+            type: 4,  // 4:播放完成
+            unitId
         });
 
         callback && callback();
@@ -826,7 +835,21 @@ export class SDKManager {
         this.callBack = null;
         this.fcallBack = null;
         this.currentVideoKey = "default";
+        this.currentVideoUnitId = "video";
         this.videoShowReported = false;
+    }
+
+    /**
+     * 生成视频广告唯一 unitId(毫秒时间戳 + 10 位随机串)
+     * 同一次广告的"拉取成功"与"播放完成"共用,下一次广告重新生成
+     */
+    private genVideoUnitId(): string {
+        const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let rand = '';
+        for (let i = 0; i < 10; i++) {
+            rand += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return Date.now() + rand;
     }
 
 
