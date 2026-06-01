@@ -260,14 +260,14 @@ export class SDKManager {
                 setTimeout(() => {
                     param.event = `lv_time_` + data.level;
                     param.len = Math.ceil(data.time);
-
+                    this.send(param, isNowSend);
                 }, 1000);
             }else if (data.type == 2) {
                 return;
             } else if(data.type == 4){ //关卡视频
-                param.event ="lv_video_1 ";
+                param.event ="lv_video_1";
             }else if(data.type == 5){ //关卡视频
-                param.event ="lv_video_2 ";
+                param.event ="lv_video_2";
             }
             this.send(param, isNowSend);
         } else {

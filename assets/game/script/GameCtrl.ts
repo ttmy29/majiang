@@ -152,10 +152,21 @@ export class GameCtrl extends Component {
     // 退到 start 层后再点开始，靠 onEnable 触发整局重开
     protected onEnable() {
         if (!this.hasStarted) return;
+        // 延后一帧再开局:GameCtrl 与 UIGameLayer 同挂在 gameLayer 节点上,且组件顺序
+        // GameCtrl 在前。gameLayer 重新激活时 onEnable 按组件顺序触发,GameCtrl 先跑,
+        // 若此处同步调用 startLevel,applySnapshot 会立刻 emit 槽位渲染事件,而 UIGameLayer
+        // 还没轮到自己的 onEnable 去重新注册 EventRenderSlot 监听 —— 事件全部丢失,
+        // 恢复存档时 slot1/slot2 预览不显示,只剩 slot3/slot4 场景默认的"解锁盒子"。
+        // 推迟到激活流程结束后的下一帧,确保 UIGameLayer 已注册监听再开局(与 start() 一致)。
+        this.unschedule(this.restartFromEnable);
+        this.scheduleOnce(this.restartFromEnable, 0);
+    }
+
+    private restartFromEnable = () => {
         // 必须每次重读 — 胜利后玩家回主页再进入,内存里的 nowLevel 还是旧值
         const { level, snapshot } = this.loadSavedProgress();
         this.startLevel(level, snapshot);
-    }
+    };
 
     protected onDisable(): void {
     }
@@ -174,8 +185,6 @@ export class GameCtrl extends Component {
             return { level, snapshot: null };
         }
         const snapshot = ProgressManager.loadSnapshot();
-        console.log("!111111111")
-        console.log(snapshot)
         return { level, snapshot };
     }
 
@@ -189,11 +198,17 @@ export class GameCtrl extends Component {
     update(deltaTime: number) {
         if (this.gameState !== 'playing' || !this.config) return;
 
-        this.elapsedTime += deltaTime;
+        // 看广告 / 切后台会 game.pause()→game.resume() 整个主循环,期间 gameState 仍是 'playing'。
+        // resume 后首帧的 deltaTime 可能等于整段暂停时长(激励视频 ~30s),直接累加会让 elapsedTime
+        // 虚高、remainTime 被一次性扣光(看完广告下一帧秒判"时间到")。封顶到一帧量级 —— 暂停期间
+        // 的时间自然不计入,正好是"玩家实际解题用时"的语义。
+        const dt = Math.min(deltaTime, 0.25);
+
+        this.elapsedTime += dt;
 
         if (this.config.levelTime <= 0) return;
 
-        this.remainTime = Math.max(0, this.remainTime - deltaTime);
+        this.remainTime = Math.max(0, this.remainTime - dt);
         // 倒计时整数秒没变就不刷 HUD，避免 60Hz 重算 filter
         const currentSecond = Math.ceil(this.remainTime);
         if (currentSecond !== this.lastTickSecond) {
