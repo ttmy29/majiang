@@ -53,7 +53,7 @@ export class UIFailureLayer extends Component {
         // opentype 非空 = 槽位全部已解锁，提示玩家清空底部 slot 继续
         // opentype 为空 = 还有未解锁槽位，沿用 prefab 默认文案("继续游戏并解锁一个新盒子?")
         if (isMax && this.tipsLabel) {
-            this.tipsLabel.string = "没有更多空间了，清理后备栏的麻将来继续游戏";
+            //this.tipsLabel.string = "没有更多空间了，清理后备栏的麻将来继续游戏";
             this.iconNode1.active = false;
             this.iconNode2.active = true;
             this.soltNode = soltNode;

@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, director, Label, Node, sp, sys, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Color, Component, director, Label, Node, sp, sys, tween, UIOpacity, UITransform, v3, Vec3, view } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
@@ -14,6 +14,14 @@ export class UIWinLayer extends Component {
     skeleton: sp.Skeleton = null!;
     @property(Label)
     rankLabel: Label = null!;
+    @property(Node)
+    bgNode: Node = null!;
+    @property(Node)
+    effectNode1: Node = null!;
+    @property(Node)
+    effectNode2: Node = null!;
+    @property(Node)
+    effectNode3: Node = null!;
 
     start() {
         AudioManager.instance.playOneShot(AudioClipNames.game_win);
@@ -23,6 +31,7 @@ export class UIWinLayer extends Component {
         this.playOpenAnimation();
         this.rankLabel.string = "";
         this.showRankLabel(97.47, time);
+        this.playLightBurst();
     }
 
     public playSingleAnimation() {
@@ -119,6 +128,13 @@ export class UIWinLayer extends Component {
 
     protected onLoad(): void {
         this.playSingleAnimation();
+        //界面适配
+        const visibleSize = view.getVisibleSize();
+        const designSize = this.bgNode.getComponent(UITransform).contentSize;
+        const scaleX = visibleSize.width / designSize.width;
+        const scaleY = visibleSize.height / designSize.height;
+        const maxScale = Math.min(scaleX, scaleY);
+        this.bgNode.setScale(new Vec3(maxScale, maxScale, 1));
     }
 
     protected onDestroy(): void {
@@ -156,4 +172,26 @@ export class UIWinLayer extends Component {
         // 胜利时 winLevel 已经 saveLevel(next)+clearSnapshot,这里直接返主菜单即可
         LayerManager.instance.showStartLayer();
     }
+
+
+    public playLightBurst() {
+        this.effectNode1.scale = v3(1, 1, 0);
+        tween(this.effectNode1)
+            .to(0.5, { scale:  v3(0.9, 0.6, 0) }, { easing: 'sineInOut' })
+            .to(0.5, { scale:  v3(1, 1, 0) }, { easing: 'sineInOut' })
+            .union()
+            .repeatForever()
+            .start();
+        this.effectNode2.scale = v3(0.5, 0.5, 0);
+        tween(this.effectNode2)
+            .delay(0.1)
+            .to(0.5, { scale:  v3(1, 1, 0) }, { easing: 'sineInOut' })
+            .start();
+        this.effectNode3.getComponent(UIOpacity).opacity = 0;
+        tween(this.effectNode3.getComponent(UIOpacity))
+            .delay(0.2)
+            .to(0.5, { opacity: 255 }, { easing: 'sineInOut' })
+            .start();
+    }
+
 }
