@@ -1524,6 +1524,7 @@ export class GameCtrl extends Component {
         if (this.undoCount <= 0) {
             SDKManager.instance.showVideoAd(() => {
                 this.setUndoCount(this.undoCount + 3);
+                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
             }, 'undo');
@@ -1634,6 +1635,7 @@ export class GameCtrl extends Component {
         // 看视频广告
         SDKManager.instance.showVideoAd(() => {
             this.executeUnlock(box);
+            SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.nowLevel });
         }, () => {
             LayerManager.instance.showToast("视频播放未完成！")
         }, 'unlock');
@@ -1686,6 +1688,7 @@ export class GameCtrl extends Component {
         if (this.switchCount <= 0) {
             SDKManager.instance.showVideoAd(() => {
                 this.setSwitchCount(this.switchCount + 3);
+                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
             }, 'shuffle');
@@ -2013,6 +2016,7 @@ export class GameCtrl extends Component {
         // 看视频广告,播完才解锁(与 onBtnUnlockClick 一致)
         SDKManager.instance.showVideoAd(() => {
             this.executeUnlock(box);
+            SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.nowLevel });
         }, () => {
             LayerManager.instance.showToast("视频播放未完成！")
         }, 'unlock');

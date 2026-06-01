@@ -140,6 +140,8 @@ export class SDKManager {
                     imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
                 };
             });
+        }else{
+            SDKManager.isOpen = false;
         }
     }
 
@@ -253,19 +255,21 @@ export class SDKManager {
             };
             if (data.type == 1) {
                 param.event = "lv_start";
-                this.send(param, isNowSend);
             } else if (data.type == 3) {
                 param.event = "lv_success";
-                this.send(param, isNowSend);
                 setTimeout(() => {
                     param.event = `lv_time_` + data.level;
                     param.len = Math.ceil(data.time);
-                    this.send(param, isNowSend);
+
                 }, 1000);
             }else if (data.type == 2) {
                 return;
+            } else if(data.type == 4){ //关卡视频
+                param.event ="lv_video_1 ";
+            }else if(data.type == 5){ //关卡视频
+                param.event ="lv_video_2 ";
             }
-
+            this.send(param, isNowSend);
         } else {
             this.send(data, isNowSend);
         }
