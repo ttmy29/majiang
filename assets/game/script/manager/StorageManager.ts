@@ -25,8 +25,8 @@ export class StorageManager {
     }
 
     getItem(key: string): string | null {
-         let local = sys.localStorage.getItem(key);
-        if(local == ''){
+        let local = sys.localStorage.getItem(key);
+        if (local == '') {
             return null;
         }
         return local;
@@ -38,7 +38,7 @@ export class StorageManager {
 
     getBoolean(key: string, defaultValue = true): boolean {
         const value = sys.localStorage.getItem(key);
-        return (value === null ||  value === '') ? defaultValue : value === 'true';
+        return (value === null || value === '') ? defaultValue : value === 'true';
     }
 
     removeItem(key: string): void {

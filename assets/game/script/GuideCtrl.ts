@@ -80,6 +80,8 @@ export class GuideCtrl extends Component {
     private _shadowGraphics: Graphics | null = null;
 
     start() {
+        window.dnSDK?.track?.('TUTORIAL_START', {});
+
         this._initScale.set(this.fingerNode.scale);
         this._initPos.set(this.fingerNode.position);
         this._basePos.set(this._initPos);
@@ -97,6 +99,7 @@ export class GuideCtrl extends Component {
     onDisable() {
         director.off(Constants.eventNames.EventGuideTileTapped, this.onGuideTileTapped, this);
         find('Canvas/gameLayer/Game_btn_shezhi').active = true;
+        window.dnSDK?.onTutorialFinish()
     }
 
     private onGuideTileTapped(payload: { count: number; type: string; col: number; row: number; layer: number; worldPos: Vec3 }) {

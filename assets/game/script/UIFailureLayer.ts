@@ -3,7 +3,8 @@ import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
-import { SDKManager } from './manager/SDKManager';
+import { SDKManager } from '../../loading/SDKManager';
+
 const { ccclass, property } = _decorator;
 
 @ccclass('UIFailureLayer')
@@ -30,11 +31,12 @@ export class UIFailureLayer extends Component {
             })
             .start();
         //显示牌
-        if (this.isMax) {
+        // soltNode/iconNode2 任一缺失(prefab 未挂或非 clearSlot 模式)就不摆牌,避免读 null.children 崩溃
+        if (this.isMax && this.soltNode && this.iconNode2) {
             let idx = 1;
             const tiles = this.soltNode.children.filter((item) => item.getChildByName("bg"));
             tiles.forEach((item) => {
-                if (!item.active) return;
+                //if (!item.active) return;
                 // iconNode2 只有 item1~item6 六个占位,而底部 slot 可能因历史挂起的牌多于 6 张。
                 // 占位取不到时直接跳过,避免 setPosition(undefined) 崩溃。
                 const slot = this.iconNode2.getChildByName(`item${idx}`);
@@ -50,14 +52,16 @@ export class UIFailureLayer extends Component {
 
     init(isMax: boolean = false, soltNode: Node = null) {
         this.isMax = isMax;
-        // opentype 非空 = 槽位全部已解锁，提示玩家清空底部 slot 继续
+        // opentype 非空 = 槽位全部已解锁，切到"清空底部 slot"模式:隐藏默认图标、显示 slot 占位,
+        //   并记下底部 slot 节点供 start() 把牌摆过来。
         // opentype 为空 = 还有未解锁槽位，沿用 prefab 默认文案("继续游戏并解锁一个新盒子?")
-        if (isMax && this.tipsLabel) {
-            //this.tipsLabel.string = "没有更多空间了，清理后备栏的麻将来继续游戏";
-            this.iconNode1.active = false;
-            this.iconNode2.active = true;
+        // 注意:soltNode 的记录不能再依赖 tipsLabel——它只是顺手改文案用的,prefab 没挂 tipsLabel 时
+        //   原来会整块跳过,导致 soltNode 留空,start() 读 null.children 崩溃。
+        if (isMax) {
+            //if (this.tipsLabel) this.tipsLabel.string = "没有更多空间了，清理后备栏的麻将来继续游戏";
+            if (this.iconNode1) this.iconNode1.active = false;
+            if (this.iconNode2) this.iconNode2.active = true;
             this.soltNode = soltNode;
-            //console.log(soltNode);
         }
 
         this.playOpenAnimation();

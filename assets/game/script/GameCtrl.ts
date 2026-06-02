@@ -7,7 +7,8 @@ import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { Utils } from './util/Utils';
-import { SDKManager, SDKEvent } from './manager/SDKManager';
+import { SDKEvent, SDKManager } from '../../loading/SDKManager';
+
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
     baseDiff: number;
@@ -148,10 +149,13 @@ export class GameCtrl extends Component {
             });
         });
     }
+    //点击广告的次数
+    ad_cnt:number = 0;
 
     // 退到 start 层后再点开始，靠 onEnable 触发整局重开
     protected onEnable() {
         if (!this.hasStarted) return;
+        this.ad_cnt = 0;
         // 延后一帧再开局:GameCtrl 与 UIGameLayer 同挂在 gameLayer 节点上,且组件顺序
         // GameCtrl 在前。gameLayer 重新激活时 onEnable 按组件顺序触发,GameCtrl 先跑,
         // 若此处同步调用 startLevel,applySnapshot 会立刻 emit 槽位渲染事件,而 UIGameLayer
@@ -169,6 +173,7 @@ export class GameCtrl extends Component {
     };
 
     protected onDisable(): void {
+        window.dnSDK?.track?.('LEVEL_EXIT', {duration:this.lastTickSecond,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
     }
 
     protected onDestroy(): void {
@@ -225,6 +230,8 @@ export class GameCtrl extends Component {
         director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
         // 上报关卡进入事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
+        //
+        window.dnSDK?.track?.('LEVEL_ENTER', {enter_level_id:this.nowLevel,enter_level_name: `关卡${this.nowLevel}`});
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -808,9 +815,50 @@ export class GameCtrl extends Component {
     private checkEndState() {
         if (this.gameState !== 'playing') return;
         if (this.tiles.every((t) => t.removed)) {
+            // removed 是在牌"起飞飞向目标槽"那一刻就置 true 的(见 moveTileToTarget),
+            // 并非等落位、等这一组三消真正收满移出。若此刻还有牌在飞 / 目标槽还停着没满,
+            // 就直接判胜利,会出现"已过关但 slot 还停在 2/3 没满"的画面。
+            // 与失败判定同理,等棋盘彻底安定再宣布胜利:
+            //   resolvingMatch  : 正在从底部存牌槽往目标槽吸牌
+            //   pending > 0     : 有牌正飞向这个目标槽(已 removed 但还没落位)
+            //   refreshing      : 目标槽收满后正在 MoveOut→换目标→MoveIn
+            //   movingIn        : 目标槽正滑回原位
+            //   progress > 0    : 目标槽里还停着牌(未满 or 刚满还没移出),正对应"slot 没满"
+            //   flyLayer 上有牌 : 任意牌还挂在飞行层(含飞向底部槽的)
+            // movedOut 不计入——队列耗尽后空槽本就停在屏外,计入会导致永远无法判胜。
+            const isBoardBusy =
+                this.resolvingMatch ||
+                this.targetBoxes.some((b) => b.pending > 0 || b.refreshing || b.movingIn || b.progress > 0) ||
+                (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer));
+
+            if (isBoardBusy) {
+                // 棋盘还在收尾,稍后再判(同失败判定的轮询兜底)。在飞的牌落位后会各自再触发
+                // checkEndState,这里的 0.2s 重排只是防御性兜底。
+                this.unschedule(this.checkEndState);
+                this.scheduleOnce(this.checkEndState, 0.2);
+                return;
+            }
             return this.winLevel();
         }
         if (this.slots.length >= Math.max(1, this.slotCapacity - 1)) {
+            // 【新增防护】：检查棋盘是否处于“忙碌”状态
+            // resolvingMatch: 正在从底部往目标槽吸牌
+            // refreshing: 正在执行 MoveOut 移出动画并准备更换目标
+            // movingIn: 正在执行 MoveIn 移入屏幕动画
+            // progress >= required: 已经收满3个，但还在等 0.18s 的延迟才开始 refreshing
+            const isBoardBusy = this.resolvingMatch || this.targetBoxes.some(b =>
+                b.refreshing ||
+                b.movingIn ||
+                (b.progress >= b.required)
+            );
+
+            if (isBoardBusy) {
+                // 棋盘正在忙，后续大概率会触发 collectStoredTargets() 吸走底部的牌。
+                // 此时不能冤枉玩家，暂缓判负，0.2秒后再重新检查（类似于轮询机制）
+                this.unschedule(this.checkEndState); // 防止高频连点导致的回调堆积
+                this.scheduleOnce(this.checkEndState, 0.2);
+                return;
+            }
             return this.failLevel('槽位满了');
         }
 
@@ -851,6 +899,8 @@ export class GameCtrl extends Component {
         this.clearIdleTips();
         // 上报关卡成功事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: this.elapsedTime });
+        //
+        window.dnSDK?.track?.('LEVEL_PASS', {duration:this.lastTickSecond,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -870,7 +920,7 @@ export class GameCtrl extends Component {
         this.clearIdleTips();
         // 上报关卡失败事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
-
+        window.dnSDK?.track?.('LEVEL_LOSE', {duration:this.lastTickSecond,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
             const allUnlocked = this.targetBoxes.every((b) => b.unlocked);
@@ -904,6 +954,7 @@ export class GameCtrl extends Component {
         this.gameState = 'playing';
         this.setBoardTileTouchEnabled(true);
         if (opentype) {
+            this.ad_cnt += 1;
             this.clearBottomSlot();
         } else {
             this.unlockNextSlotForContinue();
@@ -1169,13 +1220,44 @@ export class GameCtrl extends Component {
 
     // 严格按 task[] 顺序出队:队列空了 box.type='' 返回 false,上层会把槽位标记 movedOut
     private assignNewTarget(box: TargetBox): boolean {
-        const type = this.taskQueue.shift() || '';
+        let type = '';
+
+        // 1. 收集玩家当前“急需解救”的牌的类型
+        // 包括被失败弹窗挂起的牌 (discardedTiles) 和底部存牌槽里的牌 (slots)
+        const urgentTypes = new Set<string>();
+        for (const tile of this.discardedTiles) {
+            if (tile.node?.isValid) urgentTypes.add(tile.type);
+        }
+        for (const tile of this.slots) {
+            if (tile.node?.isValid) urgentTypes.add(tile.type);
+        }
+
+        // 2. 尝试在任务队列 (taskQueue) 中寻找这些急需的类型，将其“插队”提取出来
+        let foundUrgent = false;
+        for (const uType of urgentTypes) {
+            const taskIndex = this.taskQueue.indexOf(uType);
+            if (taskIndex >= 0) {
+                // 在队列中找到了对应的任务！用 splice 把它从原位置抽出来
+                type = this.taskQueue.splice(taskIndex, 1)[0];
+                foundUrgent = true;
+                break;
+            }
+        }
+
+        // 3. 如果没找到急需的（或者底部槽位本来就是空的），就按原逻辑取队列第一个
+        if (!foundUrgent) {
+            type = this.taskQueue.shift() || '';
+        }
+
+        // 4. 继续执行后续的原有渲染和归位逻辑
         this.emitClearSlot(box);
         box.type = type;
         box.progress = 0;
         box.pending = 0;
         this.emitRenderSlot(box);
+
         if (type) this.attachDiscardedTilesToBox(box);
+
         return !!type;
     }
 
@@ -1292,6 +1374,7 @@ export class GameCtrl extends Component {
             box.movingIn = false;
             if (this.gameState !== 'playing') return;
             this.collectStoredTargets();
+            this.checkEndState(); // <--- 加上这句作为兜底
         }, Constants.slotAnim.MoveInWait);
     }
 
@@ -1539,6 +1622,8 @@ export class GameCtrl extends Component {
         if (this.undoCount <= 0) {
             SDKManager.instance.showVideoAd(() => {
                 this.setUndoCount(this.undoCount + 3);
+                this.ad_cnt += 1;
+                window.dnSDK?.track?.('GET_ITEM', {item_source:2});
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
@@ -1568,7 +1653,7 @@ export class GameCtrl extends Component {
             this.refreshUndoButtonStatus();
             return;
         }
-
+        window.dnSDK?.track?.('USE_ITEM', {item_source:2});
         // 有次数:消耗 1 次并直接撤回(不再看广告)
         this.setUndoCount(this.undoCount - 1);
         this.executeUndo(tile, index);
@@ -1650,6 +1735,7 @@ export class GameCtrl extends Component {
         // 看视频广告
         SDKManager.instance.showVideoAd(() => {
             this.executeUnlock(box);
+            this.ad_cnt += 1;
             SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.nowLevel });
         }, () => {
             LayerManager.instance.showToast("视频播放未完成！")
@@ -1702,7 +1788,9 @@ export class GameCtrl extends Component {
         // 次数用完:点击=看广告补充次数(refill only,不换牌)
         if (this.switchCount <= 0) {
             SDKManager.instance.showVideoAd(() => {
+                this.ad_cnt += 1;
                 this.setSwitchCount(this.switchCount + 3);
+                window.dnSDK?.track?.('GET_ITEM', {item_source:2});
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
@@ -1716,6 +1804,8 @@ export class GameCtrl extends Component {
         const topCandidates = activeTiles.filter((t) => !this.isTileBlocked(t));
         if (topCandidates.length === 0) return;
 
+
+        window.dnSDK?.track?.('USE_ITEM', {item_source:2});
         // 有次数:消耗 1 次并直接换牌(不再看广告)
         this.setSwitchCount(this.switchCount - 1);
         this.executeShuffle(activeTiles, topCandidates);
@@ -2030,6 +2120,7 @@ export class GameCtrl extends Component {
 
         // 看视频广告,播完才解锁(与 onBtnUnlockClick 一致)
         SDKManager.instance.showVideoAd(() => {
+            this.ad_cnt += 1;
             this.executeUnlock(box);
             SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.nowLevel });
         }, () => {

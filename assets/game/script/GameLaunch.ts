@@ -2,22 +2,16 @@ import { _decorator, AudioClip, AudioSource, Component, assetManager, Prefab } f
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
-import { SDKEvent, SDKManager } from './manager/SDKManager';
+
 
 const { ccclass, property } = _decorator;
 
 @ccclass('GameLaunch')
 export class GameLaunch extends Component {
 
+
+    
     start() {
-        // 初始化 SDK（必须先 init 配置好 apiUrl/appId/secret，再调用 wxLogin）
-        this.initSDK();
-        SDKManager.instance.wxLogin((userId) => {
-            //console.log('wxLogin success:', userId);
-            SDKManager.instance.report({ event: SDKEvent.login, isNowSend: true });
-        }, (err) => {
-            //console.log('wxLogin failed:', err);
-        });
         LayerManager.instance.init();
         LayerManager.instance.showStartLayer();
         this.initAudioManager();
@@ -25,18 +19,6 @@ export class GameLaunch extends Component {
         this.initAudioResources();
     }
 
-    /**
-     * 初始化 SDK
-     */
-    private initSDK() {
-        SDKManager.instance.init({
-            apiUrl: 'https://shufen.shenzhenyuren.com/v1',
-            appId: 'yrRaAGjYBpxS98Mf1s3c',
-            secret: 'ZOZxZroOf3JSQ1bgrwluQqEKdEiXI1Lz',
-            timeout: 10000,
-            enableLog: true  // 生产环境建议设为 false
-        });
-    }
 
     private initAudioManager() {
         // assetManager.loadBundle(Constants.BgmBundleName, (err, bundle) => {

@@ -400,7 +400,7 @@
     "node": {
       "__id__": 6
     },
-    "_enabled": true,
+    "_enabled": false,
     "__prefab": null,
     "_alignFlags": 45,
     "_target": null,
@@ -1417,6 +1417,9 @@
     },
     "_enabled": true,
     "__prefab": null,
+    "bgNode": {
+      "__id__": 6
+    },
     "_id": "c6SPGd0sJBnYmwChsX9OQZ"
   },
   {

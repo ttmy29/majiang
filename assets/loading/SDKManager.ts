@@ -126,21 +126,44 @@ export class SDKManager {
             // });
             // 好友点击回调
             wx.onShareAppMessage(() => {
+                window.dnSDK?.track?.('SHARE', { target: 'APP_MESSAGE' })
                 return {
                     // 转发标题, 没有则默认使用小游戏的昵称
                     title: "上头小游戏（15个好友在玩）",
                     // 图片链接，
-                    imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
+                    imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"     
                 };
             });
             // 朋友圈点击回调
             wx.onShareTimeline(() => {
+                window.dnSDK?.track?.('SHARE', { target: 'TIME_LINE' })
                 return {
                     title: '上头小游戏（15个好友在玩）',
                     imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
                 };
             });
-        }else{
+            wx.onAddToFavorites(() => {
+                window.dnSDK?.track?.('ADD_TO_WISHLIST', {
+                    //  普通收藏（default）
+                    type: 'default',
+                });
+            });
+
+
+            window.dnSDK.setDebug(false);
+            window.dnSDK = new window.dnSDK({
+                appid: "wx966af392065ece23",
+                // 数据源ID，数字，必填
+                user_action_set_id: 1221758475,
+                // 加密key，必填
+                secret_key: '489f62e7884371a1cae101389ebfdc5a',
+            });
+            const initResult = window.dnSDK.getInitResult();
+            if (!initResult.inited) {
+                console.log(initResult);
+            }
+
+        } else {
             SDKManager.isOpen = false;
         }
     }
@@ -216,6 +239,16 @@ export class SDKManager {
                         this.log('Login failed:', xhr.responseText);
                         fcallback && fcallback(res);
                     }
+                    window.dnSDK?.setOpenId(userId);
+                    let a = sys.localStorage.getItem("mahjong_match_first");
+                    if (!a  || a == '') {
+                        window.dnSDK?.onRegister();
+                        sys.localStorage.setItem("mahjong_match_first", "true");
+                    } else  {
+                        window.dnSDK?.track('RE_ACTIVE', { backFlowDay: 7 });
+                    }
+                    // console.log("***********")
+                    // console.log(a)
                 } catch (e) {
                     this.log('Login parse error:', e);
                     fcallback && fcallback(e);
@@ -262,12 +295,12 @@ export class SDKManager {
                     param.len = Math.ceil(data.time);
                     this.send(param, isNowSend);
                 }, 1000);
-            }else if (data.type == 2) {
+            } else if (data.type == 2) {
                 return;
-            } else if(data.type == 4){ //关卡视频
-                param.event ="lv_video_1";
-            }else if(data.type == 5){ //关卡视频
-                param.event ="lv_video_2";
+            } else if (data.type == 4) { //关卡视频
+                param.event = "lv_video_1";
+            } else if (data.type == 5) { //关卡视频
+                param.event = "lv_video_2";
             }
             this.send(param, isNowSend);
         } else {
@@ -740,6 +773,8 @@ export class SDKManager {
             cid: videoKey,
             type: 2  // 2:拉取
         });
+        window.dnSDK?.track?.('AD_CLICK', { ad_placement_name: 1 });
+        window.dnSDK?.track?.('AD_PLACEMENT_SHOW', { ad_placement_name: 1 });
 
         // 微信小游戏
         if (sys.platform === sys.Platform.WECHAT_GAME && SDKManager.rewardedVideoAd !== null) {
@@ -820,7 +855,7 @@ export class SDKManager {
             type: 4,  // 4:播放完成
             unitId
         });
-
+        window.dnSDK?.track?.('AD_VIDEO_FINISH', { ad_placement_name: 1 });
         callback && callback();
     }
 

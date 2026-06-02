@@ -153,6 +153,7 @@ export class UIWinLayer extends Component {
     onButtonShareClick() {
         AudioManager.instance.playClick();
         if (sys.platform === sys.Platform.WECHAT_GAME) {
+            //window.dnSDK?.track?.('SHARE', {target: 'APP_MESSAGE'});
             wx.shareAppMessage({
                 title: "上头小游戏（15个好友在玩）",
                 imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
