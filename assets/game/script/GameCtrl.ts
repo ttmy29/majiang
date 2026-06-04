@@ -173,7 +173,7 @@ export class GameCtrl extends Component {
     };
 
     protected onDisable(): void {
-        window.dnSDK?.track?.('LEVEL_EXIT', {duration:this.lastTickSecond,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        if(this.nowLevel > 0 )  window.dnSDK?.track?.('LEVEL_EXIT', {duration:this.elapsedTime,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
     }
 
     protected onDestroy(): void {
@@ -231,7 +231,7 @@ export class GameCtrl extends Component {
         // 上报关卡进入事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
         //
-        window.dnSDK?.track?.('LEVEL_ENTER', {enter_level_id:this.nowLevel,enter_level_name: `关卡${this.nowLevel}`});
+        if(this.nowLevel > 0 ) window.dnSDK?.track?.('LEVEL_ENTER', {enter_level_name: `关卡${this.nowLevel}`,level_id: this.nowLevel});
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -900,7 +900,8 @@ export class GameCtrl extends Component {
         // 上报关卡成功事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: this.elapsedTime });
         //
-        window.dnSDK?.track?.('LEVEL_PASS', {duration:this.lastTickSecond,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        const duration = Math.max(0, Math.ceil(this.elapsedTime));
+        window.dnSDK?.track?.('LEVEL_PASS', {duration:duration,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -920,7 +921,7 @@ export class GameCtrl extends Component {
         this.clearIdleTips();
         // 上报关卡失败事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
-        window.dnSDK?.track?.('LEVEL_LOSE', {duration:this.lastTickSecond,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        window.dnSDK?.track?.('LEVEL_LOSE', {duration:this.elapsedTime,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
             const allUnlocked = this.targetBoxes.every((b) => b.unlocked);
