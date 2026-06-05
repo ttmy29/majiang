@@ -68,7 +68,7 @@ export class GuideCtrl extends Component {
     @property
     reboundScale: number = 1.05;
 
-  
+
 
     @property
     tapMoveDuration: number = 0.15;
@@ -99,7 +99,12 @@ export class GuideCtrl extends Component {
     onDisable() {
         director.off(Constants.eventNames.EventGuideTileTapped, this.onGuideTileTapped, this);
         find('Canvas/gameLayer/Game_btn_shezhi').active = true;
-        window.dnSDK?.onTutorialFinish()
+        const sdk = window.dnSDK;
+        if (typeof sdk?.onTutorialFinish === 'function') {
+            sdk.onTutorialFinish();
+        } else {
+            sdk?.track?.('TUTORIAL_FINISH', {});
+        }
     }
 
     private onGuideTileTapped(payload: { count: number; type: string; col: number; row: number; layer: number; worldPos: Vec3 }) {
@@ -115,23 +120,23 @@ export class GuideCtrl extends Component {
     }
 
     private getTapOffset(payload: { count: number; type: string; col: number; row: number; layer: number; worldPos: Vec3 }): { x: number; y: number } | null {
-        if(payload.type == '4005' ){
-            if(payload .col == 4){ //点的是左边边的一个
-                if(payload.count == 1){
+        if (payload.type == '4005') {
+            if (payload.col == 4) { //点的是左边边的一个
+                if (payload.count == 1) {
                     return {
                         x: -80,
                         y: 0,
                     };
                 }
-                if(payload.count == 2){
+                if (payload.count == 2) {
                     return {
                         x: -35,
                         y: -170,
                     };
                 }
             }
-            if(payload .row == 3){ //点的是右边的一个
-                 if(payload.count == 2){
+            if (payload.row == 3) { //点的是右边的一个
+                if (payload.count == 2) {
                     return {
                         x: -35,
                         y: -170,
