@@ -1,4 +1,4 @@
-import { _decorator, assetManager, AssetManager, Component, director, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, AssetManager, Component, director, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
 import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAllLevels } from './config/LevelJsonLoader';
@@ -7,6 +7,7 @@ import { ironItem } from './ironItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
+import { StorageKey, StorageManager } from './manager/StorageManager';
 import { Utils } from './util/Utils';
 import { SDKEvent, SDKManager } from '../../loading/SDKManager';
 
@@ -54,6 +55,12 @@ interface ChainLink {
     a: TileRecord;
     b: TileRecord;
     node: Node | null;
+}
+
+interface ChainLayout {
+    position: Vec3;
+    scale: Vec3;
+    angle: number;
 }
 
 interface ChainDestination {
@@ -117,6 +124,7 @@ export class GameCtrl extends Component {
     private comboEmitPending = false;
     private resolvingMatch = false;
     private dealingTiles = false;
+    private dealOverlayLayoutReady = true;
     private targetsInitialized = false;
     private hasStarted = false;
     private shuffleAnimating = false;
@@ -133,6 +141,7 @@ export class GameCtrl extends Component {
     private tipsActive = false;
     private static readonly IDLE_TIPS_SECONDS = 10;
     private static readonly GUIDE_LEVEL = 0;
+    private static readonly FIRST_TIPS_POPUP_LEVEL = 15;
     private static readonly FAILURE_POPUP_DELAY = 1.25;
 
     // UI 相关 —— targetLabel/statusLabel/comboLabel/toastLabel 已搬到 UIGameLayer，
@@ -241,6 +250,10 @@ export class GameCtrl extends Component {
         const dt = Math.min(deltaTime, 0.25);
 
         this.elapsedTime += dt;
+        if (this.dealingTiles) {
+            this.refreshChainLinkVisuals();
+            this.refreshIronLockVisuals();
+        }
 
         if (this.config.levelTime <= 0) return;
 
@@ -287,7 +300,9 @@ export class GameCtrl extends Component {
         this.lastComboAt = 0;
         this.comboEmitPending = false;
         this.resolvingMatch = false;
-        this.dealingTiles = false;
+        this.unschedule(this.finishDealAnimation);
+        this.dealingTiles = true;
+        this.dealOverlayLayoutReady = false;
         this.targetsInitialized = false;
         this.shuffleAnimating = false;
         this.shuffleSeq++;
@@ -317,7 +332,24 @@ export class GameCtrl extends Component {
         this.updatePlayableStates();
         this.updateHud();
         if (!useSnapshot) this.showToast('关卡开始', 1);
+        this.tryShowFirstTipsPopup();
     }
+
+    private tryShowFirstTipsPopup() {
+        this.unschedule(this.showFirstTipsPopup);
+        this.scheduleOnce(this.showFirstTipsPopup, 0.2);
+    }
+
+    private showFirstTipsPopup = () => {
+        if (this.gameState !== 'playing') return;
+        if (this.nowLevel !== GameCtrl.FIRST_TIPS_POPUP_LEVEL) return;
+        if (StorageManager.instance.getBoolean(StorageKey.Level15TipsShown, false)) return;
+
+        const tipsNode = LayerManager.instance.showUI('tips');
+        if (tipsNode) {
+            StorageManager.instance.setBoolean(StorageKey.Level15TipsShown, true);
+        }
+    };
 
     private generateBoard() {
         if (!this.mahjongPnode || !this.mahjongItem || !this.levelJson) return;
@@ -486,9 +518,10 @@ export class GameCtrl extends Component {
 
         const node = instantiate(this.chainItemPrefab);
         node.name = `chainLink_${a.uid}_${b.uid}`;
+        node.active = false;
         this.setNodeLayerRecursive(node, this.mahjongPnode.layer);
         this.getOrCreateLayerContainer(a.layer).addChild(node);
-        this.layoutChainNode(node, a, b);
+        this.layoutChainNode(node, a, b, true);
         return node;
     }
 
@@ -499,25 +532,86 @@ export class GameCtrl extends Component {
         }
     }
 
-    private layoutChainNode(node: Node, a: TileRecord, b: TileRecord) {
-        const midX = (a.boardPos.x + b.boardPos.x) * 0.5;
-        const midY = (a.boardPos.y + b.boardPos.y) * 0.5;
-        const dx = b.boardPos.x - a.boardPos.x;
-        const dy = b.boardPos.y - a.boardPos.y;
+    private getChainLayout(a: TileRecord, b: TileRecord, useBoardPosition = false): ChainLayout {
+        const posA = useBoardPosition ? a.boardPos : this.getOverlayTilePosition(a);
+        const posB = useBoardPosition ? b.boardPos : this.getOverlayTilePosition(b);
+        const midX = (posA.x + posB.x) * 0.5;
+        const midY = (posA.y + posB.y) * 0.5;
+        const dx = posB.x - posA.x;
+        const dy = posB.y - posA.y;
         const angle = -Math.atan2(dx, dy) * 180 / Math.PI;
         const scale = this.getBoardTileScale();
+        const isHorizontal = a.row === b.row && a.col !== b.col;
+        const horizontalTopOffset = isHorizontal ? Constants.MahjongBoard.TileStepY * this.boardFitRatio * 0.36 : 0;
+        const lengthScale = isHorizontal ? 1.82 : 1;
 
-        node.setPosition(midX, midY, 0);
-        node.setScale(scale, scale, 1);
-        node.setRotationFromEuler(0, 0, angle);
+        return {
+            position: new Vec3(midX, midY + horizontalTopOffset, 0),
+            scale: new Vec3(scale, scale * lengthScale, 1),
+            angle,
+        };
+    }
+
+    private applyChainLayout(node: Node, layout: ChainLayout) {
+        node.setPosition(layout.position);
+        node.setScale(layout.scale);
+        node.setRotationFromEuler(0, 0, layout.angle);
+    }
+
+    private layoutChainNode(node: Node, a: TileRecord, b: TileRecord, useBoardPosition = false) {
+        this.applyChainLayout(node, this.getChainLayout(a, b, useBoardPosition));
+    }
+
+    private getOverlayTilePosition(tile: TileRecord): Vec3 {
+        if (this.dealingTiles && tile.node?.isValid && tile.node.parent?.parent === this.mahjongPnode) {
+            return tile.node.position;
+        }
+        return tile.boardPos;
     }
 
     private refreshChainLinkVisuals() {
         for (const link of this.chainLinks) {
-            const active = !this.dealingTiles && this.isChainEndpointOnBoard(link.a) && this.isChainEndpointOnBoard(link.b);
+            const active = (!this.dealingTiles || this.dealOverlayLayoutReady)
+                && this.isChainEndpointOnBoard(link.a)
+                && this.isChainEndpointOnBoard(link.b);
+            if (active && !link.node?.isValid) {
+                link.node = this.createChainNode(link.a, link.b);
+            }
             if (!link.node?.isValid) continue;
             link.node.active = active;
-            if (active) this.layoutChainNode(link.node, link.a, link.b);
+            if (active && !this.dealingTiles) this.layoutChainNode(link.node, link.a, link.b, true);
+        }
+    }
+
+    private playChainDealAnimations(startDelayTime: number, startAddMoveTime: number, startMoveTime: number) {
+        for (const link of this.chainLinks) {
+            if (!this.isChainEndpointOnBoard(link.a) || !this.isChainEndpointOnBoard(link.b)) continue;
+            if (!link.node?.isValid) link.node = this.createChainNode(link.a, link.b);
+            if (!link.node?.isValid) continue;
+
+            const layout = this.getChainLayout(link.a, link.b, true);
+            const indexA = this.tiles.indexOf(link.a);
+            const indexB = this.tiles.indexOf(link.b);
+            const lastEndpointIndex = Math.max(indexA >= 0 ? indexA : 0, indexB >= 0 ? indexB : 0);
+            const delay = startDelayTime + lastEndpointIndex * startAddMoveTime;
+            const startX = layout.position.x < 0 ? -900 : 900;
+
+            Tween.stopAllByTarget(link.node);
+            link.node.active = true;
+            link.node.setPosition(startX, layout.position.y, layout.position.z);
+            link.node.setScale(layout.scale.x * 0.92, layout.scale.y * 0.92, layout.scale.z);
+            link.node.setRotationFromEuler(0, 0, layout.angle);
+
+            tween(link.node)
+                .delay(delay)
+                .to(startMoveTime, {
+                    position: layout.position,
+                    scale: layout.scale,
+                }, {})
+                .call(() => {
+                    if (link.node?.isValid) this.layoutChainNode(link.node, link.a, link.b, true);
+                })
+                .start();
         }
     }
 
@@ -598,6 +692,7 @@ export class GameCtrl extends Component {
 
         const node = instantiate(this.ironItemPrefab);
         node.name = `ironLock_${tile.uid}`;
+        node.active = false;
         this.setNodeLayerRecursive(node, this.mahjongPnode.layer);
         this.getOrCreateLayerContainer(tile.layer).addChild(node);
         const item = node.getComponent(ironItem) || node.addComponent(ironItem);
@@ -608,17 +703,32 @@ export class GameCtrl extends Component {
 
     private layoutIronNode(node: Node, tile: TileRecord) {
         const scale = this.getBoardTileScale();
-        node.setPosition(tile.boardPos.x, tile.boardPos.y, 0);
+        const pos = this.getOverlayTilePosition(tile);
+        node.setPosition(pos.x, pos.y, 0);
         node.setScale(scale * 1.6, scale * 1.6, 1);
         node.setRotationFromEuler(0, 0, 0);
     }
 
     private refreshIronLockVisuals() {
         for (const lock of this.ironLocks) {
+            const active = lock.unlocking || (
+                (!this.dealingTiles || this.dealOverlayLayoutReady)
+                && lock.locked
+                && this.isBoardTileOnBoard(lock.tile)
+            );
+            if (active && !lock.node?.isValid) {
+                lock.node = this.createIronNode(lock.tile);
+                lock.item = lock.node?.getComponent(ironItem) || null;
+            }
             if (!lock.node?.isValid) continue;
-            const active = lock.unlocking || (lock.locked && !this.dealingTiles && this.isBoardTileOnBoard(lock.tile));
             lock.node.active = active;
-            if (active) this.layoutIronNode(lock.node, lock.tile);
+            if (active) {
+                if (lock.locked && !lock.unlocking) {
+                    lock.item = lock.node.getComponent(ironItem) || lock.node.addComponent(ironItem);
+                    lock.item.resetLocked();
+                }
+                this.layoutIronNode(lock.node, lock.tile);
+            }
         }
     }
 
@@ -626,7 +736,6 @@ export class GameCtrl extends Component {
         return !tile.collected
             && !tile.removed
             && !!tile.node?.isValid
-            && tile.node.activeInHierarchy
             && tile.node.parent?.parent === this.mahjongPnode;
     }
 
@@ -642,12 +751,16 @@ export class GameCtrl extends Component {
     private showIronLockedFeedback(tile: TileRecord) {
         LayerManager.instance.showToast('被铁链锁住了');
         tile.item.playErrorFeedback();
+        const lock = this.getIronLock(tile);
+        const lockItem = lock?.item?.isValid ? lock.item : lock?.node?.getComponent(ironItem);
+        lockItem?.playLockedFeedback();
     }
 
     private unlockAdjacentIronLocks(sourceTile: TileRecord) {
         for (const lock of this.ironLocks) {
             if (!lock.locked || lock.unlocking) continue;
             if (!this.isBoardTileOnBoard(lock.tile)) continue;
+            if (sourceTile.node.parent !== lock.tile.node.parent) continue;
             if (!this.isSameLayerOrthogonalNeighbor(sourceTile, lock.tile)) continue;
             this.startIronUnlock(lock);
         }
@@ -657,7 +770,8 @@ export class GameCtrl extends Component {
         if (a.layer !== b.layer) return false;
         const rowDiff = Math.abs(a.row - b.row);
         const colDiff = Math.abs(a.col - b.col);
-        return (rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2);
+        if ((rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2)) return true;
+        return colDiff === 1 && (rowDiff === 2 || rowDiff === 3);
     }
 
     private startIronUnlock(lock: IronLock) {
@@ -734,6 +848,21 @@ export class GameCtrl extends Component {
             lock.node = null;
             lock.item = null;
         }
+    }
+
+    private shouldRestoreOriginalIronLocksForSnapshot(snap: ProgressSnapshot): boolean {
+        if (!Array.isArray(snap.ironLockedKeys) || snap.ironLockedKeys.length > 0) return false;
+        if (this.ironLocks.length === 0) return false;
+
+        const hasTileProgress = snap.tiles.some((tile) =>
+            tile.location !== 'board' || tile.collected || tile.removed
+        );
+        const hasBoxProgress = snap.boxes.some((box) => box.progress > 0 || box.tileKeys.length > 0);
+        return !hasTileProgress
+            && !hasBoxProgress
+            && snap.slotKeys.length === 0
+            && snap.discardedKeys.length === 0
+            && snap.actionHistoryKeys.length === 0;
     }
 
     private getBoardTileScale(): number {
@@ -898,6 +1027,10 @@ export class GameCtrl extends Component {
             return;
         }
 
+        this.collectSingleTile(tile);
+    }
+
+    private collectSingleTile(tile: TileRecord): boolean {
         if (tile.item.playTapFeedback) tile.item.playTapFeedback();
 
         const targetBox = this.findMatchingTargetBox(tile.type);
@@ -914,21 +1047,31 @@ export class GameCtrl extends Component {
                 });
             }
             this.moveTileToTarget(tile, targetBox);
+            return true;
         } else if (this.isGuideLevel()) {
             tile.item.playErrorFeedback();
+            return false;
         } else {
+            if (this.slots.length >= this.getSlotFailThreshold()) return false;
             this.moveTileToSlot(tile);
+            return true;
         }
     }
 
     private onChainTileTap(clicked: TileRecord, link: ChainLink) {
         const other = link.a === clicked ? link.b : link.a;
-        if (this.isTileBlocked(clicked) || this.isTileBlocked(other)) {
+        const clickedLocked = this.isIronLockedTile(clicked);
+        const otherLocked = this.isIronLockedTile(other);
+        if (this.isTileBlocked(clicked) || (!otherLocked && this.isTileBlocked(other))) {
             clicked.item.playErrorFeedback();
             return;
         }
-        if (this.isIronLockedTile(clicked) || this.isIronLockedTile(other)) {
+        if (clickedLocked) {
             this.showIronLockedFeedback(clicked);
+            return;
+        }
+        if (otherLocked) {
+            this.showIronLockedFeedback(other);
             return;
         }
 
@@ -1410,7 +1553,7 @@ export class GameCtrl extends Component {
     }
 
     private onEventFailureRestart() {
-        // startLevel 走 fresh 分支会自己 clearSnapshot,这里不重复调
+        ProgressManager.clearSnapshot();
         this.startLevel(this.nowLevel);
     }
 
@@ -1583,11 +1726,24 @@ export class GameCtrl extends Component {
         }
     }
 
-    private playDealAnimation() {
-        if (this.tiles.length === 0) return;
-        this.dealingTiles = true;
+    private finishDealAnimation = () => {
+        this.dealingTiles = false;
+        this.dealOverlayLayoutReady = true;
         this.refreshChainLinkVisuals();
         this.refreshIronLockVisuals();
+        this.updatePlayableStates();
+        this.initializeTargetsAfterDeal();
+        this.saveProgressDeferred();
+    };
+
+    private playDealAnimation() {
+        if (this.tiles.length === 0) {
+            this.dealingTiles = false;
+            this.dealOverlayLayoutReady = true;
+            return;
+        }
+        this.dealingTiles = true;
+        this.dealOverlayLayoutReady = false;
 
         // ==========================================
         // 按照原版参数配置飞入动画节奏
@@ -1628,13 +1784,13 @@ export class GameCtrl extends Component {
                 .start();
         }
 
+        this.dealOverlayLayoutReady = true;
+        this.playChainDealAnimations(startDelayTime, startAddMoveTime, startMoveTime);
+        this.refreshIronLockVisuals();
+
         // 依据精确计算的总耗时，在全部落位后解除遮罩并初始化目标
-        this.scheduleOnce(() => {
-            this.dealingTiles = false;
-            this.updatePlayableStates();
-            this.initializeTargetsAfterDeal();
-            this.saveProgressDeferred();
-        }, totalDuration);
+        this.unschedule(this.finishDealAnimation);
+        this.scheduleOnce(this.finishDealAnimation, totalDuration);
     }
 
     // ==========================================
@@ -2597,7 +2753,8 @@ export class GameCtrl extends Component {
         this.actionHistory = snap.actionHistoryKeys
             .map((k) => lookup(k))
             .filter((t): t is TileRecord => !!t && slotSet.has(t) && !this.isChainTile(t));
-        this.applyIronLockedKeys(snap.ironLockedKeys);
+        const ironLockedKeys = this.shouldRestoreOriginalIronLocksForSnapshot(snap) ? undefined : snap.ironLockedKeys;
+        this.applyIronLockedKeys(ironLockedKeys);
 
         // 8. 计时与状态
         this.remainTime = snap.remainTime;

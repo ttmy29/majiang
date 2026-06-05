@@ -12,6 +12,7 @@ export class ironItem extends Component {
     private spriteNode: Node | null = null;
     private shardNodes: Node[] = [];
     private shardStates: Map<Node, ShardState> = new Map();
+    private feedbackState: ShardState | null = null;
     private unlocked = false;
 
     onLoad() {
@@ -23,6 +24,8 @@ export class ironItem extends Component {
         this.ensureNodes();
         this.unlocked = false;
         this.node.active = true;
+        const rootOpacity = this.node.getComponent(UIOpacity);
+        if (rootOpacity) rootOpacity.opacity = 255;
         this.stopTweens();
 
         if (this.spriteNode?.isValid) {
@@ -64,6 +67,43 @@ export class ironItem extends Component {
         for (let i = 0; i < shards.length; i++) {
             this.playShardUnlock(shards[i], i, shards.length, finishShard);
         }
+    }
+
+    playLockedFeedback() {
+        this.ensureNodes();
+        const target = this.spriteNode?.isValid ? this.spriteNode : this.node;
+        const state = this.getFeedbackState(target);
+
+        Tween.stopAllByTarget(target);
+        target.active = true;
+        target.setPosition(state.position);
+        target.setScale(state.scale);
+        target.eulerAngles = state.eulerAngles.clone();
+
+        const left = new Vec3(state.position.x - 7, state.position.y + 1, state.position.z);
+        const right = new Vec3(state.position.x + 6, state.position.y - 1, state.position.z);
+        const popScale = new Vec3(state.scale.x * 1.06, state.scale.y * 1.06, state.scale.z);
+
+        tween(target)
+            .to(0.06, {
+                position: left,
+                scale: popScale,
+                eulerAngles: new Vec3(state.eulerAngles.x, state.eulerAngles.y, state.eulerAngles.z - 5),
+            }, { easing: 'sineOut' })
+            .to(0.07, {
+                position: right,
+                eulerAngles: new Vec3(state.eulerAngles.x, state.eulerAngles.y, state.eulerAngles.z + 4),
+            }, { easing: 'sineInOut' })
+            .to(0.06, {
+                position: new Vec3(state.position.x - 3, state.position.y, state.position.z),
+                eulerAngles: new Vec3(state.eulerAngles.x, state.eulerAngles.y, state.eulerAngles.z - 2),
+            }, { easing: 'sineInOut' })
+            .to(0.08, {
+                position: state.position,
+                scale: state.scale,
+                eulerAngles: state.eulerAngles,
+            }, { easing: 'backOut' })
+            .start();
     }
 
     private resetVisual(node: Node) {
@@ -170,6 +210,17 @@ export class ironItem extends Component {
             this.shardStates.set(node, state);
         }
         return state;
+    }
+
+    private getFeedbackState(node: Node): ShardState {
+        if (!this.feedbackState || node !== this.spriteNode) {
+            this.feedbackState = {
+                position: node.position.clone(),
+                scale: node.scale.clone(),
+                eulerAngles: node.eulerAngles.clone(),
+            };
+        }
+        return this.feedbackState;
     }
 
     private stopTweens() {

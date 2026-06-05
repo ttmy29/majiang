@@ -68,7 +68,8 @@ const Constants = {
         setting: 'prefab/setting',
         failure: 'prefab/failure',
         win: 'prefab/win',
-        guide: 'prefab/guide'
+        guide: 'prefab/guide',
+        tips: 'prefab/tips'
     },
     GameBundleName: 'game',
     AudioBundleName: 'audio',
