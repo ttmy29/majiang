@@ -31,7 +31,7 @@ export class UIWinLayer extends Component {
         this.playOpenAnimation();
         this.rankLabel.string = "";
         this.showRankLabel(97.47, time);
-        this.playLightBurst();
+        //this.playLightBurst();
     }
 
     public playSingleAnimation() {
