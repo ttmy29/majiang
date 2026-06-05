@@ -40,19 +40,50 @@ export class MahjongItem extends Component {
         if (!layerContainer?.isValid) return;
 
         const children = layerContainer.children.slice();
+        const chainNodes = children.filter((node) => MahjongItem.isChainNode(node));
+        const ironNodes = children.filter((node) => MahjongItem.isIronNode(node));
         const tileNodes = children
             .map((node) => ({ node, item: node.getComponent(MahjongItem) }))
             .filter((entry): entry is { node: Node; item: MahjongItem } => !!entry.item)
             .sort((a, b) => MahjongItem.compareBoardDisplayOrderRC(a.item.row, a.item.col, b.item.row, b.item.col));
+        const overlaySet = new Set([...chainNodes, ...ironNodes]);
 
         let index = 0;
         for (const child of children) {
-            if (!child.getComponent(MahjongItem)) {
+            if (!child.getComponent(MahjongItem) && !overlaySet.has(child)) {
                 child.setSiblingIndex(index++);
             }
         }
         for (const entry of tileNodes) {
             entry.node.setSiblingIndex(index++);
+        }
+        for (const child of chainNodes) {
+            child.setSiblingIndex(index++);
+        }
+        for (const child of ironNodes) {
+            child.setSiblingIndex(index++);
+        }
+    }
+
+    private static isChainNode(node: Node): boolean {
+        return node.name.startsWith('chainLink_');
+    }
+
+    private static isIronNode(node: Node): boolean {
+        return node.name.startsWith('ironLock_');
+    }
+
+    private static bringOverlayNodesToTop(layerContainer: Node | null | undefined) {
+        if (!layerContainer?.isValid) return;
+        for (const child of layerContainer.children.slice()) {
+            if (MahjongItem.isChainNode(child)) {
+                child.setSiblingIndex(layerContainer.children.length - 1);
+            }
+        }
+        for (const child of layerContainer.children.slice()) {
+            if (MahjongItem.isIronNode(child)) {
+                child.setSiblingIndex(layerContainer.children.length - 1);
+            }
         }
     }
 
@@ -521,6 +552,7 @@ export class MahjongItem extends Component {
         if (!parent) return;
 
         this.node.setSiblingIndex(parent.children.length - 1);
+        MahjongItem.bringOverlayNodesToTop(parent);
     }
 
     // 禁用触摸方法

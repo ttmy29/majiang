@@ -1,8 +1,9 @@
-import { _decorator, assetManager, Component, director, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, AssetManager, Component, director, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
 import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAllLevels } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
+import { ironItem } from './ironItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
@@ -48,6 +49,26 @@ interface TargetBox {
     required: number;
 }
 
+interface ChainLink {
+    id: number;
+    a: TileRecord;
+    b: TileRecord;
+    node: Node | null;
+}
+
+interface ChainDestination {
+    tile: TileRecord;
+    box: TargetBox | null;
+}
+
+interface IronLock {
+    tile: TileRecord;
+    node: Node | null;
+    item: ironItem | null;
+    locked: boolean;
+    unlocking: boolean;
+}
+
 @ccclass('GameCtrl')
 export class GameCtrl extends Component {
     @property(Node)
@@ -76,6 +97,10 @@ export class GameCtrl extends Component {
     private discardedTiles: TileRecord[] = [];
     private actionHistory: TileRecord[] = [];
     private targetBoxes: TargetBox[] = [];
+    private chainLinks: ChainLink[] = [];
+    private chainByTileUid: Map<number, ChainLink> = new Map();
+    private ironLocks: IronLock[] = [];
+    private ironByTileUid: Map<number, IronLock> = new Map();
 
     private slotNode: Node = null!;
     private flyLayer: Node = null!;
@@ -116,6 +141,8 @@ export class GameCtrl extends Component {
     // 资源数据
     private iconIds: string[] = [];
     private iconFrames: Map<string, SpriteFrame> = new Map();
+    private chainItemPrefab: Prefab | null = null;
+    private ironItemPrefab: Prefab | null = null;
 
     start() {
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
@@ -131,21 +158,25 @@ export class GameCtrl extends Component {
                 return;
             }
             const bundle = assetManager.getBundle(Constants.GameBundleName);
-            preloadAllLevels(bundle, () => {
-                if (!hasAnyLevelJson()) {
-                    console.warn('GameCtrl: no level JSON loaded under assets/game/json');
-                    return;
-                }
-                // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
-                director.emit(Constants.eventNames.EventGameUiInit, {
-                    mahjongItem: this.mahjongItem,
-                    iconFrames: this.iconFrames,
+            this.preloadChainItem(bundle, () => {
+                this.preloadIronItem(bundle, () => {
+                    preloadAllLevels(bundle, () => {
+                        if (!hasAnyLevelJson()) {
+                            console.warn('GameCtrl: no level JSON loaded under assets/game/json');
+                            return;
+                        }
+                        // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
+                        director.emit(Constants.eventNames.EventGameUiInit, {
+                            mahjongItem: this.mahjongItem,
+                            iconFrames: this.iconFrames,
+                        });
+                        this.scheduleOnce(() => {
+                            const { level, snapshot } = this.loadSavedProgress();
+                            this.startLevel(level, snapshot);
+                            this.hasStarted = true;
+                        }, 0);
+                    });
                 });
-                this.scheduleOnce(() => {
-                    const { level, snapshot } = this.loadSavedProgress();
-                    this.startLevel(level, snapshot);
-                    this.hasStarted = true;
-                }, 0);
             });
         });
     }
@@ -349,12 +380,17 @@ export class GameCtrl extends Component {
         }
 
         // 容器化后:层间顺序由 _layer_<N>_ 容器位置保证,这里只重排每个层容器内部的牌身。
+        this.buildChainLinks();
+        this.buildIronLocks();
+
         const layers = new Set<number>();
         for (const tile of this.tiles) {
             layers.add(tile.layer);
         }
         layers.forEach((layer) => this.refreshLayerDisplayOrder(this.getOrCreateLayerContainer(layer)));
 
+        this.refreshChainLinkVisuals();
+        this.refreshIronLockVisuals();
         this.updateBoardTileShadows();
     }
 
@@ -384,6 +420,320 @@ export class GameCtrl extends Component {
     private buildTaskQueue(json: LevelJson | null): string[] {
         if (!json?.decoded_config?.task?.[0]) return [];
         return json.decoded_config.task[0].map((id) => String(id));
+    }
+
+    private buildChainLinks() {
+        this.chainLinks = [];
+        this.chainByTileUid.clear();
+
+        const chainConfig = this.levelJson?.decoded_config?.chain;
+        if (!Array.isArray(chainConfig) || chainConfig.length === 0) return;
+
+        const tileByCoord = new Map<string, TileRecord>();
+        for (const tile of this.tiles) {
+            tileByCoord.set(this.tileCoordKey(tile.layer, tile.row, tile.col), tile);
+        }
+
+        const usedTiles = new Set<TileRecord>();
+        for (const raw of chainConfig) {
+            if (!Array.isArray(raw) || raw.length < 6) {
+                console.warn('GameCtrl: invalid chain config entry', raw);
+                continue;
+            }
+
+            const values = raw.slice(0, 6).map((v: unknown) => Number(v));
+            if (values.some((v) => !Number.isFinite(v))) {
+                console.warn('GameCtrl: invalid chain coordinates', raw);
+                continue;
+            }
+
+            const [layerA, rowA, colA, layerB, rowB, colB] = values.map((v) => Math.trunc(v));
+            const a = tileByCoord.get(this.tileCoordKey(layerA, rowA, colA));
+            const b = tileByCoord.get(this.tileCoordKey(layerB, rowB, colB));
+            if (!a || !b || a === b) {
+                console.warn('GameCtrl: chain endpoint missing', raw);
+                continue;
+            }
+            if (a.layer !== b.layer) {
+                console.warn('GameCtrl: cross-layer chain is unsupported', raw);
+                continue;
+            }
+            if (usedTiles.has(a) || usedTiles.has(b)) {
+                console.warn('GameCtrl: duplicate chain endpoint ignored', raw);
+                continue;
+            }
+
+            const link: ChainLink = {
+                id: this.chainLinks.length + 1,
+                a,
+                b,
+                node: this.createChainNode(a, b),
+            };
+            this.chainLinks.push(link);
+            this.chainByTileUid.set(a.uid, link);
+            this.chainByTileUid.set(b.uid, link);
+            usedTiles.add(a);
+            usedTiles.add(b);
+        }
+    }
+
+    private tileCoordKey(layer: number, row: number, col: number): string {
+        return `${layer}|${row}|${col}`;
+    }
+
+    private createChainNode(a: TileRecord, b: TileRecord): Node | null {
+        if (!this.chainItemPrefab) return null;
+
+        const node = instantiate(this.chainItemPrefab);
+        node.name = `chainLink_${a.uid}_${b.uid}`;
+        this.setNodeLayerRecursive(node, this.mahjongPnode.layer);
+        this.getOrCreateLayerContainer(a.layer).addChild(node);
+        this.layoutChainNode(node, a, b);
+        return node;
+    }
+
+    private setNodeLayerRecursive(node: Node, layer: number) {
+        node.layer = layer;
+        for (const child of node.children) {
+            this.setNodeLayerRecursive(child, layer);
+        }
+    }
+
+    private layoutChainNode(node: Node, a: TileRecord, b: TileRecord) {
+        const midX = (a.boardPos.x + b.boardPos.x) * 0.5;
+        const midY = (a.boardPos.y + b.boardPos.y) * 0.5;
+        const dx = b.boardPos.x - a.boardPos.x;
+        const dy = b.boardPos.y - a.boardPos.y;
+        const angle = -Math.atan2(dx, dy) * 180 / Math.PI;
+        const scale = this.getBoardTileScale();
+
+        node.setPosition(midX, midY, 0);
+        node.setScale(scale, scale, 1);
+        node.setRotationFromEuler(0, 0, angle);
+    }
+
+    private refreshChainLinkVisuals() {
+        for (const link of this.chainLinks) {
+            const active = !this.dealingTiles && this.isChainEndpointOnBoard(link.a) && this.isChainEndpointOnBoard(link.b);
+            if (!link.node?.isValid) continue;
+            link.node.active = active;
+            if (active) this.layoutChainNode(link.node, link.a, link.b);
+        }
+    }
+
+    private isChainEndpointOnBoard(tile: TileRecord): boolean {
+        return !tile.collected
+            && !tile.removed
+            && !!tile.node?.isValid
+            && tile.node.activeInHierarchy
+            && tile.node.parent?.parent === this.mahjongPnode;
+    }
+
+    private getActiveChainLink(tile: TileRecord): ChainLink | null {
+        const link = this.chainByTileUid.get(tile.uid) || null;
+        if (!link) return null;
+        return this.isChainEndpointOnBoard(link.a) && this.isChainEndpointOnBoard(link.b) ? link : null;
+    }
+
+    private isChainTile(tile: TileRecord): boolean {
+        return this.chainByTileUid.has(tile.uid);
+    }
+
+    private hideChainLink(link: ChainLink) {
+        if (link.node?.isValid) link.node.active = false;
+    }
+
+    private buildIronLocks() {
+        this.ironLocks = [];
+        this.ironByTileUid.clear();
+
+        const ironConfig = this.levelJson?.decoded_config?.ironData;
+        if (!Array.isArray(ironConfig) || ironConfig.length === 0) return;
+
+        const tileByCoord = new Map<string, TileRecord>();
+        for (const tile of this.tiles) {
+            tileByCoord.set(this.tileCoordKey(tile.layer, tile.row, tile.col), tile);
+        }
+
+        const usedTiles = new Set<TileRecord>();
+        for (const raw of ironConfig) {
+            if (!Array.isArray(raw) || raw.length < 3) {
+                console.warn('GameCtrl: invalid ironData entry', raw);
+                continue;
+            }
+
+            const values = raw.slice(0, 3).map((v: unknown) => Number(v));
+            if (values.some((v) => !Number.isFinite(v))) {
+                console.warn('GameCtrl: invalid ironData coordinates', raw);
+                continue;
+            }
+
+            const [layer, row, col] = values.map((v) => Math.trunc(v));
+            const tile = tileByCoord.get(this.tileCoordKey(layer, row, col));
+            if (!tile) {
+                console.warn('GameCtrl: ironData tile missing', raw);
+                continue;
+            }
+            if (usedTiles.has(tile)) {
+                console.warn('GameCtrl: duplicate ironData tile ignored', raw);
+                continue;
+            }
+
+            const node = this.createIronNode(tile);
+            const lock: IronLock = {
+                tile,
+                node,
+                item: node?.getComponent(ironItem) || null,
+                locked: true,
+                unlocking: false,
+            };
+            this.ironLocks.push(lock);
+            this.ironByTileUid.set(tile.uid, lock);
+            usedTiles.add(tile);
+        }
+    }
+
+    private createIronNode(tile: TileRecord): Node | null {
+        if (!this.ironItemPrefab) return null;
+
+        const node = instantiate(this.ironItemPrefab);
+        node.name = `ironLock_${tile.uid}`;
+        this.setNodeLayerRecursive(node, this.mahjongPnode.layer);
+        this.getOrCreateLayerContainer(tile.layer).addChild(node);
+        const item = node.getComponent(ironItem) || node.addComponent(ironItem);
+        item.resetLocked();
+        this.layoutIronNode(node, tile);
+        return node;
+    }
+
+    private layoutIronNode(node: Node, tile: TileRecord) {
+        const scale = this.getBoardTileScale();
+        node.setPosition(tile.boardPos.x, tile.boardPos.y, 0);
+        node.setScale(scale * 1.6, scale * 1.6, 1);
+        node.setRotationFromEuler(0, 0, 0);
+    }
+
+    private refreshIronLockVisuals() {
+        for (const lock of this.ironLocks) {
+            if (!lock.node?.isValid) continue;
+            const active = lock.unlocking || (lock.locked && !this.dealingTiles && this.isBoardTileOnBoard(lock.tile));
+            lock.node.active = active;
+            if (active) this.layoutIronNode(lock.node, lock.tile);
+        }
+    }
+
+    private isBoardTileOnBoard(tile: TileRecord): boolean {
+        return !tile.collected
+            && !tile.removed
+            && !!tile.node?.isValid
+            && tile.node.activeInHierarchy
+            && tile.node.parent?.parent === this.mahjongPnode;
+    }
+
+    private getIronLock(tile: TileRecord): IronLock | null {
+        return this.ironByTileUid.get(tile.uid) || null;
+    }
+
+    private isIronLockedTile(tile: TileRecord): boolean {
+        const lock = this.getIronLock(tile);
+        return !!lock && (lock.locked || lock.unlocking);
+    }
+
+    private showIronLockedFeedback(tile: TileRecord) {
+        LayerManager.instance.showToast('被铁链锁住了');
+        tile.item.playErrorFeedback();
+    }
+
+    private unlockAdjacentIronLocks(sourceTile: TileRecord) {
+        for (const lock of this.ironLocks) {
+            if (!lock.locked || lock.unlocking) continue;
+            if (!this.isBoardTileOnBoard(lock.tile)) continue;
+            if (!this.isSameLayerOrthogonalNeighbor(sourceTile, lock.tile)) continue;
+            this.startIronUnlock(lock);
+        }
+    }
+
+    private isSameLayerOrthogonalNeighbor(a: TileRecord, b: TileRecord): boolean {
+        if (a.layer !== b.layer) return false;
+        const rowDiff = Math.abs(a.row - b.row);
+        const colDiff = Math.abs(a.col - b.col);
+        return (rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2);
+    }
+
+    private startIronUnlock(lock: IronLock) {
+        if (!lock.locked || lock.unlocking) return;
+        lock.unlocking = true;
+
+        if (lock.node?.isValid) {
+            lock.node.active = true;
+            this.layoutIronNode(lock.node, lock.tile);
+        }
+
+        if (lock.item?.isValid) {
+            lock.item.playUnlock(() => this.finishIronUnlock(lock));
+        } else {
+            this.finishIronUnlock(lock);
+        }
+        this.updatePlayableStates();
+    }
+
+    private finishIronUnlock(lock: IronLock) {
+        lock.locked = false;
+        lock.unlocking = false;
+        this.ironByTileUid.delete(lock.tile.uid);
+
+        if (lock.node?.isValid) {
+            lock.node.destroy();
+        }
+        lock.node = null;
+        lock.item = null;
+
+        this.refreshLayerDisplayOrder(this.getOrCreateLayerContainer(lock.tile.layer));
+        this.updatePlayableStates();
+        this.updateHud();
+        this.saveProgressDeferred();
+    }
+
+    private hasUnlockingIron(): boolean {
+        return this.ironLocks.some((lock) => lock.unlocking);
+    }
+
+    private getLockedIronKeys(): TileKey[] {
+        return this.ironLocks
+            .filter((lock) => (lock.locked || lock.unlocking) && this.isBoardTileOnBoard(lock.tile))
+            .map((lock) => this.tileKey(lock.tile));
+    }
+
+    private applyIronLockedKeys(keys?: TileKey[]) {
+        const lockedSet = Array.isArray(keys)
+            ? new Set(keys.map((k) => this.tileCoordKey(k.layer, k.row, k.col)))
+            : null;
+
+        for (const lock of this.ironLocks) {
+            const key = this.tileCoordKey(lock.tile.layer, lock.tile.row, lock.tile.col);
+            const shouldKeep = this.isBoardTileOnBoard(lock.tile) && (!lockedSet || lockedSet.has(key));
+            if (shouldKeep) {
+                lock.locked = true;
+                lock.unlocking = false;
+                this.ironByTileUid.set(lock.tile.uid, lock);
+                if (!lock.node?.isValid) {
+                    lock.node = this.createIronNode(lock.tile);
+                    lock.item = lock.node?.getComponent(ironItem) || null;
+                } else {
+                    lock.item = lock.node.getComponent(ironItem) || lock.node.addComponent(ironItem);
+                    lock.item.resetLocked();
+                    this.layoutIronNode(lock.node, lock.tile);
+                }
+                continue;
+            }
+
+            lock.locked = false;
+            lock.unlocking = false;
+            this.ironByTileUid.delete(lock.tile.uid);
+            if (lock.node?.isValid) lock.node.destroy();
+            lock.node = null;
+            lock.item = null;
+        }
     }
 
     private getBoardTileScale(): number {
@@ -537,6 +887,17 @@ export class GameCtrl extends Component {
             this.clearIdleTips();
         }
 
+        if (this.isIronLockedTile(tile)) {
+            this.showIronLockedFeedback(tile);
+            return;
+        }
+
+        const chainLink = this.getActiveChainLink(tile);
+        if (chainLink) {
+            this.onChainTileTap(tile, chainLink);
+            return;
+        }
+
         if (tile.item.playTapFeedback) tile.item.playTapFeedback();
 
         const targetBox = this.findMatchingTargetBox(tile.type);
@@ -560,6 +921,72 @@ export class GameCtrl extends Component {
         }
     }
 
+    private onChainTileTap(clicked: TileRecord, link: ChainLink) {
+        const other = link.a === clicked ? link.b : link.a;
+        if (this.isTileBlocked(clicked) || this.isTileBlocked(other)) {
+            clicked.item.playErrorFeedback();
+            return;
+        }
+        if (this.isIronLockedTile(clicked) || this.isIronLockedTile(other)) {
+            this.showIronLockedFeedback(clicked);
+            return;
+        }
+
+        const destinations = this.planChainDestinations([clicked, other]);
+        if (!destinations) {
+            LayerManager.instance.showToast('槽位不足');
+            clicked.item.playErrorFeedback();
+            return;
+        }
+
+        clicked.item.playTapFeedback();
+        other.item.playTapFeedback();
+        this.hideChainLink(link);
+
+        const slotTiles: TileRecord[] = [];
+        const targetDestinations: ChainDestination[] = [];
+        for (const dest of destinations) {
+            if (dest.box) {
+                targetDestinations.push(dest);
+            } else {
+                slotTiles.push(dest.tile);
+            }
+        }
+        if (slotTiles.length > 0) {
+            if (!this.moveTilesToSlotBatch(slotTiles, false)) {
+                this.refreshChainLinkVisuals();
+                return;
+            }
+        }
+        for (const dest of targetDestinations) {
+            if (dest.box) {
+                this.moveTileToTarget(dest.tile, dest.box);
+            }
+        }
+        this.refreshChainLinkVisuals();
+        this.refreshIronLockVisuals();
+    }
+
+    private planChainDestinations(tiles: TileRecord[]): ChainDestination[] | null {
+        const plannedByBox = new Map<TargetBox, number>();
+        const destinations: ChainDestination[] = [];
+        let slotNeeded = 0;
+
+        for (const tile of tiles) {
+            const box = this.findMatchingTargetBox(tile.type, plannedByBox);
+            if (box) {
+                destinations.push({ tile, box });
+                plannedByBox.set(box, (plannedByBox.get(box) || 0) + 1);
+            } else {
+                destinations.push({ tile, box: null });
+                slotNeeded++;
+            }
+        }
+
+        const freeSlots = this.getSlotFailThreshold() - this.slots.length;
+        return slotNeeded <= freeSlots ? destinations : null;
+    }
+
     private moveTileToTarget(tile: TileRecord, box: TargetBox) {
         if (box.refreshing || box.progress + box.pending >= box.required) {
             if (this.isGuideLevel()) {
@@ -570,10 +997,12 @@ export class GameCtrl extends Component {
             return;
         }
 
+        const wasBoardTile = this.isBoardTileOnBoard(tile);
         box.pending += 1;
         tile.collected = true;
         tile.removed = true;
         tile.node.name = `targetTile_${tile.uid}`;
+        if (wasBoardTile) this.unlockAdjacentIronLocks(tile);
 
         const worldPosition = tile.node.worldPosition.clone();
         const flyLayer = this.ensureFlyLayer();
@@ -626,10 +1055,12 @@ export class GameCtrl extends Component {
         // 保证 slots 不会超过 slotCapacity-1;只拦"要进底部 slot"的牌,匹配目标槽的点击不受影响。
         if (this.slots.length >= Math.max(1, this.slotCapacity - 1)) return;
 
+        const wasBoardTile = this.isBoardTileOnBoard(tile);
         tile.collected = true;
         tile.node.name = `slotTile_${tile.uid}`;
         this.actionHistory.push(tile);
         this.refreshUndoButtonStatus();
+        if (wasBoardTile) this.unlockAdjacentIronLocks(tile);
 
         const lastSame = this.slots.reduce((last, st, i) => st.type === tile.type ? i : last, -1);
         this.slots.splice(lastSame >= 0 ? lastSame + 1 : this.slots.length, 0, tile);
@@ -651,6 +1082,43 @@ export class GameCtrl extends Component {
             this.checkEndState();
             this.saveProgressDeferred();
         }, isSlotFull ? 0.16 + 0.1 + 0.05 : 0.18);
+    }
+
+    private moveTilesToSlotBatch(tiles: TileRecord[], recordHistory: boolean): boolean {
+        if (tiles.length === 0) return true;
+        if (this.slots.length + tiles.length > this.getSlotFailThreshold()) return false;
+
+        const flyLayer = this.ensureFlyLayer();
+        for (const tile of tiles) {
+            const wasBoardTile = this.isBoardTileOnBoard(tile);
+            tile.collected = true;
+            tile.node.name = `slotTile_${tile.uid}`;
+            if (recordHistory) this.actionHistory.push(tile);
+            if (wasBoardTile) this.unlockAdjacentIronLocks(tile);
+
+            const lastSame = this.slots.reduce((last, st, i) => st.type === tile.type ? i : last, -1);
+            this.slots.splice(lastSame >= 0 ? lastSame + 1 : this.slots.length, 0, tile);
+
+            const worldPosition = tile.node.worldPosition.clone();
+            tile.node.setParent(flyLayer);
+            tile.node.setWorldPosition(worldPosition);
+            tile.item.setPlayable(true);
+        }
+
+        this.refreshUndoButtonStatus();
+        const isSlotFull = this.slots.length >= this.getSlotFailThreshold();
+        this.arrangeSlotTiles(0.16 + 0.1, tiles[0] || null);
+        this.updatePlayableStates();
+        this.updateHud();
+        this.scheduleOnce(() => {
+            this.checkEndState();
+            this.saveProgressDeferred();
+        }, isSlotFull ? 0.16 + 0.1 + 0.05 : 0.18);
+        return true;
+    }
+
+    private getSlotFailThreshold(): number {
+        return Math.max(1, this.slotCapacity - 1);
     }
 
     private arrangeSlotTiles(duration = 0.08, flyingTile: TileRecord | null = null) {
@@ -1081,6 +1549,7 @@ export class GameCtrl extends Component {
                 tile.item.setPlayable(!this.isTileBlocked(tile));
             }
         }
+        this.refreshChainLinkVisuals();
     }
 
     private isTileBlocked(tile: TileRecord): boolean {
@@ -1117,6 +1586,8 @@ export class GameCtrl extends Component {
     private playDealAnimation() {
         if (this.tiles.length === 0) return;
         this.dealingTiles = true;
+        this.refreshChainLinkVisuals();
+        this.refreshIronLockVisuals();
 
         // ==========================================
         // 按照原版参数配置飞入动画节奏
@@ -1361,8 +1832,14 @@ export class GameCtrl extends Component {
         }, Constants.slotAnim.MoveOutWait);
     }
 
-    private findMatchingTargetBox(type: string): TargetBox | null {
-        return this.targetBoxes.find((b) => b.unlocked && !b.refreshing && !b.movingIn && b.type === type && b.progress + b.pending < b.required) || null;
+    private findMatchingTargetBox(type: string, plannedByBox: Map<TargetBox, number> | null = null): TargetBox | null {
+        return this.targetBoxes.find((b) =>
+            b.unlocked
+            && !b.refreshing
+            && !b.movingIn
+            && b.type === type
+            && b.progress + b.pending + (plannedByBox?.get(b) || 0) < b.required
+        ) || null;
     }
 
     // 触发槽位回到原位的动画。期间标记 movingIn=true,findMatchingTargetBox 会跳过此槽,
@@ -1558,12 +2035,58 @@ export class GameCtrl extends Component {
         });
     }
 
+    private preloadChainItem(bundle: AssetManager.Bundle | null, done: () => void) {
+        if (this.chainItemPrefab) {
+            done();
+            return;
+        }
+        if (!bundle) {
+            console.warn('GameCtrl: game bundle not found for chainItem');
+            done();
+            return;
+        }
+
+        bundle.load<Prefab>('prefab/chainItem', Prefab, (err, prefab) => {
+            if (err || !prefab) {
+                console.warn('GameCtrl: load chainItem prefab failed', err);
+            } else {
+                this.chainItemPrefab = prefab;
+            }
+            done();
+        });
+    }
+
+    private preloadIronItem(bundle: AssetManager.Bundle | null, done: () => void) {
+        if (this.ironItemPrefab) {
+            done();
+            return;
+        }
+        if (!bundle) {
+            console.warn('GameCtrl: game bundle not found for ironItem');
+            done();
+            return;
+        }
+
+        bundle.load<Prefab>('prefab/ironItem', Prefab, (err, prefab) => {
+            if (err || !prefab) {
+                console.warn('GameCtrl: load ironItem prefab failed', err);
+            } else {
+                this.ironItemPrefab = prefab;
+            }
+            done();
+        });
+    }
+
     private normalizeMahjongFrameName(name: string): string {
         if (Constants.MahjongBoard.ExcludedFrames.indexOf(name) >= 0) return '';
         return /^\d+$/.test(name) ? name : '';
     }
 
     private clearBoard() {
+        this.chainLinks = [];
+        this.chainByTileUid.clear();
+        this.ironLocks = [];
+        this.ironByTileUid.clear();
         if (this.mahjongPnode) this.mahjongPnode.removeAllChildren();
         if (this.flyLayer?.isValid) this.flyLayer.removeAllChildren();
         if (this.slotNode) {
@@ -1635,7 +2158,7 @@ export class GameCtrl extends Component {
         let tile: TileRecord | null = null;
         while (this.actionHistory.length > 0) {
             const candidate = this.actionHistory.pop()!;
-            if (!candidate.removed && this.slots.indexOf(candidate) >= 0 && candidate.node?.isValid) {
+            if (!this.isChainTile(candidate) && !candidate.removed && this.slots.indexOf(candidate) >= 0 && candidate.node?.isValid) {
                 tile = candidate;
                 break;
             }
@@ -1700,6 +2223,12 @@ export class GameCtrl extends Component {
 
     // actionHistory 变动后调用,通知 UI 撤回按钮该置灰还是恢复彩色
     private refreshUndoButtonStatus() {
+        this.actionHistory = this.actionHistory.filter((t) =>
+            !this.isChainTile(t)
+            && !t.removed
+            && this.slots.indexOf(t) >= 0
+            && !!t.node?.isValid
+        );
         const empty = this.actionHistory.length === 0;
         director.emit(Constants.eventNames.EventSetUndoButtonStatus, empty);
     }
@@ -1960,7 +2489,8 @@ export class GameCtrl extends Component {
             tiles: tileSnaps,
             slotKeys: this.slots.map((t) => this.tileKey(t)),
             discardedKeys: this.discardedTiles.map((t) => this.tileKey(t)),
-            actionHistoryKeys: this.actionHistory.map((t) => this.tileKey(t)),
+            actionHistoryKeys: this.actionHistory.filter((t) => !this.isChainTile(t)).map((t) => this.tileKey(t)),
+            ironLockedKeys: this.getLockedIronKeys(),
             boxes,
             remainTime: this.remainTime,
             elapsedTime: this.elapsedTime,
@@ -2066,7 +2596,8 @@ export class GameCtrl extends Component {
         const slotSet = new Set(this.slots);
         this.actionHistory = snap.actionHistoryKeys
             .map((k) => lookup(k))
-            .filter((t): t is TileRecord => !!t && slotSet.has(t));
+            .filter((t): t is TileRecord => !!t && slotSet.has(t) && !this.isChainTile(t));
+        this.applyIronLockedKeys(snap.ironLockedKeys);
 
         // 8. 计时与状态
         this.remainTime = snap.remainTime;
@@ -2084,6 +2615,8 @@ export class GameCtrl extends Component {
         const layers = new Set<number>();
         for (const tile of this.tiles) layers.add(tile.layer);
         layers.forEach((layer) => this.refreshLayerDisplayOrder(this.getOrCreateLayerContainer(layer)));
+        this.refreshChainLinkVisuals();
+        this.refreshIronLockVisuals();
         this.updateBoardTileShadows();
 
         // 10. 若恢复的 slot 牌刚好匹配某个 box.type,立刻飞过去补单
@@ -2105,6 +2638,7 @@ export class GameCtrl extends Component {
         if (!this.snapshotDirty) return;
         if (this.gameState !== 'playing') return;
         if (this.resolvingMatch || this.dealingTiles || this.shuffleAnimating) return;
+        if (this.hasUnlockingIron()) return;
         if (this.targetBoxes.some((b) => b.pending > 0 || b.refreshing || b.movingIn || b.movedOut)) return;
         if (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)) return;
         ProgressManager.saveSnapshot(this.buildSnapshot());

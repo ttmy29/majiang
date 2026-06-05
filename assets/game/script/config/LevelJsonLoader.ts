@@ -13,6 +13,8 @@ export interface LevelJson {
     decoded_config: {
         task: number[][];
         taskNum: number[][];
+        chain?: number[][];
+        ironData?: number[][];
         [k: string]: any;
     };
     summary?: any;

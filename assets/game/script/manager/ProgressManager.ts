@@ -29,6 +29,7 @@ export interface ProgressSnapshot {
     slotKeys: TileKey[];
     discardedKeys: TileKey[];
     actionHistoryKeys: TileKey[];
+    ironLockedKeys?: TileKey[];
     boxes: BoxSnap[];
     remainTime: number;
     elapsedTime: number;
