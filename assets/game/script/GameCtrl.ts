@@ -1675,10 +1675,9 @@ export class GameCtrl extends Component {
             return true;
         }
 
-        const taskIndex = this.taskQueue.indexOf(type);
-        if (taskIndex < 0) return false;
-        this.taskQueue.splice(taskIndex, 1);
-        return true;
+        // 保持全局任务队列顺序:挂起牌不要从未来队列里插队消耗,
+        // 等对应 type 按 FIFO 正常出现在目标槽时再回收。
+        return false;
     }
 
     // ==========================================
@@ -1848,36 +1847,8 @@ export class GameCtrl extends Component {
 
     // 严格按 task[] 顺序出队:队列空了 box.type='' 返回 false,上层会把槽位标记 movedOut
     private assignNewTarget(box: TargetBox): boolean {
-        let type = '';
+        const type = this.taskQueue.shift() || '';
 
-        // 1. 收集玩家当前“急需解救”的牌的类型
-        // 包括被失败弹窗挂起的牌 (discardedTiles) 和底部存牌槽里的牌 (slots)
-        const urgentTypes = new Set<string>();
-        for (const tile of this.discardedTiles) {
-            if (tile.node?.isValid) urgentTypes.add(tile.type);
-        }
-        for (const tile of this.slots) {
-            if (tile.node?.isValid) urgentTypes.add(tile.type);
-        }
-
-        // 2. 尝试在任务队列 (taskQueue) 中寻找这些急需的类型，将其“插队”提取出来
-        let foundUrgent = false;
-        for (const uType of urgentTypes) {
-            const taskIndex = this.taskQueue.indexOf(uType);
-            if (taskIndex >= 0) {
-                // 在队列中找到了对应的任务！用 splice 把它从原位置抽出来
-                type = this.taskQueue.splice(taskIndex, 1)[0];
-                foundUrgent = true;
-                break;
-            }
-        }
-
-        // 3. 如果没找到急需的（或者底部槽位本来就是空的），就按原逻辑取队列第一个
-        if (!foundUrgent) {
-            type = this.taskQueue.shift() || '';
-        }
-
-        // 4. 继续执行后续的原有渲染和归位逻辑
         this.emitClearSlot(box);
         box.type = type;
         box.progress = 0;
