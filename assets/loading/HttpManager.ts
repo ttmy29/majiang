@@ -113,7 +113,7 @@ export class HttpManager {
         return this._instance;
     }
 
-    private _baseUrl: string = 'https://archive.jinkezhexin.top/mahjongmatch';
+    private _baseUrl: string = 'https://archive.jinkezhexin.top/smahjongmatch';
     private _timeout: number = 10000;
     private _enableLog: boolean = false;
     private _md5: string = '';
