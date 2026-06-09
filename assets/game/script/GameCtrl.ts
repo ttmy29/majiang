@@ -327,12 +327,15 @@ export class GameCtrl extends Component {
         this.clearBoard();
         this.generateBoard();
 
-        // 引导关永不恢复快照,确保引导流程从头跑一遍
+        // 引导关永不恢复快照,确保引导流程从头跑一遍。
+        // 另外"刚发完牌、玩家还没动过的原始满盘"快照也不恢复 —— 否则每次重新打开游戏都会让满盘
+        // 瞬间出现、跳过发牌飞入动画;这种快照没有进度可保留,改走全新发牌把飞入动画放出来。
         const useSnapshot =
             !this.isGuideLevel()
             && snapshot
             && snapshot.level === level
-            && snapshot.tiles.length === this.tiles.length;
+            && snapshot.tiles.length === this.tiles.length
+            && !this.snapshotHasNoProgress(snapshot);
         if (useSnapshot) {
             this.applySnapshot(snapshot!);
         } else {
@@ -866,7 +869,14 @@ export class GameCtrl extends Component {
     private shouldRestoreOriginalIronLocksForSnapshot(snap: ProgressSnapshot): boolean {
         if (!Array.isArray(snap.ironLockedKeys) || snap.ironLockedKeys.length > 0) return false;
         if (this.ironLocks.length === 0) return false;
+        return this.snapshotHasNoProgress(snap);
+    }
 
+    // 快照里没有任何玩家进度:所有牌都还在棋盘上、底部存牌槽/回收站/撤回栈都空、目标槽一张没收。
+    // 也就是"刚发完牌、玩家还没动过的原始满盘"——发牌结束后 finishDealAnimation 会立即存一份这样的快照。
+    // 恢复它只会让满盘瞬间出现、跳过发牌飞入动画,而棋盘是确定性的(牌型来自关卡 JSON、发牌无随机),
+    // 重发能得到一模一样的盘面。所以调用方据此改走全新发牌流程,把飞入动画放出来(见 startLevel)。
+    private snapshotHasNoProgress(snap: ProgressSnapshot): boolean {
         const hasTileProgress = snap.tiles.some((tile) =>
             tile.location !== 'board' || tile.collected || tile.removed
         );
@@ -2788,6 +2798,15 @@ export class GameCtrl extends Component {
 
         // 10. 若恢复的 slot 牌刚好匹配某个 box.type,立刻飞过去补单
         this.collectStoredTargets();
+
+        // 11. 恢复出来、仍留在棋盘上的牌做一次淡入 + 轻微缩放弹入,给"瞬间满盘"补一点入场感。
+        //     slot/target/discarded 上已就位的牌不参与,否则它们会从静止位置莫名缩放。
+        for (const tile of this.tiles) {
+            const s = snapByKey.get(`${tile.layer}|${tile.row}|${tile.col}`);
+            if (!s || s.location !== 'board' || s.collected || s.removed) continue;
+            if (!tile.node?.isValid || !tile.node.activeInHierarchy) continue;
+            tile.item.playRestoreFeedback();
+        }
     }
 
     private saveProgressDeferred() {

@@ -532,6 +532,48 @@ export class MahjongItem extends Component {
             .start();
     }
 
+    /**
+     * 恢复存档时,棋盘上仍在场的牌做一次"淡入 + 轻微缩放弹入"。
+     * 没有飞行,不影响 slot/target 上已就位的牌,只给"瞬间满盘"补一点入场感。
+     * 复用 touchTween 轨道:弹入途中玩家点牌时 stopTouchTween 能干净打断,交回 resetScale 接管缩放。
+     * @param delay 起始延迟,调用方可按牌序错峰传入(当前默认 0,整盘同时弹入)
+     */
+    public playRestoreFeedback(delay = 0) {
+        if (!this.node?.isValid) return;
+        const baseScale = this.getBoardScale();
+        this.stopTouchTween();
+
+        // 牌身淡入:setPlayable 只创建 UIOpacity 不写 opacity,所以这里独占该通道,互不干扰
+        const opacity = this.node.getComponent(UIOpacity) || this.node.addComponent(UIOpacity);
+        opacity.opacity = 0;
+        Tween.stopAllByTarget(opacity);
+        tween(opacity)
+            .delay(delay)
+            .to(0.2, { opacity: 255 }, { easing: 'sineOut' })
+            .start();
+
+        // 阴影挂在层容器里、不是牌的子节点,牌身 UIOpacity 不会级联到它,
+        // 单独补一段同样的淡入,避免"阴影先现、牌后淡入"的割裂。保留它原有目标透明度。
+        if (this.shadowNode?.isValid && this.shadowNode.active) {
+            const shadowOpacity = this.shadowNode.getComponent(UIOpacity) || this.shadowNode.addComponent(UIOpacity);
+            const shadowTarget = shadowOpacity.opacity > 0 ? shadowOpacity.opacity : 255;
+            shadowOpacity.opacity = 0;
+            Tween.stopAllByTarget(shadowOpacity);
+            tween(shadowOpacity)
+                .delay(delay)
+                .to(0.2, { opacity: shadowTarget }, { easing: 'sineOut' })
+                .start();
+        }
+
+        // 轻微缩放弹入:从 0.82 倍弹回原大小,backOut 带一点过冲营造"弹一下"的手感
+        this.node.setScale(baseScale.x * 0.82, baseScale.y * 0.82, baseScale.z);
+        this.touchTween = tween(this.node)
+            .delay(delay)
+            .to(0.26, { scale: baseScale.clone() }, { easing: 'backOut' })
+            .call(() => { this.touchTween = null; })
+            .start();
+    }
+
     private stopTouchTween() {
         if (!this.touchTween) return;
         this.touchTween.stop();
