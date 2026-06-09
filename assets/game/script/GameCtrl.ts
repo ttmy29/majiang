@@ -193,7 +193,7 @@ export class GameCtrl extends Component {
         });
     }
     //点击广告的次数
-    ad_cnt:number = 0;
+    ad_cnt: number = 0;
 
     // 看广告成功统一入口：每局埋点计数 + 全局累计持久化(难度自适应用) + 云同步
     private bumpAdCount() {
@@ -223,7 +223,7 @@ export class GameCtrl extends Component {
     };
 
     protected onDisable(): void {
-        if(this.nowLevel > 0 )  window.dnSDK?.track?.('LEVEL_EXIT', {duration:this.elapsedTime,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_EXIT', { duration: this.elapsedTime, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
     }
 
     protected onDestroy(): void {
@@ -287,7 +287,7 @@ export class GameCtrl extends Component {
         // 上报关卡进入事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
         //
-        if(this.nowLevel > 0 ) window.dnSDK?.track?.('LEVEL_ENTER', {enter_level_name: `关卡${this.nowLevel}`,level_id: this.nowLevel});
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_ENTER', { enter_level_name: `关卡${this.nowLevel}`, level_id: this.nowLevel });
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -1535,7 +1535,7 @@ export class GameCtrl extends Component {
         SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: this.elapsedTime });
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
-        window.dnSDK?.track?.('LEVEL_PASS', {duration:duration,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -1556,7 +1556,7 @@ export class GameCtrl extends Component {
         this.clearIdleTips();
         // 上报关卡失败事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
-        window.dnSDK?.track?.('LEVEL_LOSE', {duration:this.elapsedTime,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        window.dnSDK?.track?.('LEVEL_LOSE', { duration: this.elapsedTime, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
             const allUnlocked = this.targetBoxes.every((b) => b.unlocked);
@@ -1705,9 +1705,10 @@ export class GameCtrl extends Component {
             return true;
         }
 
-        // 保持全局任务队列顺序:挂起牌不要从未来队列里插队消耗,
-        // 等对应 type 按 FIFO 正常出现在目标槽时再回收。
-        return false;
+        const taskIndex = this.taskQueue.indexOf(type);
+        if (taskIndex < 0) return false;
+        this.taskQueue.splice(taskIndex, 1);
+        return true;
     }
 
     // ==========================================
@@ -1877,8 +1878,36 @@ export class GameCtrl extends Component {
 
     // 严格按 task[] 顺序出队:队列空了 box.type='' 返回 false,上层会把槽位标记 movedOut
     private assignNewTarget(box: TargetBox): boolean {
-        const type = this.taskQueue.shift() || '';
+        let type = '';
 
+        // 1. 收集玩家当前“急需解救”的牌的类型
+        // 包括被失败弹窗挂起的牌 (discardedTiles) 和底部存牌槽里的牌 (slots)
+        const urgentTypes = new Set<string>();
+        for (const tile of this.discardedTiles) {
+            if (tile.node?.isValid) urgentTypes.add(tile.type);
+        }
+        for (const tile of this.slots) {
+            if (tile.node?.isValid) urgentTypes.add(tile.type);
+        }
+
+        // 2. 尝试在任务队列 (taskQueue) 中寻找这些急需的类型，将其“插队”提取出来
+        let foundUrgent = false;
+        for (const uType of urgentTypes) {
+            const taskIndex = this.taskQueue.indexOf(uType);
+            if (taskIndex >= 0) {
+                // 在队列中找到了对应的任务！用 splice 把它从原位置抽出来
+                type = this.taskQueue.splice(taskIndex, 1)[0];
+                foundUrgent = true;
+                break;
+            }
+        }
+
+        // 3. 如果没找到急需的（或者底部槽位本来就是空的），就按原逻辑取队列第一个
+        if (!foundUrgent) {
+            type = this.taskQueue.shift() || '';
+        }
+
+        // 4. 继续执行后续的原有渲染和归位逻辑
         this.emitClearSlot(box);
         box.type = type;
         box.progress = 0;
@@ -2321,7 +2350,7 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.setUndoCount(this.undoCount + 3);
                 this.bumpAdCount();
-                window.dnSDK?.track?.('GET_ITEM', {item_source:2});
+                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
@@ -2351,7 +2380,7 @@ export class GameCtrl extends Component {
             this.refreshUndoButtonStatus();
             return;
         }
-        window.dnSDK?.track?.('USE_ITEM', {item_source:2});
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         // 有次数:消耗 1 次并直接撤回(不再看广告)
         this.setUndoCount(this.undoCount - 1);
         this.executeUndo(tile, index);
@@ -2496,7 +2525,7 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.bumpAdCount();
                 this.setSwitchCount(this.switchCount + 3);
-                window.dnSDK?.track?.('GET_ITEM', {item_source:2});
+                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
@@ -2511,7 +2540,7 @@ export class GameCtrl extends Component {
         if (topCandidates.length === 0) return;
 
 
-        window.dnSDK?.track?.('USE_ITEM', {item_source:2});
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         // 有次数:消耗 1 次并直接换牌(不再看广告)
         this.setSwitchCount(this.switchCount - 1);
         this.executeShuffle(activeTiles, topCandidates);
