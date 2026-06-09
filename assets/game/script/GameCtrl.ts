@@ -223,7 +223,7 @@ export class GameCtrl extends Component {
     };
 
     protected onDisable(): void {
-        if(this.nowLevel > 0 )  window.dnSDK?.track?.('LEVEL_EXIT', {duration:this.elapsedTime,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        if(this.nowLevel > 0 )  window.dnSDK?.track?.('LEVEL_EXIT', {duration:Math.ceil(this.elapsedTime),level_id: this.nowLevel,ad_cnt:this.ad_cnt});
     }
 
     protected onDestroy(): void {
@@ -1532,7 +1532,7 @@ export class GameCtrl extends Component {
         this.gameState = 'win';
         this.clearIdleTips();
         // 上报关卡成功事件
-        SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: this.elapsedTime });
+        SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: Math.ceil(this.elapsedTime) });
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
         window.dnSDK?.track?.('LEVEL_PASS', {duration:duration,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
@@ -1556,7 +1556,7 @@ export class GameCtrl extends Component {
         this.clearIdleTips();
         // 上报关卡失败事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
-        window.dnSDK?.track?.('LEVEL_LOSE', {duration:this.elapsedTime,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        window.dnSDK?.track?.('LEVEL_LOSE', {duration:Math.ceil(this.elapsedTime),level_id: this.nowLevel,ad_cnt:this.ad_cnt});
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
             const allUnlocked = this.targetBoxes.every((b) => b.unlocked);

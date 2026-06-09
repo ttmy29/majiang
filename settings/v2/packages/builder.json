@@ -98,7 +98,7 @@
               "isRemote": false,
               "compressionType": "merge_all_json"
             },
-            "configMode": "fallback",
+            "configMode": "overwrite",
             "overwriteSettings": {
               "wechatgame": {
                 "compressionType": "subpackage"
