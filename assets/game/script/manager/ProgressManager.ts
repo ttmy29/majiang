@@ -77,6 +77,42 @@ export class ProgressManager {
         StorageManager.instance.setItem(key, Math.max(0, Math.floor(count)));
     }
 
+    // —— 全局累计看广告次数（跨关，持久化，只增，默认 0）——
+    static loadGlobalAdCount(): number {
+        const raw = StorageManager.instance.getItem(StorageKey.GlobalAdCount);
+        if (raw === null) return 0;
+        const value = parseInt(raw, 10);
+        return Number.isFinite(value) && value >= 0 ? value : 0;
+    }
+
+    static addGlobalAdCount(delta = 1): number {
+        const next = this.loadGlobalAdCount() + Math.max(0, Math.floor(delta));
+        StorageManager.instance.setItem(StorageKey.GlobalAdCount, next);
+        return next;
+    }
+
+    // —— 本关重拾(重开)次数。游戏无选关、关号只增，只存「当前这一关」一条 {level,count}；
+    //    传入 level 与已存 level 不一致时自动归零重计，无需额外清理 ——
+    static loadLevelRetryCount(level: number): number {
+        const raw = StorageManager.instance.getItem(StorageKey.LevelRetryCount);
+        if (!raw) return 0;
+        try {
+            const obj = JSON.parse(raw) as { level?: number; count?: number };
+            if (!obj || obj.level !== level) return 0;
+            const v = obj.count;
+            return (typeof v === 'number' && Number.isFinite(v) && v >= 0) ? v : 0;
+        } catch (e) {
+            console.warn('ProgressManager: retry count parse failed', e);
+            return 0;
+        }
+    }
+
+    static addLevelRetryCount(level: number, delta = 1): number {
+        const next = this.loadLevelRetryCount(level) + Math.max(0, Math.floor(delta));
+        StorageManager.instance.setItem(StorageKey.LevelRetryCount, JSON.stringify({ level, count: next }));
+        return next;
+    }
+
     static loadSnapshot(): ProgressSnapshot | null {
         const raw = StorageManager.instance.getItem(StorageKey.LevelSnapshot);
         if (!raw) return null;

@@ -1,5 +1,6 @@
 import { Node, sys, UITransform, Vec3 } from 'cc';
 import { StorageKey, StorageManager } from '../manager/StorageManager';
+import { ArchiveManager } from '../manager/ArchiveManager';
 
 // 项目通用工具方法集合：
 // - 纯函数/纯节点操作，零业务状态
@@ -88,5 +89,6 @@ export class Utils {
     public static setVibrateEnabled(enabled: boolean) {
         Utils._vibrateEnabled = enabled;
         StorageManager.instance.setBoolean(StorageKey.Vibrate, enabled);
+        ArchiveManager.instance.scheduleUpload();
     }
 }

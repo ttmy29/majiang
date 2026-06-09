@@ -1,5 +1,6 @@
 import { _decorator, assetManager, Component, director, Label, Node, ProgressBar, SpriteFrame, sys, UITransform, Vec3, view } from 'cc';
 import { SDKEvent, SDKManager } from './SDKManager';
+import { HttpManager } from './HttpManager';
 
 const { ccclass, property } = _decorator;
 declare global {
@@ -22,6 +23,16 @@ export class loading extends Component {
 
     private loadStartTime: number = 0;
 
+    // —— 云存档拉取 → 进游戏 的协调 ——
+    // 场景就绪后最多再等存档这么久(秒)，兜底慢网/挂起，保证一定进游戏
+    private static readonly ARCHIVE_MAX_WAIT = 3;
+    // 登录→取md5→下载存档→写回本地；永不 reject(无数据/网络/非微信都吞掉)
+    private archiveReady: Promise<void> = Promise.resolve();
+    // 是否已进入游戏：进入后拒绝迟到的存档写入，避免串档
+    private gameEntered: boolean = false;
+    // 进游戏回调(存档就绪或超时都走它)，存成员便于 unschedule
+    private enterCb: (() => void) | null = null;
+
     onLoad() {
         this.progressBar.progress = 0;
         //适配
@@ -34,7 +45,58 @@ export class loading extends Component {
 
         this.initSDK();
 
+        // 进游戏前先登录拉取云存档(异步，不阻塞资源加载)；最终在 enterGameWhenReady 里汇合
+        this.archiveReady = this.prepareArchive();
+    }
 
+    /**
+     * 登录 → 取 md5 → 下载云端存档 → 写回本地。
+     * 永不 reject：无数据 / 网络错误 / 非微信环境都吞掉，继续用本地数据进游戏。
+     */
+    private prepareArchive(): Promise<void> {
+        return HttpManager.instance.loginAndFetchMd5()
+            .then(() => HttpManager.instance.downloadArchive())
+            .then((data) => {
+                // 已经进游戏了就别再写本地，避免游戏读完存档后又被覆盖(串档)
+                if (this.gameEntered) return;
+                this.applyArchive(data);
+            })
+            .catch(() => { /* 无数据 / 网络错误 / 非微信：忽略，用本地数据 */ });
+    }
+
+    /**
+     * 把下载到的扁平存档 { key: value } 写回 localStorage(云端优先覆盖本地)。
+     * 只覆盖云端存在的 key，不删除本地多出来的 key。
+     */
+    private applyArchive(data: any): void {
+        if (!data || typeof data !== 'object') return;
+        try {
+            Object.keys(data).forEach((key) => {
+                // 只认本项目的存档 key(全部以 mahjong_match_ 开头)，
+                // 顺带挡掉后端在空结果时可能返回的 code/message 等包装字段
+                if (key.indexOf('mahjong_match_') !== 0) return;
+                const value = data[key];
+                if (value === null || value === undefined) return;
+                sys.localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+            });
+        } catch (e) {
+            console.warn('applyArchive failed', e);
+        }
+    }
+
+    /**
+     * 场景已加载完成后调用：存档就绪(成功/失败/无)即进游戏，最多再等 ARCHIVE_MAX_WAIT 秒兜底。
+     */
+    private enterGameWhenReady(scene: any): void {
+        const enter = () => {
+            if (this.gameEntered) return;
+            this.gameEntered = true;
+            if (this.enterCb) this.unschedule(this.enterCb);
+            director.runScene(scene);
+        };
+        this.enterCb = enter;
+        this.archiveReady.then(enter);
+        this.scheduleOnce(enter, loading.ARCHIVE_MAX_WAIT);
     }
 
     start() {
@@ -70,7 +132,8 @@ export class loading extends Component {
                             }
 
                             //console.timeEnd("时间");
-                            director.runScene(scene);
+                            // 场景已就绪：等云存档拉取完成(或超时兜底)再进游戏
+                            this.enterGameWhenReady(scene);
                         });
                     });
                 });
@@ -112,7 +175,7 @@ export class loading extends Component {
             appId: 'yrRaAGjYBpxS98Mf1s3c',
             secret: 'ZOZxZroOf3JSQ1bgrwluQqEKdEiXI1Lz',
             timeout: 10000,
-            enableLog: true  // 生产环境建议设为 false
+            enableLog: false  // 生产环境建议设为 false
         });
         SDKManager.instance.wxLogin((userId) => {
             //console.log('wxLogin success:', userId);

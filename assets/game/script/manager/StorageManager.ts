@@ -9,6 +9,8 @@ export enum StorageKey {
     Level15TipsShown = 'mahjong_match_level15_tips_shown',
     UndoCount = 'mahjong_match_undo_count',
     SwitchCount = 'mahjong_match_switch_count',
+    GlobalAdCount = 'mahjong_match_global_ad_count',
+    LevelRetryCount = 'mahjong_match_level_retry_count',
 }
 
 export class StorageManager {

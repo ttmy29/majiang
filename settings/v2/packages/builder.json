@@ -96,9 +96,9 @@
           "miniGame": {
             "fallbackOptions": {
               "isRemote": false,
-              "compressionType": "merge_dep"
+              "compressionType": "merge_all_json"
             },
-            "configMode": "overwrite",
+            "configMode": "fallback",
             "overwriteSettings": {
               "wechatgame": {
                 "compressionType": "subpackage"

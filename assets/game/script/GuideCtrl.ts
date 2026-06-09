@@ -1,5 +1,6 @@
 import { _decorator, Color, Component, director, find, Graphics, Node, Sprite, tween, UITransform, Vec3, Tween } from 'cc';
 import { Constants } from './config/Constants';
+import { LayerManager } from './manager/LayerManager';
 const { ccclass, property } = _decorator;
 
 interface HighlightRect {
@@ -81,7 +82,7 @@ export class GuideCtrl extends Component {
 
     start() {
         window.dnSDK?.track?.('TUTORIAL_START', {});
-
+        find('Canvas/uiLayer/setting')?.destroy();
         this._initScale.set(this.fingerNode.scale);
         this._initPos.set(this.fingerNode.position);
         this._basePos.set(this._initPos);

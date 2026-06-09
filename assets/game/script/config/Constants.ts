@@ -74,6 +74,14 @@ const Constants = {
     GameBundleName: 'game',
     AudioBundleName: 'audio',
     BgmBundleName: 'bgm',
+    ConfigBundleName: 'config',
+    // 关卡难度自适应阈值（可调）
+    LevelDifficulty: {
+        // 同一关「重开」次数 > 此值，且 level_json2 里有这关 → 用 level_json2
+        RetryThreshold: 5,
+        // 全局累计看广告 >= 此值，且 level_json3 里有这关 → 用 level_json3（优先级高于重拾档）
+        AdThreshold: 10,
+    },
     MahjongBoard: {
         // 麻将牌面资源所在目录，只加载该目录下的数字牌面作为棋盘牌型。
         ResourceDir: 'resources/mahjong',

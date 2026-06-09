@@ -1,5 +1,6 @@
 import { _decorator, AudioClip, AudioSource, tween, Tween } from 'cc';
 import { StorageKey, StorageManager } from './StorageManager';
+import { ArchiveManager } from './ArchiveManager';
 
 const { ccclass } = _decorator;
 
@@ -69,6 +70,7 @@ export class AudioManager {
 
     setMusicEnabled(enabled: boolean) {
         StorageManager.instance.setBoolean(StorageKey.Music, enabled);
+        ArchiveManager.instance.scheduleUpload();
         if (enabled) {
             this.bgmSource?.play();
         } else {
@@ -78,6 +80,7 @@ export class AudioManager {
 
     setEffectEnabled(enabled: boolean) {
         StorageManager.instance.setBoolean(StorageKey.Audio, enabled);
+        ArchiveManager.instance.scheduleUpload();
     }
 
     play() {

@@ -8,6 +8,7 @@ import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
+import { ArchiveManager } from './manager/ArchiveManager';
 import { Utils } from './util/Utils';
 import { SDKEvent, SDKManager } from '../../loading/SDKManager';
 
@@ -169,21 +170,23 @@ export class GameCtrl extends Component {
             const bundle = assetManager.getBundle(Constants.GameBundleName);
             this.preloadChainItem(bundle, () => {
                 this.preloadIronItem(bundle, () => {
-                    preloadAllLevels(bundle, () => {
-                        if (!hasAnyLevelJson()) {
-                            console.warn('GameCtrl: no level JSON loaded under assets/game/json');
-                            return;
-                        }
-                        // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
-                        director.emit(Constants.eventNames.EventGameUiInit, {
-                            mahjongItem: this.mahjongItem,
-                            iconFrames: this.iconFrames,
+                    this.loadConfigBundle((configBundle) => {
+                        preloadAllLevels(configBundle, () => {
+                            if (!hasAnyLevelJson()) {
+                                console.warn('GameCtrl: no level JSON loaded from config bundle (level_json)');
+                                return;
+                            }
+                            // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
+                            director.emit(Constants.eventNames.EventGameUiInit, {
+                                mahjongItem: this.mahjongItem,
+                                iconFrames: this.iconFrames,
+                            });
+                            this.scheduleOnce(() => {
+                                const { level, snapshot } = this.loadSavedProgress();
+                                this.startLevel(level, snapshot);
+                                this.hasStarted = true;
+                            }, 0);
                         });
-                        this.scheduleOnce(() => {
-                            const { level, snapshot } = this.loadSavedProgress();
-                            this.startLevel(level, snapshot);
-                            this.hasStarted = true;
-                        }, 0);
                     });
                 });
             });
@@ -191,6 +194,13 @@ export class GameCtrl extends Component {
     }
     //点击广告的次数
     ad_cnt:number = 0;
+
+    // 看广告成功统一入口：每局埋点计数 + 全局累计持久化(难度自适应用) + 云同步
+    private bumpAdCount() {
+        this.ad_cnt++;
+        ProgressManager.addGlobalAdCount(1);
+        ArchiveManager.instance.scheduleUpload();
+    }
 
     // 退到 start 层后再点开始，靠 onEnable 触发整局重开
     protected onEnable() {
@@ -238,6 +248,8 @@ export class GameCtrl extends Component {
         // 切后台时 scheduleOnce 不再 tick,直接同步 flush
         this.snapshotDirty = true;
         this.flushSnapshot();
+        // 最后再立即把整份存档推到云端(单次低频,无视开关都同步一次)
+        ArchiveManager.instance.flushNow();
     };
 
     update(deltaTime: number) {
@@ -348,6 +360,7 @@ export class GameCtrl extends Component {
         const tipsNode = LayerManager.instance.showUI('tips');
         if (tipsNode) {
             StorageManager.instance.setBoolean(StorageKey.Level15TipsShown, true);
+            ArchiveManager.instance.scheduleUpload();
         }
     };
 
@@ -1517,6 +1530,7 @@ export class GameCtrl extends Component {
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
         ProgressManager.clearSnapshot();
+        ArchiveManager.instance.scheduleUpload();
         if (this.nowLevel == 0) {//引导关卡直接下一关
             this.scheduleOnce(() => {
                 this.onEventWinNextLevel();
@@ -1548,11 +1562,17 @@ export class GameCtrl extends Component {
         }
 
         this.showToast(`${reason}，重开本关`);
+        // 死局/时间到自动重开，同样算一次本关重拾
+        ProgressManager.addLevelRetryCount(this.nowLevel, 1);
+        ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
         this.scheduleOnce(() => this.startLevel(this.nowLevel), 1.5);
     }
 
     private onEventFailureRestart() {
+        // 真正重开本关：累加该关重拾次数（用于难度自适应）
+        ProgressManager.addLevelRetryCount(this.nowLevel, 1);
+        ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
         this.startLevel(this.nowLevel);
     }
@@ -1566,7 +1586,7 @@ export class GameCtrl extends Component {
         this.gameState = 'playing';
         this.setBoardTileTouchEnabled(true);
         if (opentype) {
-            this.ad_cnt += 1;
+            this.bumpAdCount();
             this.clearBottomSlot();
         } else {
             this.unlockNextSlotForContinue();
@@ -2204,6 +2224,20 @@ export class GameCtrl extends Component {
         });
     }
 
+    // 加载 config bundle（关卡 JSON 所在；frames/prefab 仍用 game bundle）。已加载则直接复用。
+    private loadConfigBundle(done: (bundle: AssetManager.Bundle | null) => void) {
+        const existing = assetManager.getBundle(Constants.ConfigBundleName);
+        if (existing) { done(existing); return; }
+        assetManager.loadBundle(Constants.ConfigBundleName, (err, bundle) => {
+            if (err || !bundle) {
+                console.warn('GameCtrl: load config bundle failed', err);
+                done(null);
+                return;
+            }
+            done(bundle);
+        });
+    }
+
     private normalizeMahjongFrameName(name: string): string {
         if (Constants.MahjongBoard.ExcludedFrames.indexOf(name) >= 0) return '';
         return /^\d+$/.test(name) ? name : '';
@@ -2224,7 +2258,10 @@ export class GameCtrl extends Component {
     }
 
     private createLevelConfig(level: number): RuntimeLevelConfig {
-        const json = getLevelJson(level);
+        // 难度自适应：全局累计看广告 >= 阈值 → 广告档(优先)；本关重开次数 > 阈值 → 重拾档；都不满足走默认
+        const ad = ProgressManager.loadGlobalAdCount() >= Constants.LevelDifficulty.AdThreshold;
+        const retry = ProgressManager.loadLevelRetryCount(level) > Constants.LevelDifficulty.RetryThreshold;
+        const json = getLevelJson(level, { ad, retry });
         if (!json) {
             console.warn(`GameCtrl: no level JSON for level ${level}`);
         }
@@ -2273,7 +2310,7 @@ export class GameCtrl extends Component {
         if (this.undoCount <= 0) {
             SDKManager.instance.showVideoAd(() => {
                 this.setUndoCount(this.undoCount + 3);
-                this.ad_cnt += 1;
+                this.bumpAdCount();
                 window.dnSDK?.track?.('GET_ITEM', {item_source:2});
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
@@ -2374,12 +2411,14 @@ export class GameCtrl extends Component {
     private setUndoCount(v: number) {
         this.undoCount = Math.max(0, v);
         ProgressManager.saveUndoCount(this.undoCount);
+        ArchiveManager.instance.scheduleUpload();
         this.emitPropCounts();
     }
 
     private setSwitchCount(v: number) {
         this.switchCount = Math.max(0, v);
         ProgressManager.saveSwitchCount(this.switchCount);
+        ArchiveManager.instance.scheduleUpload();
         this.emitPropCounts();
     }
 
@@ -2392,7 +2431,7 @@ export class GameCtrl extends Component {
         // 看视频广告
         SDKManager.instance.showVideoAd(() => {
             this.executeUnlock(box);
-            this.ad_cnt += 1;
+            this.bumpAdCount();
             SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.nowLevel });
         }, () => {
             LayerManager.instance.showToast("视频播放未完成！")
@@ -2445,7 +2484,7 @@ export class GameCtrl extends Component {
         // 次数用完:点击=看广告补充次数(refill only,不换牌)
         if (this.switchCount <= 0) {
             SDKManager.instance.showVideoAd(() => {
-                this.ad_cnt += 1;
+                this.bumpAdCount();
                 this.setSwitchCount(this.switchCount + 3);
                 window.dnSDK?.track?.('GET_ITEM', {item_source:2});
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
@@ -2771,6 +2810,7 @@ export class GameCtrl extends Component {
         if (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)) return;
         ProgressManager.saveSnapshot(this.buildSnapshot());
         this.snapshotDirty = false;
+        ArchiveManager.instance.scheduleUploadForSnapshot();
     }
 
     public onBtnSlotUnlockClick(event, data: string) {
@@ -2783,7 +2823,7 @@ export class GameCtrl extends Component {
 
         // 看视频广告,播完才解锁(与 onBtnUnlockClick 一致)
         SDKManager.instance.showVideoAd(() => {
-            this.ad_cnt += 1;
+            this.bumpAdCount();
             this.executeUnlock(box);
             SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.nowLevel });
         }, () => {

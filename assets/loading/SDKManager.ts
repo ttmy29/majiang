@@ -160,7 +160,7 @@ export class SDKManager {
             });
             const initResult = window.dnSDK.getInitResult();
             if (!initResult.inited) {
-                console.log(initResult);
+                this.log(initResult);
             }
 
         } else {
@@ -900,7 +900,7 @@ export class SDKManager {
             str += data[key] + '=' + param[data[key]] + '&';
         }
         str += secret;
-        console.log('[SDKManager] createSign', str);
+        this.log('[SDKManager] createSign', str);
         return this.getMD5(str);
     }
 }
