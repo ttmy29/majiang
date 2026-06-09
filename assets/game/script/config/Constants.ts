@@ -74,7 +74,8 @@ const Constants = {
     GameBundleName: 'game',
     AudioBundleName: 'audio',
     BgmBundleName: 'bgm',
-    ConfigBundleName: 'config',
+    LevelConfigSegmentSize: 50,
+    LevelConfigBundlePrefix: 'config_levels_',
     // 关卡难度自适应阈值（可调）
     LevelDifficulty: {
         // 同一关「重开」次数 > 此值，且 level_json2 里有这关 → 用 level_json2

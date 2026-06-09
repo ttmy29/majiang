@@ -1,7 +1,7 @@
 import { _decorator, assetManager, AssetManager, Component, director, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
-import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAllLevels } from './config/LevelJsonLoader';
+import { ensureLevelJson, LevelJson, LevelJsonPosition, releaseOutsideWindow, resolveLevelLoadOptions, warmupForwardWindow } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { ironItem } from './ironItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
@@ -153,6 +153,7 @@ export class GameCtrl extends Component {
     private iconFrames: Map<string, SpriteFrame> = new Map();
     private chainItemPrefab: Prefab | null = null;
     private ironItemPrefab: Prefab | null = null;
+    private levelRequestSeq = 0;
 
     start() {
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
@@ -170,24 +171,15 @@ export class GameCtrl extends Component {
             const bundle = assetManager.getBundle(Constants.GameBundleName);
             this.preloadChainItem(bundle, () => {
                 this.preloadIronItem(bundle, () => {
-                    this.loadConfigBundle((configBundle) => {
-                        preloadAllLevels(configBundle, () => {
-                            if (!hasAnyLevelJson()) {
-                                console.warn('GameCtrl: no level JSON loaded from config bundle (level_json)');
-                                return;
-                            }
-                            // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
-                            director.emit(Constants.eventNames.EventGameUiInit, {
-                                mahjongItem: this.mahjongItem,
-                                iconFrames: this.iconFrames,
-                            });
-                            this.scheduleOnce(() => {
-                                const { level, snapshot } = this.loadSavedProgress();
-                                this.startLevel(level, snapshot);
-                                this.hasStarted = true;
-                            }, 0);
-                        });
+                    // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
+                    director.emit(Constants.eventNames.EventGameUiInit, {
+                        mahjongItem: this.mahjongItem,
+                        iconFrames: this.iconFrames,
                     });
+                    this.scheduleOnce(() => {
+                        const { level, snapshot } = this.loadSavedProgress();
+                        void this.requestStartLevel(level, snapshot);
+                    }, 0);
                 });
             });
         });
@@ -219,7 +211,7 @@ export class GameCtrl extends Component {
     private restartFromEnable = () => {
         // 必须每次重读 — 胜利后玩家回主页再进入,内存里的 nowLevel 还是旧值
         const { level, snapshot } = this.loadSavedProgress();
-        this.startLevel(level, snapshot);
+        void this.requestStartLevel(level, snapshot);
     };
 
     protected onDisable(): void {
@@ -241,6 +233,25 @@ export class GameCtrl extends Component {
         }
         const snapshot = ProgressManager.loadSnapshot();
         return { level, snapshot };
+    }
+
+    private async requestStartLevel(level: number, snapshot: ProgressSnapshot | null = null) {
+        const requestSeq = ++this.levelRequestSeq;
+        const opts = resolveLevelLoadOptions(level);
+        const json = await ensureLevelJson(level, opts);
+        if (requestSeq !== this.levelRequestSeq) return;
+        if (!json) {
+            console.warn(`GameCtrl: no level JSON for level ${level}`);
+            return;
+        }
+
+        this.levelJson = json;
+        this.startLevel(level, snapshot);
+        if (requestSeq !== this.levelRequestSeq) return;
+
+        this.hasStarted = true;
+        void warmupForwardWindow(level, 10);
+        releaseOutsideWindow(level, 10);
     }
 
     private onAppHide = () => {
@@ -1576,7 +1587,7 @@ export class GameCtrl extends Component {
         ProgressManager.addLevelRetryCount(this.nowLevel, 1);
         ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
-        this.scheduleOnce(() => this.startLevel(this.nowLevel), 1.5);
+        this.scheduleOnce(() => void this.requestStartLevel(this.nowLevel), 1.5);
     }
 
     private onEventFailureRestart() {
@@ -1584,11 +1595,11 @@ export class GameCtrl extends Component {
         ProgressManager.addLevelRetryCount(this.nowLevel, 1);
         ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
-        this.startLevel(this.nowLevel);
+        void this.requestStartLevel(this.nowLevel);
     }
 
     private onEventWinNextLevel() {
-        this.startLevel(this.nowLevel + 1);
+        void this.requestStartLevel(this.nowLevel + 1);
     }
 
     private onEventFailureContinue(opentype: string | null) {
@@ -2234,20 +2245,6 @@ export class GameCtrl extends Component {
         });
     }
 
-    // 加载 config bundle（关卡 JSON 所在；frames/prefab 仍用 game bundle）。已加载则直接复用。
-    private loadConfigBundle(done: (bundle: AssetManager.Bundle | null) => void) {
-        const existing = assetManager.getBundle(Constants.ConfigBundleName);
-        if (existing) { done(existing); return; }
-        assetManager.loadBundle(Constants.ConfigBundleName, (err, bundle) => {
-            if (err || !bundle) {
-                console.warn('GameCtrl: load config bundle failed', err);
-                done(null);
-                return;
-            }
-            done(bundle);
-        });
-    }
-
     private normalizeMahjongFrameName(name: string): string {
         if (Constants.MahjongBoard.ExcludedFrames.indexOf(name) >= 0) return '';
         return /^\d+$/.test(name) ? name : '';
@@ -2268,14 +2265,10 @@ export class GameCtrl extends Component {
     }
 
     private createLevelConfig(level: number): RuntimeLevelConfig {
-        // 难度自适应：全局累计看广告 >= 阈值 → 广告档(优先)；本关重开次数 > 阈值 → 重拾档；都不满足走默认
-        const ad = ProgressManager.loadGlobalAdCount() >= Constants.LevelDifficulty.AdThreshold;
-        const retry = ProgressManager.loadLevelRetryCount(level) > Constants.LevelDifficulty.RetryThreshold;
-        const json = getLevelJson(level, { ad, retry });
+        const json = this.levelJson;
         if (!json) {
             console.warn(`GameCtrl: no level JSON for level ${level}`);
         }
-        this.levelJson = json as LevelJson;
         const play = getLevelPlayConfig(level);
         const baseDiff = json?.index_config?.base_diff ?? json?.summary?.hard ?? 0;
         return {
