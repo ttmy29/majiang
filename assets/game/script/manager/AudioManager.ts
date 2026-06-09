@@ -16,7 +16,7 @@ export enum AudioClipNames {
     mj_error = 'mj_error', //麻将 抖动音效
     game_lose = 'game_lose', //游戏结束 失败弹窗音效
     game_win = 'game_win', //游戏结束 胜利弹窗音效
-    combo_level1 = 'bucuo1', //1_好
+    combo_level1 = 'bucuo1', //1_不错
     combo_level2 = 'lihai2', //2_优秀
     combo_level3 = 'niude3', //3_真棒
     combo_level4 = 'juele4', //4_漂亮
