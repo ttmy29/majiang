@@ -28,14 +28,20 @@ export class loading extends Component {
     // 提示名言列表:tispLabel1 显示正文,tispLabel2 显示作者。
     // 首次进入游戏固定显示第 0 条,其余每次从剩下的里随机取一条。
     private static readonly TIPS: ReadonlyArray<{ text: string; author: string }> = [
-        { text: '辛勤的蜜蜂永没有时间悲哀。', author: '——布莱克' },
-        { text: '业精于勤,荒于嬉;行成于思,毁于随。', author: '——韩愈' },
-        { text: '宝剑锋从磨砺出,梅花香自苦寒来。', author: '——《警世贤文》' },
-        { text: '世上无难事,只怕有心人。', author: '——谚语' },
-        { text: '千里之行,始于足下。', author: '——老子' },
-        { text: '不积跬步,无以至千里。', author: '——荀子' },
-        { text: '逝者如斯夫,不舍昼夜。', author: '——孔子' },
-        { text: '天才就是百分之一的灵感加百分之九十九的汗水。', author: '——爱迪生' },
+        { text: '每天游玩三十分钟,放松身心,助于睡眠。', author: '' },
+        { text: '不攀比,不依附,不焦虑。你若盛开,清风自来。', author: '' },
+        { text: '身体健康就是最大的福气,心里没事就是最大的财气。', author: '' },
+        { text: '放下执念,才能拿起幸福;心宽一寸,路宽一丈。', author: '' },
+        { text: '每天笑一笑,烦恼全跑掉;心情舒畅了,身体自然好。', author: '' },
+        { text: '看淡得失,才能活得轻松;放下执念,才能遇见美好。', author: '' },
+        { text: '不争不抢,不慌不忙;顺其自然,自有答案。', author: '' },
+        { text: '心若简单,世界就简单;人若知足,人生就幸福。', author: '' },
+        { text: '饭吃七分饱,事想三分开;心宽百病退,人静福自来。', author: '' },
+        { text: '与人相处,贵在真诚;与己相处,重在释怀。', author: '' },
+        { text: '遇事不急,处事不乱;做人有尺,做事有度。', author: '' },
+        { text: '不念过往,不惧将来;心之所向,皆是美好。', author: '' },
+        { text: '心宽福自来,人善运自旺。', author: '' },
+        { text: '心安即归处,知足即幸福。', author: '' },
     ];
     // 标记首次进入游戏,持久化到本地(沿用本项目 mahjong_match_ 前缀)
     private static readonly TIP_SEEN_KEY = 'mahjong_match_tip_seen';

@@ -797,16 +797,13 @@ export class UIGameLayer extends Component {
         }
         let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
-            motionStreakNode.setPosition(new Vec3(140, 0, 0));
+            motionStreakNode.setPosition(new Vec3(0, -140, 0));
             motionStreakNode.active = false;
         }
 
 
         // 1. 停止当前节点的所有动画
         Tween.stopAllByTarget(targetNode);
-
-        // 2. 判断是左侧还是右侧槽位 (通常 4 个槽位 0,1 为左，2,3 为右，你可以根据实际场景微调)
-        const isLeft = slotID == 1 || slotID == 3;
 
         // ==========================================
         // 盖子下压动画 (task_gaiziNew)
@@ -850,11 +847,11 @@ export class UIGameLayer extends Component {
             .to(0.05, { scale: new Vec3(0.98, 1.02, 1) }) // 横向回缩，纵向拉长
             .to(0.05, { scale: new Vec3(1, 1, 1) })       // 回正
             .start();
-        const targetPosX = !isLeft ? 1000 : -1000;
+        const targetPosY = targetNode.y + 1500;
 
         tween(targetNode)
             .delay(0.3333)
-            .to(0.3000, { position: new Vec3(targetPosX, targetNode.y, 0) }) // 大幅度斜向退场，飞出屏幕
+            .to(0.4500, { position: new Vec3(targetNode.x, targetPosY, 0) }) // 大幅度向上退场，飞出屏幕顶部（速度对齐原左右挪动）
             .call(() => {
                 if (motionStreakNode) motionStreakNode.active = false;
             })
@@ -869,7 +866,7 @@ export class UIGameLayer extends Component {
         }
         let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
-            motionStreakNode.setPosition(new Vec3(-140, 0, 0));
+            motionStreakNode.setPosition(new Vec3(0, 140, 0));
             motionStreakNode.active = false;
         }
         const box2Node = targetNode.getChildByName('box_2');
@@ -880,8 +877,10 @@ export class UIGameLayer extends Component {
         AudioManager.instance.playOneShot(AudioClipNames.taskBoxMove);
         // 2. 回到该槽位在场景里的原始位置（不再写死 ±200, 0）
         const originPos = this.slotOriginPositions[slotID] ?? targetNode.position.clone();
+        // 从顶部上方落入：先把节点放到原始位置正上方，再下落归位
+        targetNode.setPosition(new Vec3(originPos.x, originPos.y + 1500, 0));
         tween(targetNode)
-            .to(0.3, { position: originPos.clone() }, { easing: 'quadOut' })
+            .to(0.45, { position: originPos.clone() }, { easing: 'quadOut' })
             .call(() => {
                 targetNode.setPosition(originPos.clone());
                 if (motionStreakNode) motionStreakNode.active = false;

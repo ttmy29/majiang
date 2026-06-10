@@ -349,6 +349,9 @@ export class GameCtrl extends Component {
             && !this.snapshotHasNoProgress(snapshot);
         if (useSnapshot) {
             this.applySnapshot(snapshot!);
+            // 恢复存档没有发牌飞入动画,但仍补上"开局发牌音效",让继续游戏与全新开局的开场体验一致。
+            // 牌已就位,无需像 playDealAnimation 那样延时到首张牌起飞,直接播放即可。
+            AudioManager.instance.playOneShotPauseBgm(AudioClipNames.game_start);
         } else {
             // 全新开局:写入关卡号 + 清掉旧快照,然后正常发牌
             ProgressManager.saveLevel(level);
