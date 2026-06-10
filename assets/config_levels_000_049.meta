@@ -1,16 +1,12 @@
 {
-    "ver":  "1.2.0",
-    "importer":  "directory",
-    "imported":  true,
-    "uuid":  "786a7507-4143-4d79-a923-77ef9162ca94",
-    "files":  [
-
-              ],
-    "subMetas":  {
-
-                 },
-    "userData":  {
-                     "isBundle":  true,
-                     "bundleConfigID":  "66ACcqrvRHC6ZBnICfzsG7"
-                 }
+  "ver": "1.2.0",
+  "importer": "directory",
+  "imported": true,
+  "uuid": "786a7507-4143-4d79-a923-77ef9162ca94",
+  "files": [],
+  "subMetas": {},
+  "userData": {
+    "isBundle": true,
+    "bundleConfigID": "fbGzC9qLNLUabD0f5W3cBQ"
+  }
 }

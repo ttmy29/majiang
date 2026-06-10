@@ -106,6 +106,38 @@
             }
           }
         }
+      },
+      "fbGzC9qLNLUabD0f5W3cBQ": {
+        "displayName": "配置config",
+        "configs": {
+          "native": {
+            "preferredOptions": {
+              "isRemote": false,
+              "compressionType": "merge_dep"
+            }
+          },
+          "web": {
+            "preferredOptions": {
+              "isRemote": false,
+              "compressionType": "merge_dep"
+            },
+            "fallbackOptions": {
+              "compressionType": "merge_dep"
+            }
+          },
+          "miniGame": {
+            "fallbackOptions": {
+              "isRemote": true,
+              "compressionType": "merge_dep"
+            },
+            "configMode": "fallback",
+            "overwriteSettings": {
+              "wechatgame": {
+                "compressionType": "subpackage"
+              }
+            }
+          }
+        }
       }
     }
   }

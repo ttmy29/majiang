@@ -1793,8 +1793,9 @@ export class GameCtrl extends Component {
         const startMoveTime = 0.3;       // m_startMoveTime: 单张牌飞行耗时 0.3s
 
         // 开局发牌音效:延时到首张牌真正起飞的瞬间再响,避免画面还没动声音就先到
+        // 播放期间暂停背景音乐,音效结束后再恢复
         this.scheduleOnce(() => {
-            AudioManager.instance.playOneShot(AudioClipNames.game_start);
+            AudioManager.instance.playOneShotPauseBgm(AudioClipNames.game_start);
         }, startDelayTime);
 
         // 计算所有麻将落位完成的总耗时
