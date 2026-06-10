@@ -188,9 +188,10 @@ export class AudioManager {
 
         source.playOneShot(clip, volume);
 
-        // 用音效本身的时长作为暂停时长,音效放完时再恢复 BGM
+        // 用音效本身的时长作为暂停时长,音效放完后再额外留 0.2s 缓冲才恢复 BGM
         const duration = typeof clip.getDuration === 'function' ? clip.getDuration() : 0;
-        this.pauseBgmFor(duration > 0 ? duration : 1.5);
+        const extraDelay = 0.2; // 音效结束后的额外延时,避免 BGM 立刻顶上来
+        this.pauseBgmFor((duration > 0 ? duration : 1.5) + extraDelay);
     }
 
     /**

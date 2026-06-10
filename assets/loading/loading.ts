@@ -20,6 +20,25 @@ export class loading extends Component {
     progressLabel: Label = null!;
     @property(Node)
     bgNode: Node = null!;
+    @property(Label)
+    tispLabel1:Label = null!;
+    @property(Label)
+    tispLabel2:Label = null!;
+
+    // 提示名言列表:tispLabel1 显示正文,tispLabel2 显示作者。
+    // 首次进入游戏固定显示第 0 条,其余每次从剩下的里随机取一条。
+    private static readonly TIPS: ReadonlyArray<{ text: string; author: string }> = [
+        { text: '辛勤的蜜蜂永没有时间悲哀。', author: '——布莱克' },
+        { text: '业精于勤,荒于嬉;行成于思,毁于随。', author: '——韩愈' },
+        { text: '宝剑锋从磨砺出,梅花香自苦寒来。', author: '——《警世贤文》' },
+        { text: '世上无难事,只怕有心人。', author: '——谚语' },
+        { text: '千里之行,始于足下。', author: '——老子' },
+        { text: '不积跬步,无以至千里。', author: '——荀子' },
+        { text: '逝者如斯夫,不舍昼夜。', author: '——孔子' },
+        { text: '天才就是百分之一的灵感加百分之九十九的汗水。', author: '——爱迪生' },
+    ];
+    // 标记首次进入游戏,持久化到本地(沿用本项目 mahjong_match_ 前缀)
+    private static readonly TIP_SEEN_KEY = 'mahjong_match_tip_seen';
 
     private loadStartTime: number = 0;
 
@@ -45,8 +64,35 @@ export class loading extends Component {
 
         this.initSDK();
 
+        // 显示一条提示名言
+        this.showTip();
+
         // 进游戏前先登录拉取云存档(异步，不阻塞资源加载)；最终在 enterGameWhenReady 里汇合
         this.archiveReady = this.prepareArchive();
+    }
+
+    /**
+     * 显示提示名言:首次进入固定显示第 0 条,之后每次从剩下的里随机取一条。
+     */
+    private showTip(): void {
+        const tips = loading.TIPS;
+        if (tips.length === 0) return;
+
+        let index = 0;
+        const seen = sys.localStorage.getItem(loading.TIP_SEEN_KEY);
+        if (seen) {
+            // 非首次:从第 1 条开始随机(剩下的)
+            if (tips.length > 1) {
+                index = 1 + Math.floor(Math.random() * (tips.length - 1));
+            }
+        } else {
+            // 首次:固定第 0 条并打标记
+            sys.localStorage.setItem(loading.TIP_SEEN_KEY, '1');
+        }
+
+        const tip = tips[index];
+        this.tispLabel1.string = tip.text;
+        this.tispLabel2.string = tip.author;
     }
 
     /**

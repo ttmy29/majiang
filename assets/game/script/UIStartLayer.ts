@@ -43,6 +43,11 @@ export class UIStartLayer extends Component {
     // 点击开始游戏
     async onClickStartButton() {
         AudioManager.instance.playClick();
+
+
+        LayerManager.instance.showUI("win");
+
+        return;
         if (this.enteringGame) return;
 
         this.enteringGame = true;

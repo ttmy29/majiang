@@ -30,7 +30,8 @@ export class UIWinLayer extends Component {
     init(time: number = 0) {
         this.playOpenAnimation();
         this.rankLabel.string = "";
-        this.showRankLabel(97.47, time);
+        const rank = 80 + Math.random() * (98.88 - 80);
+        this.showRankLabel(rank, time);
         //this.playLightBurst();
     }
 

@@ -926,7 +926,7 @@
         "__id__": 25
       }
     ],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 29
@@ -1167,9 +1167,9 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 197,
-      "g": 230,
-      "b": 204,
+      "r": 88,
+      "g": 177,
+      "b": 160,
       "a": 255
     },
     "_string": "失眠了吗？来试试麻将疗法，无需处方",
@@ -1300,6 +1300,12 @@
     },
     "bgNode": {
       "__id__": 5
+    },
+    "tispLabel1": {
+      "__id__": 30
+    },
+    "tispLabel2": {
+      "__id__": 27
     },
     "_id": "18NCh7HBpFWJqdXoz9o4Od"
   },
