@@ -20,6 +20,31 @@ export class loading extends Component {
     progressLabel: Label = null!;
     @property(Node)
     bgNode: Node = null!;
+    @property(Label)
+    tispLabel1:Label = null!;
+    @property(Label)
+    tispLabel2:Label = null!;
+
+    // 提示名言列表:tispLabel1 显示正文,tispLabel2 显示作者。
+    // 首次进入游戏固定显示第 0 条,其余每次从剩下的里随机取一条。
+    private static readonly TIPS: ReadonlyArray<{ text: string; author: string }> = [
+        { text: '每天游玩三十分钟,放松身心,助于睡眠。', author: '' },
+        { text: '不攀比,不依附,不焦虑。你若盛开,清风自来。', author: '' },
+        { text: '身体健康就是最大的福气,心里没事就是最大的财气。', author: '' },
+        { text: '放下执念,才能拿起幸福;心宽一寸,路宽一丈。', author: '' },
+        { text: '每天笑一笑,烦恼全跑掉;心情舒畅了,身体自然好。', author: '' },
+        { text: '看淡得失,才能活得轻松;放下执念,才能遇见美好。', author: '' },
+        { text: '不争不抢,不慌不忙;顺其自然,自有答案。', author: '' },
+        { text: '心若简单,世界就简单;人若知足,人生就幸福。', author: '' },
+        { text: '饭吃七分饱,事想三分开;心宽百病退,人静福自来。', author: '' },
+        { text: '与人相处,贵在真诚;与己相处,重在释怀。', author: '' },
+        { text: '遇事不急,处事不乱;做人有尺,做事有度。', author: '' },
+        { text: '不念过往,不惧将来;心之所向,皆是美好。', author: '' },
+        { text: '心宽福自来,人善运自旺。', author: '' },
+        { text: '心安即归处,知足即幸福。', author: '' },
+    ];
+    // 标记首次进入游戏,持久化到本地(沿用本项目 mahjong_match_ 前缀)
+    private static readonly TIP_SEEN_KEY = 'mahjong_match_tip_seen';
 
     private loadStartTime: number = 0;
 
@@ -45,8 +70,35 @@ export class loading extends Component {
 
         this.initSDK();
 
+        // 显示一条提示名言
+        this.showTip();
+
         // 进游戏前先登录拉取云存档(异步，不阻塞资源加载)；最终在 enterGameWhenReady 里汇合
         this.archiveReady = this.prepareArchive();
+    }
+
+    /**
+     * 显示提示名言:首次进入固定显示第 0 条,之后每次从剩下的里随机取一条。
+     */
+    private showTip(): void {
+        const tips = loading.TIPS;
+        if (tips.length === 0) return;
+
+        let index = 0;
+        const seen = sys.localStorage.getItem(loading.TIP_SEEN_KEY);
+        if (seen) {
+            // 非首次:从第 1 条开始随机(剩下的)
+            if (tips.length > 1) {
+                index = 1 + Math.floor(Math.random() * (tips.length - 1));
+            }
+        } else {
+            // 首次:固定第 0 条并打标记
+            sys.localStorage.setItem(loading.TIP_SEEN_KEY, '1');
+        }
+
+        const tip = tips[index];
+        this.tispLabel1.string = tip.text;
+        this.tispLabel2.string = tip.author;
     }
 
     /**

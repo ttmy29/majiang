@@ -27,6 +27,8 @@ const Constants = {
         EventSetUndoButtonStatus: 'SetUndoButtonStatus',
         // 道具剩余次数:GameCtrl -> UI,payload {undo, switch},>0 显示 di+countLabel,==0 显示 ad1
         EventSetPropCount: 'SetPropCount',
+        // 随机道具(额外免费道具)按钮显隐:GameCtrl -> UI,payload boolean(true=显示,false=隐藏)
+        EventSetRandomPropButton: 'SetRandomPropButton',
         // 闲置帮助提示:payload 是 index(1=解锁槽位按钮,2=换牌按钮)
         EventShowTipsAnimator: 'ShowTipsAnimator',
         EventShowShuffleTileEffect: 'ShowShuffleTileEffect',
@@ -55,8 +57,10 @@ const Constants = {
     slotAnim: {
         // MoveOut: 0.1833 延迟 + 三段挤压 0.05*3 + 0.3 飞出 = 0.6333s，留少量余量到 0.65s
         MoveOutWait: 0.65,
-        // MoveIn: 0.3 飞回原位，留余量到 0.35s。期间 slot 里的牌若提前飞过去会落到半路位置
-        MoveInWait: 0.35,
+        // MoveIn: 实际飞回动画 0.45s(见 UIGameLayer.onEventShowSlotMoveIn 的 .to(0.45)),留余量到 0.5s。
+        // 必须 >= 动画时长:否则 movingIn 提前解除,collectStoredTargets 会让挂起的牌飞向"还在半路(偏上)"
+        // 的盒子世界坐标,表现为"牌先落到盒子上方,落位瞬间才吸进格子"。
+        MoveInWait: 0.5,
         // Unlock: 盖子飞出最长链路 0.35 延迟 + 0.2167 淡出 = 0.5667s，留余量到 0.6s
         UnlockWait: 0.6,
     },
@@ -74,7 +78,8 @@ const Constants = {
     GameBundleName: 'game',
     AudioBundleName: 'audio',
     BgmBundleName: 'bgm',
-    ConfigBundleName: 'config',
+    LevelConfigSegmentSize: 50,
+    LevelConfigBundlePrefix: 'config_levels_',
     // 关卡难度自适应阈值（可调）
     LevelDifficulty: {
         // 同一关「重开」次数 > 此值，且 level_json2 里有这关 → 用 level_json2
@@ -82,6 +87,13 @@ const Constants = {
         // 全局累计看广告 >= 此值，且 level_json3 里有这关 → 用 level_json3（优先级高于重拾档）
         AdThreshold: 10,
     },
+    sharData:{
+        string :'上头小游戏（15个好友在玩）',
+        url :'https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png'
+    },
+    showRandomPropButtonLevel:[
+        6,7,29,30
+    ],
     MahjongBoard: {
         // 麻将牌面资源所在目录，只加载该目录下的数字牌面作为棋盘牌型。
         ResourceDir: 'resources/mahjong',

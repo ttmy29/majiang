@@ -1,4 +1,6 @@
-import { AssetManager, JsonAsset } from 'cc';
+import { assetManager, AssetManager, JsonAsset } from 'cc';
+import { Constants } from './Constants';
+import { ProgressManager } from '../manager/ProgressManager';
 
 export interface LevelJsonPosition {
     z_layer: number;
@@ -21,60 +23,455 @@ export interface LevelJson {
     [k: string]: any;
 }
 
-// 三档关卡配置：默认 / 重拾档 / 广告档。启动时一次性并行预载进内存，getLevelJson 同步查表。
-const levelMap: Map<number, LevelJson> = new Map();   // level_json  (默认)
-const levelMap2: Map<number, LevelJson> = new Map();  // level_json2 (本关重开次数超阈值)
-const levelMap3: Map<number, LevelJson> = new Map();  // level_json3 (全局看广告次数超阈值)
-let preloaded = false;
+type LevelVariant = 'default' | 'retry' | 'ad';
 
-// 从 config bundle 并行加载三个目录。level_json2 / level_json3 不存在属正常情况，安全跳过。
-export function preloadAllLevels(bundle: AssetManager.Bundle | null, done: () => void) {
-    if (preloaded || !bundle) {
-        preloaded = true;
-        done();
+interface BundleSegment {
+    start: number;
+    end: number;
+    bundleName: string;
+}
+
+interface VariantIndex {
+    dir: string;
+    indexedLevels: Set<number>;
+    pathByLevel: Map<number, string>;
+}
+
+interface BundleIndexState {
+    segment: BundleSegment;
+    variantIndexes: Record<LevelVariant, VariantIndex>;
+    maxDefaultLevel: number;
+    scanned: boolean;
+    missing: boolean;
+    readyPromise: Promise<void> | null;
+}
+
+interface VariantBucket {
+    assets: Map<string, JsonAsset>;
+    loading: Map<string, Promise<JsonAsset | null>>;
+}
+
+interface LevelAssetInfo {
+    bundleName: string;
+    level: number;
+    path: string;
+}
+
+const DEFAULT_DIR = 'level_json';
+const RETRY_DIR = 'level_json2';
+const AD_DIR = 'level_json3';
+
+const variantDirs: Record<LevelVariant, string> = {
+    default: DEFAULT_DIR,
+    retry: RETRY_DIR,
+    ad: AD_DIR,
+};
+
+const variantBuckets: Record<LevelVariant, VariantBucket> = {
+    default: createVariantBucket(),
+    retry: createVariantBucket(),
+    ad: createVariantBucket(),
+};
+
+const bundleLoadingPromises = new Map<string, Promise<AssetManager.Bundle | null>>();
+const bundleIndexes = new Map<string, BundleIndexState>();
+const bundleAssetRefState = new Map<string, number>();
+const bundleLoadingCounts = new Map<string, number>();
+const missingBundles = new Set<string>();
+
+function createVariantBucket(): VariantBucket {
+    return {
+        assets: new Map(),
+        loading: new Map(),
+    };
+}
+
+function createVariantIndex(dir: string): VariantIndex {
+    return {
+        dir,
+        indexedLevels: new Set(),
+        pathByLevel: new Map(),
+    };
+}
+
+function createBundleIndexState(segment: BundleSegment): BundleIndexState {
+    return {
+        segment,
+        variantIndexes: {
+            default: createVariantIndex(DEFAULT_DIR),
+            retry: createVariantIndex(RETRY_DIR),
+            ad: createVariantIndex(AD_DIR),
+        },
+        maxDefaultLevel: -1,
+        scanned: false,
+        missing: false,
+        readyPromise: null,
+    };
+}
+
+function getSegmentSize(): number {
+    const configured = Math.floor(Constants.LevelConfigSegmentSize || 0);
+    return configured > 0 ? configured : 50;
+}
+
+function getBundlePrefix(): string {
+    return Constants.LevelConfigBundlePrefix || 'config_levels_';
+}
+
+function normalizeLevel(level: number): number {
+    if (!Number.isFinite(level)) return 0;
+    return Math.max(0, Math.floor(level));
+}
+
+function formatSegmentBound(value: number): string {
+    const text = String(Math.max(0, value));
+    return text.length >= 3 ? text : (`000${text}`).slice(-3);
+}
+
+function resolveSegmentByStart(start: number): BundleSegment {
+    const safeStart = Math.max(0, start);
+    const end = safeStart + getSegmentSize() - 1;
+    return {
+        start: safeStart,
+        end,
+        bundleName: `${getBundlePrefix()}${formatSegmentBound(safeStart)}_${formatSegmentBound(end)}`,
+    };
+}
+
+function resolveSegmentForLevel(level: number): BundleSegment {
+    const normalizedLevel = normalizeLevel(level);
+    const segmentSize = getSegmentSize();
+    const start = Math.floor(normalizedLevel / segmentSize) * segmentSize;
+    return resolveSegmentByStart(start);
+}
+
+function extractLevel(path: string): number | null {
+    const match = path.match(/pure_level(\d+)_config$/);
+    if (!match) return null;
+    const level = Number(match[1]);
+    return Number.isFinite(level) ? level : null;
+}
+
+function getBucket(variant: LevelVariant): VariantBucket {
+    return variantBuckets[variant];
+}
+
+function getCacheKey(bundleName: string, level: number): string {
+    return `${bundleName}|${level}`;
+}
+
+function parseCacheKey(cacheKey: string): { bundleName: string; level: number } | null {
+    const separatorIndex = cacheKey.lastIndexOf('|');
+    if (separatorIndex < 0) return null;
+
+    const bundleName = cacheKey.slice(0, separatorIndex);
+    const level = Number(cacheKey.slice(separatorIndex + 1));
+    if (!bundleName || !Number.isFinite(level)) return null;
+
+    return {
+        bundleName,
+        level,
+    };
+}
+
+function adjustCount(store: Map<string, number>, key: string, delta: number) {
+    const nextValue = (store.get(key) || 0) + delta;
+    if (nextValue > 0) {
+        store.set(key, nextValue);
         return;
     }
-    const dirs: Array<[string, Map<number, LevelJson>]> = [
-        ['level_json', levelMap],
-        ['level_json2', levelMap2],
-        ['level_json3', levelMap3],
-    ];
-    let remaining = dirs.length;
-    const finish = () => {
-        if (--remaining === 0) {
-            preloaded = true;
-            done();
+    store.delete(key);
+}
+
+function getIndexedPath(bundleName: string, variant: LevelVariant, level: number): string | null {
+    const state = bundleIndexes.get(bundleName);
+    if (!state) return null;
+    return state.variantIndexes[variant].pathByLevel.get(level) || null;
+}
+
+function readBundleIndex(bundle: AssetManager.Bundle, state: BundleIndexState) {
+    state.maxDefaultLevel = -1;
+
+    (Object.keys(variantDirs) as LevelVariant[]).forEach((variant) => {
+        const variantIndex = state.variantIndexes[variant];
+        variantIndex.indexedLevels.clear();
+        variantIndex.pathByLevel.clear();
+
+        const infos = bundle.getDirWithPath(variantIndex.dir, JsonAsset, []);
+        for (const info of infos) {
+            const level = extractLevel(info.path);
+            if (level === null) continue;
+
+            variantIndex.indexedLevels.add(level);
+            variantIndex.pathByLevel.set(level, info.path);
+
+            if (variant === 'default' && level > state.maxDefaultLevel) {
+                state.maxDefaultLevel = level;
+            }
         }
+    });
+}
+
+async function ensureBundleIndex(segment: BundleSegment): Promise<BundleIndexState> {
+    let state = bundleIndexes.get(segment.bundleName);
+    if (!state) {
+        state = createBundleIndexState(segment);
+        bundleIndexes.set(segment.bundleName, state);
+    }
+
+    if (state.scanned) return state;
+    if (state.readyPromise) {
+        await state.readyPromise;
+        return state;
+    }
+
+    state.readyPromise = ensureBundleReady(segment.bundleName).then((bundle) => {
+        if (!bundle) {
+            state!.missing = true;
+            state!.scanned = true;
+            return;
+        }
+
+        readBundleIndex(bundle, state!);
+        state!.scanned = true;
+    });
+
+    await state.readyPromise;
+    return state;
+}
+
+async function resolveVariantLevelInfo(level: number, variant: Exclude<LevelVariant, 'default'>): Promise<LevelAssetInfo | null> {
+    const normalizedLevel = normalizeLevel(level);
+    const segment = resolveSegmentForLevel(normalizedLevel);
+    const state = await ensureBundleIndex(segment);
+    const path = state.variantIndexes[variant].pathByLevel.get(normalizedLevel);
+    if (!path) return null;
+
+    return {
+        bundleName: state.segment.bundleName,
+        level: normalizedLevel,
+        path,
     };
-    for (const [dir, map] of dirs) {
-        bundle.loadDir(dir, JsonAsset, (err, assets) => {
-            if (err || !assets?.length) {
-                // 只有默认目录缺失才告警；level_json2/3 缺失是预期内的
-                if (dir === 'level_json') console.warn('LevelJsonLoader: loadDir level_json failed', err);
-                finish();
-                return;
-            }
-            for (const asset of assets) {
-                const json = asset.json as LevelJson | null;
-                if (!json || typeof json.level_no !== 'number') continue;
-                map.set(json.level_no, json);
-            }
-            finish();
+}
+
+async function resolveDefaultLevelInfo(level: number): Promise<LevelAssetInfo | null> {
+    const normalizedLevel = normalizeLevel(level);
+    const segment = resolveSegmentForLevel(normalizedLevel);
+    const segmentSize = getSegmentSize();
+
+    for (let start = segment.start; start >= 0; start -= segmentSize) {
+        const state = await ensureBundleIndex(resolveSegmentByStart(start));
+        const exactPath = state.variantIndexes.default.pathByLevel.get(normalizedLevel);
+        if (exactPath) {
+            return {
+                bundleName: state.segment.bundleName,
+                level: normalizedLevel,
+                path: exactPath,
+            };
+        }
+
+        if (state.maxDefaultLevel < 0) continue;
+
+        const fallbackPath = state.variantIndexes.default.pathByLevel.get(state.maxDefaultLevel);
+        if (!fallbackPath) continue;
+
+        return {
+            bundleName: state.segment.bundleName,
+            level: state.maxDefaultLevel,
+            path: fallbackPath,
+        };
+    }
+
+    return null;
+}
+
+async function ensureVariantAsset(variant: LevelVariant, info: LevelAssetInfo): Promise<JsonAsset | null> {
+    const bucket = getBucket(variant);
+    const cacheKey = getCacheKey(info.bundleName, info.level);
+    if (bucket.assets.has(cacheKey)) return bucket.assets.get(cacheKey)!;
+    if (bucket.loading.has(cacheKey)) return bucket.loading.get(cacheKey)!;
+
+    adjustCount(bundleLoadingCounts, info.bundleName, 1);
+
+    const promise = ensureBundleReady(info.bundleName).then((bundle) => {
+        if (!bundle) return null;
+
+        return new Promise<JsonAsset | null>((resolve) => {
+            bundle.load(info.path, JsonAsset, (err, asset) => {
+                if (err || !asset) {
+                    console.warn(`LevelJsonLoader: load ${info.bundleName}/${info.path} failed`, err);
+                    resolve(null);
+                    return;
+                }
+
+                bucket.assets.set(cacheKey, asset);
+                adjustCount(bundleAssetRefState, info.bundleName, 1);
+                resolve(asset);
+            });
         });
+    });
+
+    const trackedPromise = promise.then((asset) => {
+        bucket.loading.delete(cacheKey);
+        adjustCount(bundleLoadingCounts, info.bundleName, -1);
+        return asset;
+    }, (err) => {
+        bucket.loading.delete(cacheKey);
+        adjustCount(bundleLoadingCounts, info.bundleName, -1);
+        throw err;
+    });
+
+    bucket.loading.set(cacheKey, trackedPromise);
+    return trackedPromise;
+}
+
+function tryReleaseBundle(bundleName: string) {
+    if ((bundleAssetRefState.get(bundleName) || 0) > 0) return;
+    if ((bundleLoadingCounts.get(bundleName) || 0) > 0) return;
+
+    const bundle = assetManager.getBundle(bundleName);
+    if (!bundle) return;
+
+    try {
+        (bundle as any).releaseAll?.();
+    } catch (err) {
+        console.warn(`LevelJsonLoader: releaseAll ${bundleName} failed`, err);
+    }
+
+    const bundleManager = assetManager as any;
+    if (typeof bundleManager.removeBundle === 'function') {
+        try {
+            bundleManager.removeBundle(bundle);
+        } catch (err) {
+            console.warn(`LevelJsonLoader: remove bundle ${bundleName} failed`, err);
+        }
     }
 }
 
-// 分档查表：广告档优先 → 重拾档 → 默认档；每档需「该关存在」否则逐级回退。
-// 默认档保留原「找不到就取最大关」的兜底。
-export function getLevelJson(level: number, opts?: { ad?: boolean; retry?: boolean }): LevelJson | null {
-    if (opts?.ad && levelMap3.has(level)) return levelMap3.get(level)!;
-    if (opts?.retry && levelMap2.has(level)) return levelMap2.get(level)!;
-    if (levelMap.has(level)) return levelMap.get(level)!;
-    if (levelMap.size === 0) return null;
-    const maxLevel = Math.max(...levelMap.keys());
-    return levelMap.get(maxLevel) || null;
+function releaseVariantLevel(variant: LevelVariant, bundleName: string, level: number) {
+    const bucket = getBucket(variant);
+    const cacheKey = getCacheKey(bundleName, level);
+    if (!bucket.assets.has(cacheKey)) return;
+
+    const bundle = assetManager.getBundle(bundleName);
+    const path = getIndexedPath(bundleName, variant, level);
+    if (bundle && path) {
+        bundle.release(path, JsonAsset);
+    }
+
+    bucket.assets.delete(cacheKey);
+    bucket.loading.delete(cacheKey);
+    adjustCount(bundleAssetRefState, bundleName, -1);
+    tryReleaseBundle(bundleName);
 }
 
-export function hasAnyLevelJson(): boolean {
-    return levelMap.size > 0;
+export async function ensureBundleReady(bundleName: string): Promise<AssetManager.Bundle | null> {
+    const existing = assetManager.getBundle(bundleName);
+    if (existing) return existing;
+    if (missingBundles.has(bundleName)) return null;
+    if (bundleLoadingPromises.has(bundleName)) {
+        return bundleLoadingPromises.get(bundleName)!;
+    }
+
+    const promise = new Promise<AssetManager.Bundle | null>((resolve) => {
+        assetManager.loadBundle(bundleName, (err, bundle) => {
+            if (err || !bundle) {
+                console.warn(`LevelJsonLoader: load bundle ${bundleName} failed`, err);
+                resolve(null);
+                return;
+            }
+            resolve(bundle);
+        });
+    });
+
+    const trackedPromise = promise.then((bundle) => {
+        bundleLoadingPromises.delete(bundleName);
+        if (!bundle) missingBundles.add(bundleName);
+        return bundle;
+    }, (err) => {
+        bundleLoadingPromises.delete(bundleName);
+        throw err;
+    });
+
+    bundleLoadingPromises.set(bundleName, trackedPromise);
+    return trackedPromise;
+}
+
+export function resolveLevelLoadOptions(level: number): { ad: boolean; retry: boolean } {
+    const normalizedLevel = normalizeLevel(level);
+    return {
+        ad: ProgressManager.loadGlobalAdCount() >= Constants.LevelDifficulty.AdThreshold,
+        retry: ProgressManager.loadLevelRetryCount(normalizedLevel) > Constants.LevelDifficulty.RetryThreshold,
+    };
+}
+
+export async function warmupForwardWindow(level: number, aheadCount = 10): Promise<void> {
+    const normalizedLevel = normalizeLevel(level);
+    const targets = new Map<string, LevelAssetInfo>();
+
+    for (let offset = 0; offset <= aheadCount; offset++) {
+        const info = await resolveDefaultLevelInfo(normalizedLevel + offset);
+        if (!info) continue;
+        targets.set(getCacheKey(info.bundleName, info.level), info);
+    }
+
+    await Promise.all(Array.from(targets.values(), (info) => ensureVariantAsset('default', info)));
+}
+
+export async function ensureLevelJson(level: number, opts?: { ad?: boolean; retry?: boolean }): Promise<LevelJson | null> {
+    const normalizedLevel = normalizeLevel(level);
+
+    if (opts?.ad) {
+        const adInfo = await resolveVariantLevelInfo(normalizedLevel, 'ad');
+        if (adInfo) {
+            const adAsset = await ensureVariantAsset('ad', adInfo);
+            if (adAsset?.json) return adAsset.json as LevelJson;
+        }
+    }
+
+    if (opts?.retry) {
+        const retryInfo = await resolveVariantLevelInfo(normalizedLevel, 'retry');
+        if (retryInfo) {
+            const retryAsset = await ensureVariantAsset('retry', retryInfo);
+            if (retryAsset?.json) return retryAsset.json as LevelJson;
+        }
+    }
+
+    const defaultInfo = await resolveDefaultLevelInfo(normalizedLevel);
+    if (!defaultInfo) return null;
+
+    const asset = await ensureVariantAsset('default', defaultInfo);
+    return asset?.json ? asset.json as LevelJson : null;
+}
+
+export function releaseOutsideWindow(level: number, aheadCount = 10): void {
+    void (async () => {
+        const normalizedLevel = normalizeLevel(level);
+        const defaultKeepKeys = new Set<string>();
+
+        for (let offset = 0; offset <= aheadCount; offset++) {
+            const info = await resolveDefaultLevelInfo(normalizedLevel + offset);
+            if (!info) continue;
+            defaultKeepKeys.add(getCacheKey(info.bundleName, info.level));
+        }
+
+        for (const cacheKey of Array.from(getBucket('default').assets.keys())) {
+            if (defaultKeepKeys.has(cacheKey)) continue;
+
+            const parsed = parseCacheKey(cacheKey);
+            if (!parsed) continue;
+            releaseVariantLevel('default', parsed.bundleName, parsed.level);
+        }
+
+        const minLevel = normalizedLevel;
+        const maxLevel = normalizedLevel + aheadCount;
+        (['retry', 'ad'] as Array<Exclude<LevelVariant, 'default'>>).forEach((variant) => {
+            for (const cacheKey of Array.from(getBucket(variant).assets.keys())) {
+                const parsed = parseCacheKey(cacheKey);
+                if (!parsed) continue;
+                if (parsed.level >= minLevel && parsed.level <= maxLevel) continue;
+                releaseVariantLevel(variant, parsed.bundleName, parsed.level);
+            }
+        });
+    })();
 }

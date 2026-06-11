@@ -174,6 +174,27 @@ export class AudioManager {
     }
 
     /**
+     * 播放一个音效,并在其播放期间暂停 BGM,音效放完后再恢复 BGM。
+     * 与 playOneShotDuckingBgm(只压低音量)不同,这里是完全暂停背景音乐。
+     * @param clipName 音效名
+     * @param volume   音效音量(0~1)
+     */
+    playOneShotPauseBgm(clipName: AudioClipName, volume = 1) {
+        if (!this.effectOn) return;
+
+        const clip = this.getClip(clipName);
+        const source = this.getEffectSource();
+        if (!clip || !source) return;
+
+        source.playOneShot(clip, volume);
+
+        // 用音效本身的时长作为暂停时长,音效放完后再额外留 0.2s 缓冲才恢复 BGM
+        const duration = typeof clip.getDuration === 'function' ? clip.getDuration() : 0;
+        const extraDelay = 0.2; // 音效结束后的额外延时,避免 BGM 立刻顶上来
+        this.pauseBgmFor((duration > 0 ? duration : 1.5) + extraDelay);
+    }
+
+    /**
      * 临时压低 BGM 音量并在 holdSeconds 后恢复到正常音量。
      * 快速压低 + 稍慢恢复,过渡更自然;重复调用会打断上一次重新计时。
      */
@@ -190,6 +211,29 @@ export class AudioManager {
             .to(fadeIn, { volume: low })
             .delay(Math.max(0, holdSeconds))
             .to(fadeOut, { volume: this.bgmBaseVolume })
+            .start();
+    }
+
+    /**
+     * 暂停 BGM,并在 holdSeconds 后恢复播放。
+     * 借助 tween 在 bgmSource 上计时(与 duckBgm 同一套机制),重复调用会重新计时。
+     * BGM 本来就没在播放时直接跳过。
+     */
+    private pauseBgmFor(holdSeconds: number) {
+        if (!this.bgmSource || !this.musicOn || !this.bgmSource.playing) return;
+
+        // 停掉可能正在进行的 ducking/恢复 tween,避免与本次暂停-恢复冲突
+        Tween.stopAllByTarget(this.bgmSource);
+        this.bgmSource.pause();
+
+        tween(this.bgmSource)
+            .delay(Math.max(0, holdSeconds))
+            .call(() => {
+                if (!this.musicOn || !this.bgmSource) return;
+                // 恢复到正常音量(防止上一次 ducking 被打断后停在压低值)并续播
+                this.bgmSource.volume = this.bgmBaseVolume;
+                this.bgmSource.play();
+            })
             .start();
     }
 
