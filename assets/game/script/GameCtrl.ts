@@ -1,7 +1,7 @@
-import { _decorator, assetManager, AssetManager, Component, director, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, AssetManager, Component, director, find, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, sys, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
-import { getLevelJson, hasAnyLevelJson, LevelJson, LevelJsonPosition, preloadAllLevels } from './config/LevelJsonLoader';
+import { ensureLevelJson, LevelJson, LevelJsonPosition, releaseOutsideWindow, resolveLevelLoadOptions, warmupForwardWindow } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { ironItem } from './ironItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
@@ -153,6 +153,7 @@ export class GameCtrl extends Component {
     private iconFrames: Map<string, SpriteFrame> = new Map();
     private chainItemPrefab: Prefab | null = null;
     private ironItemPrefab: Prefab | null = null;
+    private levelRequestSeq = 0;
 
     start() {
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
@@ -170,30 +171,21 @@ export class GameCtrl extends Component {
             const bundle = assetManager.getBundle(Constants.GameBundleName);
             this.preloadChainItem(bundle, () => {
                 this.preloadIronItem(bundle, () => {
-                    this.loadConfigBundle((configBundle) => {
-                        preloadAllLevels(configBundle, () => {
-                            if (!hasAnyLevelJson()) {
-                                console.warn('GameCtrl: no level JSON loaded from config bundle (level_json)');
-                                return;
-                            }
-                            // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
-                            director.emit(Constants.eventNames.EventGameUiInit, {
-                                mahjongItem: this.mahjongItem,
-                                iconFrames: this.iconFrames,
-                            });
-                            this.scheduleOnce(() => {
-                                const { level, snapshot } = this.loadSavedProgress();
-                                this.startLevel(level, snapshot);
-                                this.hasStarted = true;
-                            }, 0);
-                        });
+                    // 把 UI 层需要的资源一次性推过去,后续 EventRenderSlot 就有 prefab + iconFrames 可用了
+                    director.emit(Constants.eventNames.EventGameUiInit, {
+                        mahjongItem: this.mahjongItem,
+                        iconFrames: this.iconFrames,
                     });
+                    this.scheduleOnce(() => {
+                        const { level, snapshot } = this.loadSavedProgress();
+                        void this.requestStartLevel(level, snapshot);
+                    }, 0);
                 });
             });
         });
     }
     //点击广告的次数
-    ad_cnt:number = 0;
+    ad_cnt: number = 0;
 
     // 看广告成功统一入口：每局埋点计数 + 全局累计持久化(难度自适应用) + 云同步
     private bumpAdCount() {
@@ -204,6 +196,10 @@ export class GameCtrl extends Component {
 
     // 退到 start 层后再点开始，靠 onEnable 触发整局重开
     protected onEnable() {
+        // gameBack 监听必须在 hasStarted 守卫之前注册:首次进入时 onEnable 先于 start 执行,
+        // 此刻 hasStarted=false 会在下面提前 return,若把注册放在守卫之后,第一局就收不到
+        // 微信 onShow 回调(分享免费道具失效),要退出重进才生效。与 onDisable 的 off 成对。
+        director.on("gameBack", this.onEventGameBack, this);
         if (!this.hasStarted) return;
         this.ad_cnt = 0;
         // 延后一帧再开局:GameCtrl 与 UIGameLayer 同挂在 gameLayer 节点上,且组件顺序
@@ -219,11 +215,13 @@ export class GameCtrl extends Component {
     private restartFromEnable = () => {
         // 必须每次重读 — 胜利后玩家回主页再进入,内存里的 nowLevel 还是旧值
         const { level, snapshot } = this.loadSavedProgress();
-        this.startLevel(level, snapshot);
+        void this.requestStartLevel(level, snapshot);
     };
 
     protected onDisable(): void {
-        if(this.nowLevel > 0 )  window.dnSDK?.track?.('LEVEL_EXIT', {duration:this.elapsedTime,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_EXIT', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
+        this.isFreePropState = null;
+        director.off("gameBack", this.onEventGameBack, this);
     }
 
     protected onDestroy(): void {
@@ -241,6 +239,25 @@ export class GameCtrl extends Component {
         }
         const snapshot = ProgressManager.loadSnapshot();
         return { level, snapshot };
+    }
+
+    private async requestStartLevel(level: number, snapshot: ProgressSnapshot | null = null) {
+        const requestSeq = ++this.levelRequestSeq;
+        const opts = resolveLevelLoadOptions(level);
+        const json = await ensureLevelJson(level, opts);
+        if (requestSeq !== this.levelRequestSeq) return;
+        if (!json) {
+            console.warn(`GameCtrl: no level JSON for level ${level}`);
+            return;
+        }
+
+        this.levelJson = json;
+        this.startLevel(level, snapshot);
+        if (requestSeq !== this.levelRequestSeq) return;
+
+        this.hasStarted = true;
+        void warmupForwardWindow(level, 10);
+        releaseOutsideWindow(level, 10);
     }
 
     private onAppHide = () => {
@@ -284,10 +301,12 @@ export class GameCtrl extends Component {
         this.nowLevel = level;
         this._guideTapCount = 0;
         director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
+        // 随机道具(额外免费道具)按钮:仅在配置关卡显示。失败重开/重新进入会再走一遍 startLevel,按钮按关卡重新出现
+        director.emit(Constants.eventNames.EventSetRandomPropButton, Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0);
         // 上报关卡进入事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
         //
-        if(this.nowLevel > 0 ) window.dnSDK?.track?.('LEVEL_ENTER', {enter_level_name: `关卡${this.nowLevel}`,level_id: this.nowLevel});
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_ENTER', { enter_level_name: `关卡${this.nowLevel}`, level_id: this.nowLevel });
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -338,6 +357,9 @@ export class GameCtrl extends Component {
             && !this.snapshotHasNoProgress(snapshot);
         if (useSnapshot) {
             this.applySnapshot(snapshot!);
+            // 恢复存档没有发牌飞入动画,但仍补上"开局发牌音效",让继续游戏与全新开局的开场体验一致。
+            // 牌已就位,无需像 playDealAnimation 那样延时到首张牌起飞,直接播放即可。
+            AudioManager.instance.playOneShotPauseBgm(AudioClipNames.game_start);
         } else {
             // 全新开局:写入关卡号 + 清掉旧快照,然后正常发牌
             ProgressManager.saveLevel(level);
@@ -990,7 +1012,10 @@ export class GameCtrl extends Component {
         if (!this.shouldUseIdleTips() || this.gameState !== 'playing' || this.tipsActive) return;
         this.tipsActive = true;
         // 1=解锁槽位按钮,2=换牌按钮,随机选一个
-        const tipsIndex = Math.random() < 0.5 ? 1 : 2;
+        let tipsIndex = Math.random() < 0.5 ? 1 : 2;
+        if(Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0){
+            if(find("Canvas/gameLayer/down/button4").active) tipsIndex = 3
+        }
         director.emit(Constants.eventNames.EventShowTipsAnimator, tipsIndex);
     };
 
@@ -1186,7 +1211,6 @@ export class GameCtrl extends Component {
         // 牌起飞时就触发抖动:把飞行时长传给 UI,让挤压峰值精准落在落位时刻
         const flyToBoxDuration = 0.18 + 0.1;
         director.emit(Constants.eventNames.EventShowSlotShake, this.getTargetBoxSlotID(box), flyToBoxDuration);
-
         tween(tile.node)
             .to(flyToBoxDuration, { position: targetFlyPosition, scale: new Vec3(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1) })
             .call(() => {
@@ -1200,8 +1224,12 @@ export class GameCtrl extends Component {
                 tile.node.setWorldPosition(endWorldPosition);
                 tile.node.setPosition(targetBoxPosition);
                 tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
-                // siblingIndex 依 progress 递增即可（这张落下后 progress 就会变成 progress+1）
-                tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + box.progress + 1);
+                // siblingIndex 绑定这张牌起飞时就定好的落格 targetIndex,而不是落位瞬间的 box.progress。
+                // 多张牌同时飞向同一目标槽时,tween 的 .call 完成顺序并不保证等于起飞顺序;
+                // 若按落位时的 progress 递增,会出现"后落的牌 siblingIndex 反而更小",
+                // 导致它的牌叠到相邻格子的牌上面 —— 看起来就是"牌跑到盒子上面"。
+                // 用 targetIndex(=该牌落入的 itemNodes 下标)定层,z 序永远和它落入的格子一致。
+                tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + targetIndex);
                 //屏蔽触摸方法
                 tile.item.disableTileTouch();
                 Utils.onVibrationShort();
@@ -1532,10 +1560,10 @@ export class GameCtrl extends Component {
         this.gameState = 'win';
         this.clearIdleTips();
         // 上报关卡成功事件
-        SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: this.elapsedTime });
+        SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: Math.ceil(this.elapsedTime) });
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
-        window.dnSDK?.track?.('LEVEL_PASS', {duration:duration,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -1556,7 +1584,7 @@ export class GameCtrl extends Component {
         this.clearIdleTips();
         // 上报关卡失败事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
-        window.dnSDK?.track?.('LEVEL_LOSE', {duration:this.elapsedTime,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        window.dnSDK?.track?.('LEVEL_LOSE', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
             const allUnlocked = this.targetBoxes.every((b) => b.unlocked);
@@ -1576,7 +1604,7 @@ export class GameCtrl extends Component {
         ProgressManager.addLevelRetryCount(this.nowLevel, 1);
         ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
-        this.scheduleOnce(() => this.startLevel(this.nowLevel), 1.5);
+        this.scheduleOnce(() => void this.requestStartLevel(this.nowLevel), 1.5);
     }
 
     private onEventFailureRestart() {
@@ -1584,11 +1612,11 @@ export class GameCtrl extends Component {
         ProgressManager.addLevelRetryCount(this.nowLevel, 1);
         ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
-        this.startLevel(this.nowLevel);
+        void this.requestStartLevel(this.nowLevel);
     }
 
     private onEventWinNextLevel() {
-        this.startLevel(this.nowLevel + 1);
+        void this.requestStartLevel(this.nowLevel + 1);
     }
 
     private onEventFailureContinue(opentype: string | null) {
@@ -1782,8 +1810,9 @@ export class GameCtrl extends Component {
         const startMoveTime = 0.3;       // m_startMoveTime: 单张牌飞行耗时 0.3s
 
         // 开局发牌音效:延时到首张牌真正起飞的瞬间再响,避免画面还没动声音就先到
+        // 播放期间暂停背景音乐,音效结束后再恢复
         this.scheduleOnce(() => {
-            AudioManager.instance.playOneShot(AudioClipNames.game_start);
+            AudioManager.instance.playOneShotPauseBgm(AudioClipNames.game_start);
         }, startDelayTime);
 
         // 计算所有麻将落位完成的总耗时
@@ -2234,20 +2263,6 @@ export class GameCtrl extends Component {
         });
     }
 
-    // 加载 config bundle（关卡 JSON 所在；frames/prefab 仍用 game bundle）。已加载则直接复用。
-    private loadConfigBundle(done: (bundle: AssetManager.Bundle | null) => void) {
-        const existing = assetManager.getBundle(Constants.ConfigBundleName);
-        if (existing) { done(existing); return; }
-        assetManager.loadBundle(Constants.ConfigBundleName, (err, bundle) => {
-            if (err || !bundle) {
-                console.warn('GameCtrl: load config bundle failed', err);
-                done(null);
-                return;
-            }
-            done(bundle);
-        });
-    }
-
     private normalizeMahjongFrameName(name: string): string {
         if (Constants.MahjongBoard.ExcludedFrames.indexOf(name) >= 0) return '';
         return /^\d+$/.test(name) ? name : '';
@@ -2268,14 +2283,10 @@ export class GameCtrl extends Component {
     }
 
     private createLevelConfig(level: number): RuntimeLevelConfig {
-        // 难度自适应：全局累计看广告 >= 阈值 → 广告档(优先)；本关重开次数 > 阈值 → 重拾档；都不满足走默认
-        const ad = ProgressManager.loadGlobalAdCount() >= Constants.LevelDifficulty.AdThreshold;
-        const retry = ProgressManager.loadLevelRetryCount(level) > Constants.LevelDifficulty.RetryThreshold;
-        const json = getLevelJson(level, { ad, retry });
+        const json = this.levelJson;
         if (!json) {
             console.warn(`GameCtrl: no level JSON for level ${level}`);
         }
-        this.levelJson = json as LevelJson;
         const play = getLevelPlayConfig(level);
         const baseDiff = json?.index_config?.base_diff ?? json?.summary?.hard ?? 0;
         return {
@@ -2321,7 +2332,7 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.setUndoCount(this.undoCount + 3);
                 this.bumpAdCount();
-                window.dnSDK?.track?.('GET_ITEM', {item_source:2});
+                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
@@ -2351,7 +2362,7 @@ export class GameCtrl extends Component {
             this.refreshUndoButtonStatus();
             return;
         }
-        window.dnSDK?.track?.('USE_ITEM', {item_source:2});
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         // 有次数:消耗 1 次并直接撤回(不再看广告)
         this.setUndoCount(this.undoCount - 1);
         this.executeUndo(tile, index);
@@ -2496,7 +2507,7 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.bumpAdCount();
                 this.setSwitchCount(this.switchCount + 3);
-                window.dnSDK?.track?.('GET_ITEM', {item_source:2});
+                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
@@ -2511,7 +2522,7 @@ export class GameCtrl extends Component {
         if (topCandidates.length === 0) return;
 
 
-        window.dnSDK?.track?.('USE_ITEM', {item_source:2});
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         // 有次数:消耗 1 次并直接换牌(不再看广告)
         this.setSwitchCount(this.switchCount - 1);
         this.executeShuffle(activeTiles, topCandidates);
@@ -2837,6 +2848,7 @@ export class GameCtrl extends Component {
         // data "1" -> slot3,"2" -> slot4
         const slotName = data == "1" ? "slot3" : (data == "2" ? "slot4" : "");
         if (!slotName) return;
+        AudioManager.instance.playClick();
         const box = this.targetBoxes.find((b) => b.node?.name === slotName);
         if (!box || box.unlocked) return;
 
@@ -2848,5 +2860,76 @@ export class GameCtrl extends Component {
         }, () => {
             LayerManager.instance.showToast("视频播放未完成！")
         }, 'unlock');
+    }
+
+    private isFreePropState: string | null = null;
+    public onBtnRandomPropClick(event, data: string) {
+        AudioManager.instance.playClick();
+        if (this.gameState !== 'playing') return;
+        this.isFreePropState = data;
+        if (sys.platform === sys.Platform.WECHAT_GAME) {
+            wx.shareAppMessage({
+                title: Constants.sharData.string,
+                imageUrl: Constants.sharData.url
+            });
+        } else {
+            this.onEventGameBack(true);
+        }
+    }
+
+
+
+    onEventGameBack(isFree: boolean = false) {
+        if (!this.isFreePropState) return;
+        // 分享时切后台,回来时可能已经胜利/失败(理论上后台不 tick,这里做防御):非游戏中直接清空待用状态
+        if (this.gameState !== 'playing') { this.isFreePropState = null; return; }
+        if (!isFree) {
+            const lastHideTime = SDKManager.instance.lastHideTime || 0;
+            if (Date.now() - lastHideTime >= 4000) {
+
+            } else {
+                LayerManager.instance.showToast("分享失败！");
+                return;
+            }
+        }
+
+        // 时间校验已通过:把本次分享意图"消费"掉(置空待用状态),避免之后任意一次切后台返回
+        // 又命中这里重复触发。按钮是否隐藏仍取决于效果是否真正执行——执行不了只弹提示、按钮保留可重点。
+        const propType = this.isFreePropState;
+        this.isFreePropState = null;
+
+        // propType:"0"=撤回,"1"=换牌,"2"=解锁槽位(由 UIGameLayer.onSetRandomPropButtonShow 随机贴图时写入)。
+        // 额外免费道具:复用各自的 execute*,不扣次数、不看广告。效果当前无法执行时只弹提示、不消耗按钮。
+        switch (propType) {
+            case '0': { // 撤回
+                if (this.resolvingMatch) return;
+                let tile: TileRecord | null = null;
+                while (this.actionHistory.length > 0) {
+                    const c = this.actionHistory.pop()!;
+                    if (!this.isChainTile(c) && !c.removed && this.slots.indexOf(c) >= 0 && c.node?.isValid) { tile = c; break; }
+                }
+                if (!tile) { LayerManager.instance.showToast('无可撤回'); this.refreshUndoButtonStatus(); return; }
+                this.executeUndo(tile, this.slots.indexOf(tile));
+                break;
+            }
+            case '1': { // 换牌
+                if (this.shuffleAnimating) return;
+                const activeTiles = this.tiles.filter((t) => !t.collected && !t.removed);
+                const topCandidates = activeTiles.filter((t) => !this.isTileBlocked(t));
+                if (activeTiles.length === 0 || topCandidates.length === 0) { LayerManager.instance.showToast('无牌可换'); return; }
+                this.executeShuffle(activeTiles, topCandidates);
+                break;
+            }
+            case '2': { // 解锁槽位
+                const box = this.targetBoxes.find((b) => !b.unlocked);
+                if (!box) { LayerManager.instance.showToast('槽位已满'); return; }
+                this.executeUnlock(box);
+                break;
+            }
+            default: return;
+        }
+
+        // 成功执行了某个效果 -> 一次性道具,隐藏按钮(待用状态已在上面消费)
+        director.emit(Constants.eventNames.EventSetRandomPropButton, false);
     }
 }

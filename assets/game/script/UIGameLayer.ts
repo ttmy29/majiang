@@ -1,4 +1,4 @@
-import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, view, Widget } from 'cc';
+import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, v3, Vec3, view, Widget } from 'cc';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
@@ -62,10 +62,15 @@ export class UIGameLayer extends Component {
     //解锁盒子按钮
     @property(Node)
     unlockButton: Node = null!;
+    //随机道具按钮
+    @property(Node)
+    randomPropButton: Node = null!;
     @property(Node)
     unlockTipsNode: Node = null!;
     @property(Node)
     switchTipsNode: Node = null!;
+    @property(Node)
+    randomPropTipsNode: Node = null!;
     @property(Node)
     comboNode: Node = null!;
     @property(Node)
@@ -75,6 +80,7 @@ export class UIGameLayer extends Component {
 
     // 每个槽位在场景里的原始位置，MoveIn 时回到自己的原点而不是写死坐标
     private slotOriginPositions: Vec3[] = [];
+    private propButtonOriginPositions: Vec3[] = [];
 
     // HUD label —— 由 GameCtrl emit EventHudUpdate / EventShowToast 触发渲染
     private targetLabel: Label = null!;
@@ -125,6 +131,7 @@ export class UIGameLayer extends Component {
 
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
         this.slotRootTop = this.getSlotRootWidget()?.top ?? 0;
+        this.propButtonOriginPositions = [this.undoButton, this.switchButton, this.unlockButton].map(btn => btn ? btn.position.clone() : new Vec3());
         //this.setupHudLabels();
         this.setupComboNode();
         this.preloadShuffleEffectClip();
@@ -222,6 +229,8 @@ export class UIGameLayer extends Component {
     onDisable() {
         this.registerGlobalEvent(false);
         this.onEventCleanSlotContainers();
+        // 界面隐藏时关闭连击显示并把状态复位,避免下次显示时残留上一局的进度条/口号
+        this.resetComboNode();
     }
 
     onEnable() {
@@ -247,6 +256,7 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventCleanSlotContainers, this.onEventCleanSlotContainers, this);
             director.on(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
             director.on(Constants.eventNames.EventSetPropCount, this.onSetPropCount, this);
+            director.on(Constants.eventNames.EventSetRandomPropButton, this.onSetRandomPropButton, this);
             director.on(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
             director.on(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.on(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
@@ -267,6 +277,7 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventCleanSlotContainers, this.onEventCleanSlotContainers, this);
             director.off(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
             director.off(Constants.eventNames.EventSetPropCount, this.onSetPropCount, this);
+            director.off(Constants.eventNames.EventSetRandomPropButton, this.onSetRandomPropButton, this);
             director.off(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
             director.off(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.off(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
@@ -626,6 +637,8 @@ export class UIGameLayer extends Component {
             this.comboBarSprite.fillRange = 1;
         }
         if (this.comboNode?.isValid) this.comboNode.active = false;
+        // 口号等级也归零,下次连击重新从 level1 开始
+        this.comboAudioLevel = 0;
         this.hideComboLevelNodes();
     }
 
@@ -797,16 +810,13 @@ export class UIGameLayer extends Component {
         }
         let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
-            motionStreakNode.setPosition(new Vec3(140, 0, 0));
+            motionStreakNode.setPosition(new Vec3(0, -140, 0));
             motionStreakNode.active = false;
         }
 
 
         // 1. 停止当前节点的所有动画
         Tween.stopAllByTarget(targetNode);
-
-        // 2. 判断是左侧还是右侧槽位 (通常 4 个槽位 0,1 为左，2,3 为右，你可以根据实际场景微调)
-        const isLeft = slotID == 1 || slotID == 3;
 
         // ==========================================
         // 盖子下压动画 (task_gaiziNew)
@@ -850,11 +860,11 @@ export class UIGameLayer extends Component {
             .to(0.05, { scale: new Vec3(0.98, 1.02, 1) }) // 横向回缩，纵向拉长
             .to(0.05, { scale: new Vec3(1, 1, 1) })       // 回正
             .start();
-        const targetPosX = !isLeft ? 1000 : -1000;
+        const targetPosY = targetNode.y + 1500;
 
         tween(targetNode)
             .delay(0.3333)
-            .to(0.3000, { position: new Vec3(targetPosX, targetNode.y, 0) }) // 大幅度斜向退场，飞出屏幕
+            .to(0.4500, { position: new Vec3(targetNode.x, targetPosY, 0) }) // 大幅度向上退场，飞出屏幕顶部（速度对齐原左右挪动）
             .call(() => {
                 if (motionStreakNode) motionStreakNode.active = false;
             })
@@ -869,7 +879,7 @@ export class UIGameLayer extends Component {
         }
         let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
-            motionStreakNode.setPosition(new Vec3(-140, 0, 0));
+            motionStreakNode.setPosition(new Vec3(0, 140, 0));
             motionStreakNode.active = false;
         }
         const box2Node = targetNode.getChildByName('box_2');
@@ -880,8 +890,12 @@ export class UIGameLayer extends Component {
         AudioManager.instance.playOneShot(AudioClipNames.taskBoxMove);
         // 2. 回到该槽位在场景里的原始位置（不再写死 ±200, 0）
         const originPos = this.slotOriginPositions[slotID] ?? targetNode.position.clone();
+        // 从顶部上方落入：先把节点放到原始位置正上方，再下落归位
+        targetNode.setPosition(new Vec3(originPos.x, originPos.y + 1500, 0));
         tween(targetNode)
-            .to(0.3, { position: originPos.clone() }, { easing: 'quadOut' })
+            // 时长 0.45s:若调整,必须同步 Constants.slotAnim.MoveInWait(需 >= 此值),
+            // 否则 movingIn 提前解除,挂起的牌会飞向盒子还没归位的"半路(偏上)"坐标。
+            .to(0.45, { position: originPos.clone() }, { easing: 'quadOut' })
             .call(() => {
                 targetNode.setPosition(originPos.clone());
                 if (motionStreakNode) motionStreakNode.active = false;
@@ -908,6 +922,74 @@ export class UIGameLayer extends Component {
         this.applyPropCount(this.switchButton, payload.switch);
     }
 
+    // 随机道具按钮当前是否显示。去重用:目标状态与当前一致时不再跑 onSetRandomPropButtonShow 的 tween,
+    // 避免普通关卡每次开局都把 tips 节点等多余地动一遍。
+    private randomPropShown = false;
+
+    // GameCtrl 通知随机道具(额外免费道具)按钮显隐
+    private onSetRandomPropButton(show: boolean) {
+        if (this.isGuideLevel) show = false;
+        if (show === this.randomPropShown) return;
+        this.randomPropShown = show;
+        this.onSetRandomPropButtonShow(show);
+    }
+
+    onSetRandomPropButtonShow(isShow: boolean) {
+        if (isShow) {
+            const idx = Math.floor(Math.random() * 3);
+            const icon = [this.undoButton, this.switchButton, this.unlockButton][idx].getChildByName('icon');
+            const iconSprite = icon.getComponent(Sprite);
+            this.randomPropButton.getChildByName("icon").getComponent(Sprite)!.spriteFrame = iconSprite!.spriteFrame;
+            this.randomPropButton.getComponent(Button)!.clickEvents[0].customEventData = [idx] + '';
+        } else {
+            this.randomPropButton.getChildByName("icon").getComponent(Sprite)!.spriteFrame = null;
+            Tween.stopAllByTarget(this.randomPropButton);
+            this.randomPropButton.active = false;
+        }
+        const spacing = 180;
+        const startX = -1.5 * spacing;
+        const buttons = [this.unlockButton, this.switchButton, this.undoButton];
+
+        buttons.forEach((btn, i) => {
+            if (!btn) return;
+            Tween.stopAllByTarget(btn);
+            let targetX = 0;
+            if (isShow) {
+                targetX = startX + i * spacing;
+            } else {
+                if (btn === this.undoButton) targetX = this.propButtonOriginPositions[0].x;
+                else if (btn === this.switchButton) targetX = this.propButtonOriginPositions[1].x;
+                else if (btn === this.unlockButton) targetX = this.propButtonOriginPositions[2].x;
+            }
+            tween(btn)
+                .to(0.3, { position: new Vec3(targetX, btn.position.y, 0) }, { easing: 'sineOut' })
+                .call(() => {
+                    if (isShow && i === 2) {
+                        Tween.stopAllByTarget(this.randomPropButton);
+                        const randomBtnTargetX = startX + 3 * spacing;
+                        this.randomPropButton.setPosition(new Vec3(randomBtnTargetX, this.randomPropButton.position.y, 0));
+                        this.randomPropButton.active = true;
+                    }
+                })
+                .start();
+        });
+
+        [this.unlockTipsNode, this.switchTipsNode].forEach((node, i) => {
+            if (!node) return;
+            Tween.stopAllByTarget(node);
+            const btnIndex = i === 0 ? buttons.indexOf(this.unlockButton) : buttons.indexOf(this.switchButton);
+            let targetX = 0;
+            if (isShow) {
+                targetX = startX + btnIndex * spacing;
+            } else {
+                targetX = this.propButtonOriginPositions[i === 0 ? 2 : 1].x;
+            }
+            tween(node)
+                .to(0.3, { position: new Vec3(targetX, node.position.y, 0) }, { easing: 'sineOut' })
+                .start();
+        });
+    }
+    
     private applyPropCount(button: Node, count: number) {
         if (!button) return;
         const hasCount = count > 0;
@@ -928,7 +1010,6 @@ export class UIGameLayer extends Component {
     onClickSetButton() {
         AudioManager.instance.playClick();
         LayerManager.instance.showUI("setting", 1);
-        //this.onShowTipsAnimator(1);
     }
 
     private preloadShuffleEffectClip() {
@@ -1018,9 +1099,12 @@ export class UIGameLayer extends Component {
 
     onShowTipsAnimator(index: number) {
         // index 1 是 解锁槽位按钮  2 是换牌按钮
-        const targetNode = index == 1 ? this.unlockButton : this.switchButton;
-        const tipsNode = index == 1 ? this.unlockTipsNode : this.switchTipsNode;
-
+        let targetNode = index == 1 ? this.unlockButton : this.switchButton;
+        let tipsNode = index == 1 ? this.unlockTipsNode : this.switchTipsNode;
+        if(index == 3){
+            targetNode = this.randomPropButton;
+            tipsNode = this.randomPropTipsNode;
+        }
         if (!targetNode || !tipsNode) return;
 
         // 同时只允许一个引导提示存在,触发前先把对方 index 的提示清理掉

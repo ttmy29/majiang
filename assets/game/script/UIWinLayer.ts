@@ -30,7 +30,8 @@ export class UIWinLayer extends Component {
     init(time: number = 0) {
         this.playOpenAnimation();
         this.rankLabel.string = "";
-        this.showRankLabel(97.47, time);
+        const rank = 80 + Math.random() * (98.88 - 80);
+        this.showRankLabel(rank, time);
         //this.playLightBurst();
     }
 
@@ -155,8 +156,8 @@ export class UIWinLayer extends Component {
         if (sys.platform === sys.Platform.WECHAT_GAME) {
             //window.dnSDK?.track?.('SHARE', {target: 'APP_MESSAGE'});
             wx.shareAppMessage({
-                title: "上头小游戏（15个好友在玩）",
-                imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
+                title: Constants.sharData.string,
+                imageUrl: Constants.sharData.url
             });
         }
     }
