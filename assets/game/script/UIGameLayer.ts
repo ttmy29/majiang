@@ -62,6 +62,9 @@ export class UIGameLayer extends Component {
     //解锁盒子按钮
     @property(Node)
     unlockButton: Node = null!;
+    //随机道具按钮
+    @property(Node)
+    randomPropButton: Node = null!;
     @property(Node)
     unlockTipsNode: Node = null!;
     @property(Node)
