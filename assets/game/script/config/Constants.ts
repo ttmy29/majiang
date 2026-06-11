@@ -92,7 +92,7 @@ const Constants = {
         url :'https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png'
     },
     showRandomPropButtonLevel:[
-        6,7,29,30
+        2,6,7,9,11,20,22,29,30,33,36,42,44
     ],
     MahjongBoard: {
         // 麻将牌面资源所在目录，只加载该目录下的数字牌面作为棋盘牌型。
