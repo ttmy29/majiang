@@ -70,6 +70,8 @@ export class UIGameLayer extends Component {
     @property(Node)
     switchTipsNode: Node = null!;
     @property(Node)
+    randomPropTipsNode: Node = null!;
+    @property(Node)
     comboNode: Node = null!;
     @property(Node)
     comboLabelNode: Node = null!;
@@ -254,6 +256,7 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventCleanSlotContainers, this.onEventCleanSlotContainers, this);
             director.on(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
             director.on(Constants.eventNames.EventSetPropCount, this.onSetPropCount, this);
+            director.on(Constants.eventNames.EventSetRandomPropButton, this.onSetRandomPropButton, this);
             director.on(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
             director.on(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.on(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
@@ -274,6 +277,7 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventCleanSlotContainers, this.onEventCleanSlotContainers, this);
             director.off(Constants.eventNames.EventSetUndoButtonStatus, this.onSetUndoButtonStatus, this);
             director.off(Constants.eventNames.EventSetPropCount, this.onSetPropCount, this);
+            director.off(Constants.eventNames.EventSetRandomPropButton, this.onSetRandomPropButton, this);
             director.off(Constants.eventNames.EventShowTipsAnimator, this.onShowTipsAnimator, this);
             director.off(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.off(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
@@ -918,6 +922,18 @@ export class UIGameLayer extends Component {
         this.applyPropCount(this.switchButton, payload.switch);
     }
 
+    // 随机道具按钮当前是否显示。去重用:目标状态与当前一致时不再跑 onSetRandomPropButtonShow 的 tween,
+    // 避免普通关卡每次开局都把 tips 节点等多余地动一遍。
+    private randomPropShown = false;
+
+    // GameCtrl 通知随机道具(额外免费道具)按钮显隐
+    private onSetRandomPropButton(show: boolean) {
+        if (this.isGuideLevel) show = false;
+        if (show === this.randomPropShown) return;
+        this.randomPropShown = show;
+        this.onSetRandomPropButtonShow(show);
+    }
+
     onSetRandomPropButtonShow(isShow: boolean) {
         if (isShow) {
             const idx = Math.floor(Math.random() * 3);
@@ -991,14 +1007,9 @@ export class UIGameLayer extends Component {
         if (ad1) ad1.active = !hasCount;
     }
 
-    isShow = true;
     onClickSetButton() {
-        this.onSetRandomPropButtonShow(this.isShow);
-        this.isShow = !this.isShow;
-        return
         AudioManager.instance.playClick();
         LayerManager.instance.showUI("setting", 1);
-        //this.onShowTipsAnimator(1);
     }
 
     private preloadShuffleEffectClip() {
@@ -1088,9 +1099,12 @@ export class UIGameLayer extends Component {
 
     onShowTipsAnimator(index: number) {
         // index 1 是 解锁槽位按钮  2 是换牌按钮
-        const targetNode = index == 1 ? this.unlockButton : this.switchButton;
-        const tipsNode = index == 1 ? this.unlockTipsNode : this.switchTipsNode;
-
+        let targetNode = index == 1 ? this.unlockButton : this.switchButton;
+        let tipsNode = index == 1 ? this.unlockTipsNode : this.switchTipsNode;
+        if(index == 3){
+            targetNode = this.randomPropButton;
+            tipsNode = this.randomPropTipsNode;
+        }
         if (!targetNode || !tipsNode) return;
 
         // 同时只允许一个引导提示存在,触发前先把对方 index 的提示清理掉

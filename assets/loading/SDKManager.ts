@@ -1,4 +1,4 @@
-import { _decorator, game, math, sys } from 'cc';
+import { _decorator, director, game, math, sys } from 'cc';
 
 const { ccclass } = _decorator;
 
@@ -70,6 +70,7 @@ export class SDKManager {
     private isVideoPlaying: boolean = false
     private videoSettled: boolean = false
     private videoShowReported: boolean = false
+    public lastHideTime: number = null;
     public static get instance(): SDKManager {
         if (!this._instance) {
             this._instance = new SDKManager();
@@ -148,8 +149,12 @@ export class SDKManager {
                     type: 'default',
                 });
             });
-
-
+            wx.onShow(() => {
+               director.emit("gameBack") 
+            });
+            wx.onHide(() => {
+                this.lastHideTime = Date.now();
+            });
             window.dnSDK.setDebug(false);
             window.dnSDK = new window.dnSDK({
                 appid: "wx966af392065ece23",

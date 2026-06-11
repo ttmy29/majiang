@@ -1,4 +1,4 @@
-import { _decorator, assetManager, AssetManager, Component, director, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, AssetManager, Component, director, find, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, sys, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
 import { ensureLevelJson, LevelJson, LevelJsonPosition, releaseOutsideWindow, resolveLevelLoadOptions, warmupForwardWindow } from './config/LevelJsonLoader';
@@ -196,6 +196,10 @@ export class GameCtrl extends Component {
 
     // 退到 start 层后再点开始，靠 onEnable 触发整局重开
     protected onEnable() {
+        // gameBack 监听必须在 hasStarted 守卫之前注册:首次进入时 onEnable 先于 start 执行,
+        // 此刻 hasStarted=false 会在下面提前 return,若把注册放在守卫之后,第一局就收不到
+        // 微信 onShow 回调(分享免费道具失效),要退出重进才生效。与 onDisable 的 off 成对。
+        director.on("gameBack", this.onEventGameBack, this);
         if (!this.hasStarted) return;
         this.ad_cnt = 0;
         // 延后一帧再开局:GameCtrl 与 UIGameLayer 同挂在 gameLayer 节点上,且组件顺序
@@ -216,6 +220,8 @@ export class GameCtrl extends Component {
 
     protected onDisable(): void {
         if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_EXIT', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
+        this.isFreePropState = null;
+        director.off("gameBack", this.onEventGameBack, this);
     }
 
     protected onDestroy(): void {
@@ -295,6 +301,8 @@ export class GameCtrl extends Component {
         this.nowLevel = level;
         this._guideTapCount = 0;
         director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
+        // 随机道具(额外免费道具)按钮:仅在配置关卡显示。失败重开/重新进入会再走一遍 startLevel,按钮按关卡重新出现
+        director.emit(Constants.eventNames.EventSetRandomPropButton, Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0);
         // 上报关卡进入事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
         //
@@ -1004,7 +1012,10 @@ export class GameCtrl extends Component {
         if (!this.shouldUseIdleTips() || this.gameState !== 'playing' || this.tipsActive) return;
         this.tipsActive = true;
         // 1=解锁槽位按钮,2=换牌按钮,随机选一个
-        const tipsIndex = Math.random() < 0.5 ? 1 : 2;
+        let tipsIndex = Math.random() < 0.5 ? 1 : 2;
+        if(Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0){
+            if(find("Canvas/gameLayer/down/button4").active) tipsIndex = 3
+        }
         director.emit(Constants.eventNames.EventShowTipsAnimator, tipsIndex);
     };
 
@@ -2851,10 +2862,74 @@ export class GameCtrl extends Component {
         }, 'unlock');
     }
 
+    private isFreePropState: string | null = null;
     public onBtnRandomPropClick(event, data: string) {
-        AudioManager.instance.playClick(); 
+        AudioManager.instance.playClick();
         if (this.gameState !== 'playing') return;
+        this.isFreePropState = data;
+        if (sys.platform === sys.Platform.WECHAT_GAME) {
+            wx.shareAppMessage({
+                title: Constants.sharData.string,
+                imageUrl: Constants.sharData.url
+            });
+        } else {
+            this.onEventGameBack(true);
+        }
+    }
 
 
+
+    onEventGameBack(isFree: boolean = false) {
+        if (!this.isFreePropState) return;
+        // 分享时切后台,回来时可能已经胜利/失败(理论上后台不 tick,这里做防御):非游戏中直接清空待用状态
+        if (this.gameState !== 'playing') { this.isFreePropState = null; return; }
+        if (!isFree) {
+            const lastHideTime = SDKManager.instance.lastHideTime || 0;
+            if (Date.now() - lastHideTime >= 4000) {
+
+            } else {
+                LayerManager.instance.showToast("分享失败！");
+                return;
+            }
+        }
+
+        // 时间校验已通过:把本次分享意图"消费"掉(置空待用状态),避免之后任意一次切后台返回
+        // 又命中这里重复触发。按钮是否隐藏仍取决于效果是否真正执行——执行不了只弹提示、按钮保留可重点。
+        const propType = this.isFreePropState;
+        this.isFreePropState = null;
+
+        // propType:"0"=撤回,"1"=换牌,"2"=解锁槽位(由 UIGameLayer.onSetRandomPropButtonShow 随机贴图时写入)。
+        // 额外免费道具:复用各自的 execute*,不扣次数、不看广告。效果当前无法执行时只弹提示、不消耗按钮。
+        switch (propType) {
+            case '0': { // 撤回
+                if (this.resolvingMatch) return;
+                let tile: TileRecord | null = null;
+                while (this.actionHistory.length > 0) {
+                    const c = this.actionHistory.pop()!;
+                    if (!this.isChainTile(c) && !c.removed && this.slots.indexOf(c) >= 0 && c.node?.isValid) { tile = c; break; }
+                }
+                if (!tile) { LayerManager.instance.showToast('无可撤回'); this.refreshUndoButtonStatus(); return; }
+                this.executeUndo(tile, this.slots.indexOf(tile));
+                break;
+            }
+            case '1': { // 换牌
+                if (this.shuffleAnimating) return;
+                const activeTiles = this.tiles.filter((t) => !t.collected && !t.removed);
+                const topCandidates = activeTiles.filter((t) => !this.isTileBlocked(t));
+                if (activeTiles.length === 0 || topCandidates.length === 0) { LayerManager.instance.showToast('无牌可换'); return; }
+                this.executeShuffle(activeTiles, topCandidates);
+                break;
+            }
+            case '2': { // 解锁槽位
+                const box = this.targetBoxes.find((b) => !b.unlocked);
+                if (!box) { LayerManager.instance.showToast('槽位已满'); return; }
+                this.executeUnlock(box);
+                break;
+            }
+            default: return;
+        }
+
+        // 成功执行了某个效果 -> 一次性道具,隐藏按钮(待用状态已在上面消费)
+        director.emit(Constants.eventNames.EventSetRandomPropButton, false);
     }
 }

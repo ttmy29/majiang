@@ -27,6 +27,8 @@ const Constants = {
         EventSetUndoButtonStatus: 'SetUndoButtonStatus',
         // 道具剩余次数:GameCtrl -> UI,payload {undo, switch},>0 显示 di+countLabel,==0 显示 ad1
         EventSetPropCount: 'SetPropCount',
+        // 随机道具(额外免费道具)按钮显隐:GameCtrl -> UI,payload boolean(true=显示,false=隐藏)
+        EventSetRandomPropButton: 'SetRandomPropButton',
         // 闲置帮助提示:payload 是 index(1=解锁槽位按钮,2=换牌按钮)
         EventShowTipsAnimator: 'ShowTipsAnimator',
         EventShowShuffleTileEffect: 'ShowShuffleTileEffect',
