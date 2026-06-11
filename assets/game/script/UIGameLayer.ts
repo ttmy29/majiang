@@ -929,7 +929,7 @@ export class UIGameLayer extends Component {
     // GameCtrl 通知随机道具(额外免费道具)按钮显隐
     private onSetRandomPropButton(show: boolean) {
         if (this.isGuideLevel) show = false;
-        if (show === this.randomPropShown) return;
+        if (show === this.randomPropButton.active) return;
         this.randomPropShown = show;
         this.onSetRandomPropButtonShow(show);
     }
