@@ -589,7 +589,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 239.5,
+      "width": 0,
       "height": 30
     },
     "_anchorPoint": {
@@ -714,7 +714,7 @@
     },
     "_mode": 0,
     "_totalLength": 479,
-    "_progress": 0.5,
+    "_progress": 0,
     "_reverse": false,
     "_id": "52BriKM5BHPKjjroxmffOc"
   },
