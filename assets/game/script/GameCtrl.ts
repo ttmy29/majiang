@@ -2837,6 +2837,7 @@ export class GameCtrl extends Component {
         // data "1" -> slot3,"2" -> slot4
         const slotName = data == "1" ? "slot3" : (data == "2" ? "slot4" : "");
         if (!slotName) return;
+        AudioManager.instance.playClick();
         const box = this.targetBoxes.find((b) => b.node?.name === slotName);
         if (!box || box.unlocked) return;
 
@@ -2848,5 +2849,12 @@ export class GameCtrl extends Component {
         }, () => {
             LayerManager.instance.showToast("视频播放未完成！")
         }, 'unlock');
+    }
+
+    public onBtnRandomPropClick(event, data: string) {
+        AudioManager.instance.playClick(); 
+        if (this.gameState !== 'playing') return;
+
+
     }
 }

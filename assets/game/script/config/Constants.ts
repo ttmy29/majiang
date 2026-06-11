@@ -85,6 +85,13 @@ const Constants = {
         // 全局累计看广告 >= 此值，且 level_json3 里有这关 → 用 level_json3（优先级高于重拾档）
         AdThreshold: 10,
     },
+    sharData:{
+        string :'上头小游戏（15个好友在玩）',
+        url :'https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png'
+    },
+    showRandomPropButtonLevel:[
+        6,7,29,30
+    ],
     MahjongBoard: {
         // 麻将牌面资源所在目录，只加载该目录下的数字牌面作为棋盘牌型。
         ResourceDir: 'resources/mahjong',

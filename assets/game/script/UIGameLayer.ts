@@ -1,4 +1,4 @@
-import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, view, Widget } from 'cc';
+import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, v3, Vec3, view, Widget } from 'cc';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
@@ -78,6 +78,7 @@ export class UIGameLayer extends Component {
 
     // 每个槽位在场景里的原始位置，MoveIn 时回到自己的原点而不是写死坐标
     private slotOriginPositions: Vec3[] = [];
+    private propButtonOriginPositions: Vec3[] = [];
 
     // HUD label —— 由 GameCtrl emit EventHudUpdate / EventShowToast 触发渲染
     private targetLabel: Label = null!;
@@ -128,6 +129,7 @@ export class UIGameLayer extends Component {
 
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
         this.slotRootTop = this.getSlotRootWidget()?.top ?? 0;
+        this.propButtonOriginPositions = [this.undoButton, this.switchButton, this.unlockButton].map(btn => btn ? btn.position.clone() : new Vec3());
         //this.setupHudLabels();
         this.setupComboNode();
         this.preloadShuffleEffectClip();
@@ -916,6 +918,62 @@ export class UIGameLayer extends Component {
         this.applyPropCount(this.switchButton, payload.switch);
     }
 
+    onSetRandomPropButtonShow(isShow: boolean) {
+        if (isShow) {
+            const idx = Math.floor(Math.random() * 3);
+            const icon = [this.undoButton, this.switchButton, this.unlockButton][idx].getChildByName('icon');
+            const iconSprite = icon.getComponent(Sprite);
+            this.randomPropButton.getChildByName("icon").getComponent(Sprite)!.spriteFrame = iconSprite!.spriteFrame;
+            this.randomPropButton.getComponent(Button)!.clickEvents[0].customEventData = [idx] + '';
+        } else {
+            this.randomPropButton.getChildByName("icon").getComponent(Sprite)!.spriteFrame = null;
+            Tween.stopAllByTarget(this.randomPropButton);
+            this.randomPropButton.active = false;
+        }
+        const spacing = 180;
+        const startX = -1.5 * spacing;
+        const buttons = [this.unlockButton, this.switchButton, this.undoButton];
+
+        buttons.forEach((btn, i) => {
+            if (!btn) return;
+            Tween.stopAllByTarget(btn);
+            let targetX = 0;
+            if (isShow) {
+                targetX = startX + i * spacing;
+            } else {
+                if (btn === this.undoButton) targetX = this.propButtonOriginPositions[0].x;
+                else if (btn === this.switchButton) targetX = this.propButtonOriginPositions[1].x;
+                else if (btn === this.unlockButton) targetX = this.propButtonOriginPositions[2].x;
+            }
+            tween(btn)
+                .to(0.3, { position: new Vec3(targetX, btn.position.y, 0) }, { easing: 'sineOut' })
+                .call(() => {
+                    if (isShow && i === 2) {
+                        Tween.stopAllByTarget(this.randomPropButton);
+                        const randomBtnTargetX = startX + 3 * spacing;
+                        this.randomPropButton.setPosition(new Vec3(randomBtnTargetX, this.randomPropButton.position.y, 0));
+                        this.randomPropButton.active = true;
+                    }
+                })
+                .start();
+        });
+
+        [this.unlockTipsNode, this.switchTipsNode].forEach((node, i) => {
+            if (!node) return;
+            Tween.stopAllByTarget(node);
+            const btnIndex = i === 0 ? buttons.indexOf(this.unlockButton) : buttons.indexOf(this.switchButton);
+            let targetX = 0;
+            if (isShow) {
+                targetX = startX + btnIndex * spacing;
+            } else {
+                targetX = this.propButtonOriginPositions[i === 0 ? 2 : 1].x;
+            }
+            tween(node)
+                .to(0.3, { position: new Vec3(targetX, node.position.y, 0) }, { easing: 'sineOut' })
+                .start();
+        });
+    }
+    
     private applyPropCount(button: Node, count: number) {
         if (!button) return;
         const hasCount = count > 0;
@@ -933,7 +991,11 @@ export class UIGameLayer extends Component {
         if (ad1) ad1.active = !hasCount;
     }
 
+    isShow = true;
     onClickSetButton() {
+        this.onSetRandomPropButtonShow(this.isShow);
+        this.isShow = !this.isShow;
+        return
         AudioManager.instance.playClick();
         LayerManager.instance.showUI("setting", 1);
         //this.onShowTipsAnimator(1);

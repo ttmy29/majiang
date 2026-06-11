@@ -280,8 +280,8 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 1200,
-      "height": 2665
+      "width": 1080,
+      "height": 2400
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -550,7 +550,7 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": -200,
+      "x": -237.601,
       "y": 0,
       "z": 0
     },
@@ -589,7 +589,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 200,
+      "width": 239.5,
       "height": 30
     },
     "_anchorPoint": {
@@ -614,13 +614,13 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 0,
+      "r": 255,
       "g": 255,
-      "b": 0,
+      "b": 255,
       "a": 255
     },
     "_spriteFrame": {
-      "__uuid__": "24a704da-2867-446d-8d1a-5e920c75e09d@f9941",
+      "__uuid__": "09933a77-3325-4265-8e5e-16daf0d61f20@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
     "_type": 1,
@@ -650,8 +650,8 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 400,
-      "height": 30
+      "width": 479,
+      "height": 32
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -681,7 +681,7 @@
       "a": 255
     },
     "_spriteFrame": {
-      "__uuid__": "9fd900dd-221b-4f89-8f2c-fba34243c835@f9941",
+      "__uuid__": "2d68e30a-a6bc-482e-99e3-526714fff2d2@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
     "_type": 1,
@@ -713,7 +713,7 @@
       "__id__": 15
     },
     "_mode": 0,
-    "_totalLength": 300,
+    "_totalLength": 479,
     "_progress": 0.5,
     "_reverse": false,
     "_id": "52BriKM5BHPKjjroxmffOc"
@@ -733,7 +733,7 @@
     "_left": 0,
     "_right": 0,
     "_top": 0,
-    "_bottom": 103.08100000000007,
+    "_bottom": 102.08100000000007,
     "_horizontalCenter": 0,
     "_verticalCenter": 0,
     "_isAbsLeft": true,
@@ -773,7 +773,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": -482.9560000000001,
+      "y": -482.956,
       "z": 0
     },
     "_lrot": {
@@ -811,8 +811,8 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 360,
-      "height": 75.6
+      "width": 334,
+      "height": 73.3
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -836,18 +836,18 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 255,
-      "g": 255,
-      "b": 255,
+      "r": 47,
+      "g": 169,
+      "b": 103,
       "a": 255
     },
     "_string": "正在进入游戏",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
-    "_actualFontSize": 60,
-    "_fontSize": 60,
+    "_actualFontSize": 55,
+    "_fontSize": 55,
     "_fontFamily": "Arial",
-    "_lineHeight": 60,
+    "_lineHeight": 55,
     "_overflow": 0,
     "_enableWrapText": true,
     "_font": null,
@@ -858,12 +858,12 @@
     "_isUnderline": false,
     "_underlineHeight": 2,
     "_cacheMode": 0,
-    "_enableOutline": false,
+    "_enableOutline": true,
     "_outlineColor": {
       "__type__": "cc.Color",
-      "r": 0,
-      "g": 0,
-      "b": 0,
+      "r": 17,
+      "g": 79,
+      "b": 57,
       "a": 255
     },
     "_outlineWidth": 2,
@@ -898,7 +898,7 @@
     "_left": 0,
     "_right": 0,
     "_top": 0,
-    "_bottom": 146.24399999999997,
+    "_bottom": 147.39399999999998,
     "_horizontalCenter": 0,
     "_verticalCenter": 0,
     "_isAbsLeft": true,
@@ -1028,7 +1028,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 200,
+      "width": 0,
       "height": 63
     },
     "_anchorPoint": {
@@ -1058,7 +1058,7 @@
       "b": 160,
       "a": 255
     },
-    "_string": "失眠了吗？",
+    "_string": "",
     "_horizontalAlign": 2,
     "_verticalAlign": 1,
     "_actualFontSize": 40,
@@ -1167,9 +1167,9 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 88,
-      "g": 177,
-      "b": 160,
+      "r": 187,
+      "g": 255,
+      "b": 221,
       "a": 255
     },
     "_string": "失眠了吗？来试试麻将疗法，无需处方",
