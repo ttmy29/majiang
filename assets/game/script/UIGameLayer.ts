@@ -222,6 +222,8 @@ export class UIGameLayer extends Component {
     onDisable() {
         this.registerGlobalEvent(false);
         this.onEventCleanSlotContainers();
+        // 界面隐藏时关闭连击显示并把状态复位,避免下次显示时残留上一局的进度条/口号
+        this.resetComboNode();
     }
 
     onEnable() {
@@ -626,6 +628,8 @@ export class UIGameLayer extends Component {
             this.comboBarSprite.fillRange = 1;
         }
         if (this.comboNode?.isValid) this.comboNode.active = false;
+        // 口号等级也归零,下次连击重新从 level1 开始
+        this.comboAudioLevel = 0;
         this.hideComboLevelNodes();
     }
 
@@ -880,6 +884,8 @@ export class UIGameLayer extends Component {
         // 从顶部上方落入：先把节点放到原始位置正上方，再下落归位
         targetNode.setPosition(new Vec3(originPos.x, originPos.y + 1500, 0));
         tween(targetNode)
+            // 时长 0.45s:若调整,必须同步 Constants.slotAnim.MoveInWait(需 >= 此值),
+            // 否则 movingIn 提前解除,挂起的牌会飞向盒子还没归位的"半路(偏上)"坐标。
             .to(0.45, { position: originPos.clone() }, { easing: 'quadOut' })
             .call(() => {
                 targetNode.setPosition(originPos.clone());

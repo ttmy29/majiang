@@ -55,8 +55,10 @@ const Constants = {
     slotAnim: {
         // MoveOut: 0.1833 延迟 + 三段挤压 0.05*3 + 0.3 飞出 = 0.6333s，留少量余量到 0.65s
         MoveOutWait: 0.65,
-        // MoveIn: 0.3 飞回原位，留余量到 0.35s。期间 slot 里的牌若提前飞过去会落到半路位置
-        MoveInWait: 0.35,
+        // MoveIn: 实际飞回动画 0.45s(见 UIGameLayer.onEventShowSlotMoveIn 的 .to(0.45)),留余量到 0.5s。
+        // 必须 >= 动画时长:否则 movingIn 提前解除,collectStoredTargets 会让挂起的牌飞向"还在半路(偏上)"
+        // 的盒子世界坐标,表现为"牌先落到盒子上方,落位瞬间才吸进格子"。
+        MoveInWait: 0.5,
         // Unlock: 盖子飞出最长链路 0.35 延迟 + 0.2167 淡出 = 0.5667s，留余量到 0.6s
         UnlockWait: 0.6,
     },

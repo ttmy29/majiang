@@ -1,0 +1,135 @@
+{
+  "target": "HomeUI fx_lizi PathConstraint baked to ordinary bone transform timelines - leaf-only compact texture",
+  "reason": "Fallback for Cocos projects where PathConstraint position animation does not visibly update. Path constraints are removed; bones 1..7 are sampled at 30fps into translate/rotate/scale/shear timelines.",
+  "fps": 30,
+  "atlas": "fx_lizi.atlas",
+  "textures": [
+    "fx_lizi_leaf.png"
+  ],
+  "skeletons": [
+    {
+      "role": "normal",
+      "sourceJson": "fx_lizi__Spien_FX__pid3914.visible.json",
+      "outputJson": "fx_lizi__Spien_FX__pid3914.baked.json",
+      "pathConstraintsRemoved": 7,
+      "bakedBones": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ],
+      "bakedTimelines": [
+        "translate",
+        "rotate",
+        "scale",
+        "shear"
+      ],
+      "animations": [
+        {
+          "name": "Appear",
+          "duration": 1
+        },
+        {
+          "name": "Disappear",
+          "duration": 2
+        },
+        {
+          "name": "Idle",
+          "duration": 0
+        },
+        {
+          "name": "Loop",
+          "duration": 5
+        }
+      ],
+      "validation": {
+        "ok": true,
+        "maxBoundsDelta": 14.043815,
+        "invalidSamples": 0,
+        "sampleCount": 84,
+        "note": "Bounds delta is from transform decomposition/30fps baking; visual motion is preserved as a Cocos fallback."
+      }
+    },
+    {
+      "role": "ipad",
+      "sourceJson": "fx_lizi__Spien_FX_Ipad__pid3064.visible.json",
+      "outputJson": "fx_lizi__Spien_FX_Ipad__pid3064.baked.json",
+      "pathConstraintsRemoved": 7,
+      "bakedBones": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ],
+      "bakedTimelines": [
+        "translate",
+        "rotate",
+        "scale",
+        "shear"
+      ],
+      "animations": [
+        {
+          "name": "Appear",
+          "duration": 1
+        },
+        {
+          "name": "Disappear",
+          "duration": 2
+        },
+        {
+          "name": "Idle",
+          "duration": 0
+        },
+        {
+          "name": "Loop",
+          "duration": 5
+        }
+      ],
+      "validation": {
+        "ok": true,
+        "maxBoundsDelta": 13.811757,
+        "invalidSamples": 0,
+        "sampleCount": 84,
+        "note": "Bounds delta is from transform decomposition/30fps baking; visual motion is preserved as a Cocos fallback."
+      }
+    }
+  ],
+  "textureCrop": {
+    "sourceTexture": "HomeUI_2.png",
+    "outputTexture": "fx_lizi_leaf.png",
+    "sourceSize": [
+      2004,
+      1966
+    ],
+    "cropRect": {
+      "x": 1469,
+      "y": 1007,
+      "width": 378,
+      "height": 41
+    },
+    "regions": {
+      "Fx_lizi/shuye": {
+        "x": 1660,
+        "y": 1011,
+        "w": 185,
+        "h": 35,
+        "extra": [
+          "offsets:1,1,187,37"
+        ]
+      },
+      "Fx_lizi/shuye2": {
+        "x": 1471,
+        "y": 1009,
+        "w": 187,
+        "h": 37,
+        "extra": []
+      }
+    }
+  }
+}

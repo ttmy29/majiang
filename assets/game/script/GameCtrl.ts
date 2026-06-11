@@ -185,7 +185,7 @@ export class GameCtrl extends Component {
         });
     }
     //点击广告的次数
-    ad_cnt:number = 0;
+    ad_cnt: number = 0;
 
     // 看广告成功统一入口：每局埋点计数 + 全局累计持久化(难度自适应用) + 云同步
     private bumpAdCount() {
@@ -215,7 +215,7 @@ export class GameCtrl extends Component {
     };
 
     protected onDisable(): void {
-        if(this.nowLevel > 0 )  window.dnSDK?.track?.('LEVEL_EXIT', {duration:Math.ceil(this.elapsedTime),level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_EXIT', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
     }
 
     protected onDestroy(): void {
@@ -298,7 +298,7 @@ export class GameCtrl extends Component {
         // 上报关卡进入事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
         //
-        if(this.nowLevel > 0 ) window.dnSDK?.track?.('LEVEL_ENTER', {enter_level_name: `关卡${this.nowLevel}`,level_id: this.nowLevel});
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_ENTER', { enter_level_name: `关卡${this.nowLevel}`, level_id: this.nowLevel });
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -1200,7 +1200,6 @@ export class GameCtrl extends Component {
         // 牌起飞时就触发抖动:把飞行时长传给 UI,让挤压峰值精准落在落位时刻
         const flyToBoxDuration = 0.18 + 0.1;
         director.emit(Constants.eventNames.EventShowSlotShake, this.getTargetBoxSlotID(box), flyToBoxDuration);
-
         tween(tile.node)
             .to(flyToBoxDuration, { position: targetFlyPosition, scale: new Vec3(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1) })
             .call(() => {
@@ -1214,8 +1213,12 @@ export class GameCtrl extends Component {
                 tile.node.setWorldPosition(endWorldPosition);
                 tile.node.setPosition(targetBoxPosition);
                 tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
-                // siblingIndex 依 progress 递增即可（这张落下后 progress 就会变成 progress+1）
-                tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + box.progress + 1);
+                // siblingIndex 绑定这张牌起飞时就定好的落格 targetIndex,而不是落位瞬间的 box.progress。
+                // 多张牌同时飞向同一目标槽时,tween 的 .call 完成顺序并不保证等于起飞顺序;
+                // 若按落位时的 progress 递增,会出现"后落的牌 siblingIndex 反而更小",
+                // 导致它的牌叠到相邻格子的牌上面 —— 看起来就是"牌跑到盒子上面"。
+                // 用 targetIndex(=该牌落入的 itemNodes 下标)定层,z 序永远和它落入的格子一致。
+                tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + targetIndex);
                 //屏蔽触摸方法
                 tile.item.disableTileTouch();
                 Utils.onVibrationShort();
@@ -1549,7 +1552,7 @@ export class GameCtrl extends Component {
         SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: Math.ceil(this.elapsedTime) });
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
-        window.dnSDK?.track?.('LEVEL_PASS', {duration:duration,level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -1570,7 +1573,7 @@ export class GameCtrl extends Component {
         this.clearIdleTips();
         // 上报关卡失败事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
-        window.dnSDK?.track?.('LEVEL_LOSE', {duration:Math.ceil(this.elapsedTime),level_id: this.nowLevel,ad_cnt:this.ad_cnt});
+        window.dnSDK?.track?.('LEVEL_LOSE', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
             const allUnlocked = this.targetBoxes.every((b) => b.unlocked);
@@ -2318,7 +2321,7 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.setUndoCount(this.undoCount + 3);
                 this.bumpAdCount();
-                window.dnSDK?.track?.('GET_ITEM', {item_source:2});
+                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
@@ -2348,7 +2351,7 @@ export class GameCtrl extends Component {
             this.refreshUndoButtonStatus();
             return;
         }
-        window.dnSDK?.track?.('USE_ITEM', {item_source:2});
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         // 有次数:消耗 1 次并直接撤回(不再看广告)
         this.setUndoCount(this.undoCount - 1);
         this.executeUndo(tile, index);
@@ -2493,7 +2496,7 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.bumpAdCount();
                 this.setSwitchCount(this.switchCount + 3);
-                window.dnSDK?.track?.('GET_ITEM', {item_source:2});
+                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
                 SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
@@ -2508,7 +2511,7 @@ export class GameCtrl extends Component {
         if (topCandidates.length === 0) return;
 
 
-        window.dnSDK?.track?.('USE_ITEM', {item_source:2});
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         // 有次数:消耗 1 次并直接换牌(不再看广告)
         this.setSwitchCount(this.switchCount - 1);
         this.executeShuffle(activeTiles, topCandidates);
