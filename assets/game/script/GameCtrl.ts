@@ -1013,8 +1013,8 @@ export class GameCtrl extends Component {
         this.tipsActive = true;
         // 1=解锁槽位按钮,2=换牌按钮,随机选一个
         let tipsIndex = Math.random() < 0.5 ? 1 : 2;
-        if(Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0){
-            if(find("Canvas/gameLayer/down/button4").active) tipsIndex = 3
+        if (Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0) {
+            if (find("Canvas/gameLayer/down/button4").active) tipsIndex = 3
         }
         director.emit(Constants.eventNames.EventShowTipsAnimator, tipsIndex);
     };
@@ -1253,11 +1253,15 @@ export class GameCtrl extends Component {
         tile.collected = true;
         tile.node.name = `slotTile_${tile.uid}`;
         this.actionHistory.push(tile);
-        this.refreshUndoButtonStatus();
+
         if (wasBoardTile) this.unlockAdjacentIronLocks(tile);
 
         const lastSame = this.slots.reduce((last, st, i) => st.type === tile.type ? i : last, -1);
         this.slots.splice(lastSame >= 0 ? lastSame + 1 : this.slots.length, 0, tile);
+
+
+        this.refreshUndoButtonStatus();
+
         const isSlotFull = this.slots.length >= Math.max(1, this.slotCapacity - 1);
 
         const worldPosition = tile.node.worldPosition.clone();
