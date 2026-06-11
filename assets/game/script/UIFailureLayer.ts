@@ -1,4 +1,4 @@
-import { _decorator, Component, director, Label, Node, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Component, director, find, Label, Node, tween, UIOpacity, Vec3 } from 'cc';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
@@ -28,6 +28,7 @@ export class UIFailureLayer extends Component {
             .delay(0.5)
             .call(() => {
                 AudioManager.instance.playOneShotDuckingBgm(AudioClipNames.game_lose);
+                find('Canvas/uiLayer/setting')?.destroy();
             })
             .start();
         //显示牌
