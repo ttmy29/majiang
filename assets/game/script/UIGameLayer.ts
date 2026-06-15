@@ -95,11 +95,13 @@ export class UIGameLayer extends Component {
     private comboLevelOriginPositions: Vec3[] = [];
     private comboLevelOriginScales: Vec3[] = [];
     private comboLevelOpacities: UIOpacity[] = [];
+    private comboNodeOriginScale: Vec3 = new Vec3(1, 1, 1);
+    private comboRefreshSeq = 0;
     // 当前已经播放到的连击口号下标(0~7),combo 中断或窗口到期时清零
     private comboAudioLevel = 0;
     // 每 3 次连击解锁下一级口号,与 COMBO_AUDIOS 长度对应,超过 7 后不再升级
     private static readonly COMBO_STEP = 3;
-    // 连击窗口时长（秒），与 GameCtrl.updateCombo 中的 5000ms 保持一致
+    // 连击展示进度条时长（秒）。计数由 GameCtrl 持续累加,这里仅控制 UI 隐藏节奏。
     private static readonly COMBO_DURATION = 5;
     private static readonly COMBO_AUDIOS: { audio: AudioClipNames }[] = [
         { audio: AudioClipNames.combo_level1 },
@@ -169,6 +171,7 @@ export class UIGameLayer extends Component {
 
     private setupComboNode() {
         if (!this.comboNode) return;
+        this.comboNodeOriginScale = this.comboNode.scale.clone();
         const progressBar = this.comboNode.getChildByName('ProgressBar');
         const bar = progressBar?.getChildByName('Bar');
         if (bar) this.comboBarSprite = bar.getComponent(Sprite)!;
@@ -186,6 +189,7 @@ export class UIGameLayer extends Component {
             opacity.opacity = 0;
             levelNode.active = false;
         }
+        this.comboNode.setScale(this.comboNodeOriginScale.clone());
         this.comboNode.active = false;
     }
 
@@ -293,6 +297,7 @@ export class UIGameLayer extends Component {
     onEventLevelStart(level: number) {
         this.hasLevelUiMode = true;
         this.isGuideLevel = level === 0;
+        this.resetComboNode();
         this.applyLevelUiMode();
         this.setGuideVisible(this.isGuideLevel, level);
     }
@@ -535,11 +540,20 @@ export class UIGameLayer extends Component {
     // 函数,Tween.stopAllByTarget 会打断旧动画并重新开始,countLabel 同步刷新
     onEventComboUpdate(comboTimes: number) {
         if (!this.comboNode || !this.comboBarSprite) return;
+        const seq = ++this.comboRefreshSeq;
+        const originScale = this.comboNodeOriginScale.clone();
+        const popStartScale = new Vec3(originScale.x * 0.78, originScale.y * 0.78, originScale.z);
+        const popPeakScale = new Vec3(originScale.x * 1.08, originScale.y * 1.08, originScale.z);
+
+        Tween.stopAllByTarget(this.comboNode);
+        Tween.stopAllByTarget(this.comboBarSprite);
+
         this.comboNode.active = true;
+        this.comboNode.setScale(popStartScale);
         if (this.comboCountLabel) this.comboCountLabel.string = `${comboTimes}`;
 
-        // GameCtrl 在窗口过期后会把 comboTimes 重新置为 1,意味着开启新一轮 combo,
-        // 已播放过的口号等级要从头来过,旧的 comboLabel 文本也要先收掉
+        // GameCtrl 从 0 开始新一轮 combo 时,已播放过的口号等级要从头来过,
+        // 旧的 comboLabel 文本也要先收掉
         if (comboTimes <= 1) {
             this.comboAudioLevel = 0;
             this.hideComboLevelNodes();
@@ -548,20 +562,33 @@ export class UIGameLayer extends Component {
         // 每 COMBO_STEP 次连击解锁下一级口号:第 3/6/9/... 次时按顺序播一个
         const targetLevel = Math.floor(comboTimes / UIGameLayer.COMBO_STEP);
         const maxLevel = UIGameLayer.COMBO_AUDIOS.length;
-        if (targetLevel > this.comboAudioLevel && targetLevel <= maxLevel) {
-            this.comboAudioLevel = targetLevel;
-            this.playComboLevel(targetLevel - 1);
-        }
+        const shouldPlayComboLevel = targetLevel > this.comboAudioLevel && targetLevel <= maxLevel;
+        if (shouldPlayComboLevel) this.hideComboLevelNodes();
 
-        Tween.stopAllByTarget(this.comboBarSprite);
         this.comboBarSprite.fillRange = 1;
-        tween(this.comboBarSprite)
-            .to(UIGameLayer.COMBO_DURATION, { fillRange: 0 })
+        tween(this.comboNode)
+            .to(0.12, { scale: popPeakScale }, { easing: 'backOut' })
+            .to(0.06, { scale: originScale }, { easing: 'quadOut' })
             .call(() => {
-                if (this.comboNode?.isValid) this.comboNode.active = false;
-                // 窗口走完意味着这一轮 combo 结束,下一次匹配再从 level1 开始
-                this.comboAudioLevel = 0;
-                this.hideComboLevelNodes();
+                if (seq !== this.comboRefreshSeq || !this.comboNode?.isValid) return;
+
+                if (shouldPlayComboLevel) {
+                    this.comboAudioLevel = targetLevel;
+                    this.playComboLevel(targetLevel - 1);
+                }
+
+                Tween.stopAllByTarget(this.comboBarSprite);
+                this.comboBarSprite.fillRange = 1;
+                tween(this.comboBarSprite)
+                    .to(UIGameLayer.COMBO_DURATION, { fillRange: 0 })
+                    .call(() => {
+                        if (seq !== this.comboRefreshSeq || !this.comboNode?.isValid) return;
+                        this.comboNode.active = false;
+                        // 展示进度走完只隐藏 UI 并重置口号播放状态,不影响 GameCtrl 的连击计数
+                        this.comboAudioLevel = 0;
+                        this.hideComboLevelNodes();
+                    })
+                    .start();
             })
             .start();
     }
@@ -632,11 +659,16 @@ export class UIGameLayer extends Component {
     }
 
     private resetComboNode() {
+        this.comboRefreshSeq++;
+        if (this.comboNode) Tween.stopAllByTarget(this.comboNode);
         if (this.comboBarSprite) {
             Tween.stopAllByTarget(this.comboBarSprite);
             this.comboBarSprite.fillRange = 1;
         }
-        if (this.comboNode?.isValid) this.comboNode.active = false;
+        if (this.comboNode?.isValid) {
+            this.comboNode.setScale(this.comboNodeOriginScale.clone());
+            this.comboNode.active = false;
+        }
         // 口号等级也归零,下次连击重新从 level1 开始
         this.comboAudioLevel = 0;
         this.hideComboLevelNodes();
@@ -1182,5 +1214,3 @@ export class UIGameLayer extends Component {
         }
     }
 }
-
-

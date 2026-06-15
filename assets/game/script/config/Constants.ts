@@ -135,7 +135,7 @@ const Constants = {
             [0, 0],
         ] as Array<readonly [number, number]>,
         // 槽位麻将牌实例的统一缩放比例 36。
-        SlotScale: 0.32,
+        SlotScale: 0.40,
         // 底部存牌槽里牌的缩放(比目标槽 SlotScale 略小 0.05),视觉上比目标槽小一圈
         SlotTileScale: 0.27,
         // 牌在底部 slot 内的 siblingIndex 基数: BottomSlotSiblingBase + slotIndex

@@ -145,6 +145,15 @@ export class GameCtrl extends Component {
     private static readonly FIRST_TIPS_POPUP_LEVEL = 15;
     private static readonly FAILURE_POPUP_DELAY = 1.25;
 
+    // 自动完成:清到"只剩最后一层"(剩余牌全在同一层、必然无遮挡)时接管,
+    // 自动把剩余牌逐张飞入目标槽直到通关。期间禁用一切交互。
+    private autoFinishing = false;
+    private initialLayerCount = 1;            // 开局时不同 z_layer 的数量;==1 的纯单层关不触发(否则一开局就自动通关)
+    private autoFinishIdleTicks = 0;          // 连续多少拍没有任何牌被消除(看门狗用)
+    private autoFinishLastRemovedCount = 0;   // 上一拍已消除的牌数,用来判断是否有进度
+    private static readonly AUTO_FINISH_STEP = 0.16;       // 每次自动点牌的间隔(秒)
+    private static readonly AUTO_FINISH_MAX_IDLE = 25;     // 看门狗:连续无进度拍数上限(~4s)后放弃接管
+
     // UI 相关 —— targetLabel/statusLabel/comboLabel/toastLabel 已搬到 UIGameLayer，
     // levelLabel 是 @property 由场景绑定，留在这里直接读写
 
@@ -331,6 +340,8 @@ export class GameCtrl extends Component {
         this.lastComboAt = 0;
         this.comboEmitPending = false;
         this.resolvingMatch = false;
+        this.autoFinishing = false;
+        this.unschedule(this.autoFinishStep);
         this.unschedule(this.finishDealAnimation);
         this.dealingTiles = true;
         this.dealOverlayLayoutReady = false;
@@ -457,6 +468,7 @@ export class GameCtrl extends Component {
         for (const tile of this.tiles) {
             layers.add(tile.layer);
         }
+        this.initialLayerCount = layers.size;
         layers.forEach((layer) => this.refreshLayerDisplayOrder(this.getOrCreateLayerContainer(layer)));
 
         this.refreshChainLinkVisuals();
@@ -1045,7 +1057,7 @@ export class GameCtrl extends Component {
     }
 
     private onTileTap(tile: TileRecord) {
-        if (this.gameState !== 'playing' || this.dealingTiles || this.shuffleAnimating || tile.collected || tile.removed) {
+        if (this.gameState !== 'playing' || this.autoFinishing || this.dealingTiles || this.shuffleAnimating || tile.collected || tile.removed) {
             return;
         }
         if (this.isTileBlocked(tile)) {
@@ -1413,6 +1425,7 @@ export class GameCtrl extends Component {
             }, 0.18);
             this.updatePlayableStates();
             this.updateHud();
+            this.scheduleAutoFinishStep(0);
             return;
         }
 
@@ -1424,6 +1437,7 @@ export class GameCtrl extends Component {
         this.updateHud();
         this.checkEndState();
         this.saveProgressDeferred();
+        this.scheduleAutoFinishStep(0);
     }
 
     private collectStoredTargets() {
@@ -1535,6 +1549,289 @@ export class GameCtrl extends Component {
         // }
     }
 
+    // ==========================================
+    // 自动完成(最后一层自动飞入)
+    // ==========================================
+
+    // 棋盘安定且"只剩最后一层"时返回 true。遮挡判断:同层之间不会互相遮挡
+    // (findBlockerTile 只算更高层),所以剩余牌全在同一层即等价于"全部无遮挡"。
+    private isReadyForAutoFinish(): boolean {
+        const logAutoFinishState = (reason: string, remainingOverride: TileRecord[] | null = null) => {
+            const remaining = remainingOverride || this.tiles.filter((t) => !t.removed && this.isBoardTileOnBoard(t));
+            const boxStates = this.targetBoxes.map((b, index) => ({
+                index,
+                type: b.type,
+                progress: b.progress,
+                pending: b.pending,
+                required: b.required,
+                unlocked: b.unlocked,
+                refreshing: b.refreshing,
+                movingIn: b.movingIn,
+                movedOut: b.movedOut,
+            }));
+            const remainingStates = remaining.map((t) => {
+                const blocker = this.findBlockerTile(t);
+                const ironLock = this.getIronLock(t);
+                const chainLink = this.getActiveChainLink(t);
+                return {
+                    uid: t.uid,
+                    type: t.type,
+                    layer: t.layer,
+                    row: t.row,
+                    col: t.col,
+                    collected: t.collected,
+                    removed: t.removed,
+                    active: !!t.node?.activeInHierarchy,
+                    parent: t.node?.parent?.name || '',
+                    blocked: !!blocker,
+                    blocker: blocker ? {
+                        uid: blocker.uid,
+                        type: blocker.type,
+                        layer: blocker.layer,
+                        row: blocker.row,
+                        col: blocker.col,
+                    } : null,
+                    ironLocked: !!ironLock && (ironLock.locked || ironLock.unlocking),
+                    ironUnlocking: !!ironLock?.unlocking,
+                    chainId: chainLink?.id || null,
+                    matchingBoxIndex: this.targetBoxes.findIndex((b) =>
+                        b.unlocked
+                        && !b.refreshing
+                        && !b.movingIn
+                        && b.type === t.type
+                        && b.progress + b.pending < b.required
+                    ),
+                };
+            });
+            // console.log('[AutoFinish] isReadyForAutoFinish', {
+            //     reason,
+            //     level: this.nowLevel,
+            //     gameState: this.gameState,
+            //     autoFinishing: this.autoFinishing,
+            //     isGuideLevel: this.isGuideLevel(),
+            //     initialLayerCount: this.initialLayerCount,
+            //     dealingTiles: this.dealingTiles,
+            //     shuffleAnimating: this.shuffleAnimating,
+            //     resolvingMatch: this.resolvingMatch,
+            //     hasUnlockingIron: this.hasUnlockingIron(),
+            //     flyLayerBusy: !!(this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)),
+            //     remainingCount: remaining.length,
+            //     remainingLayers: Array.from(new Set(remaining.map((t) => t.layer))),
+            //     slotCount: this.slots.length,
+            //     slotTypes: this.slots.map((t) => t.type),
+            //     boxStates,
+            //     remainingStates,
+            // });
+        };
+
+        if (this.gameState !== 'playing' || this.autoFinishing || this.isGuideLevel()) {
+            logAutoFinishState('state-not-ready');
+            return false;
+        }
+        if (this.initialLayerCount <= 1) {
+            logAutoFinishState('single-layer-level');
+            return false;
+        }
+        // 棋盘必须安定:发牌/换牌/吸牌/铁链解锁中,或有目标槽在飞/刷新/移入,或飞行层上还有牌,都不接管
+        if (this.dealingTiles || this.shuffleAnimating || this.resolvingMatch || this.hasUnlockingIron()) {
+            logAutoFinishState('board-busy');
+            return false;
+        }
+        if (this.targetBoxes.some((b) => b.pending > 0 || b.refreshing || b.movingIn)) {
+            logAutoFinishState('target-box-busy');
+            return false;
+        }
+        if (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)) {
+            logAutoFinishState('fly-layer-busy');
+            return false;
+        }
+
+        const remaining = this.tiles.filter((t) => !t.removed && this.isBoardTileOnBoard(t));
+        if (remaining.length === 0) {
+            logAutoFinishState('no-board-tiles', remaining);
+            return false;
+        }
+        const layer = remaining[0].layer;
+        if (remaining.some((t) => t.layer !== layer)) {
+            logAutoFinishState('multiple-remaining-layers', remaining);
+            return false;
+        }
+        // 防御:同层内仍有未解的链/铁链(或异常遮挡)时不接管,留给玩家手动清,清完再触发
+        if (remaining.some((t) => this.isTileBlocked(t) || this.isIronLockedTile(t) || !!this.getActiveChainLink(t))) {
+            logAutoFinishState('remaining-tile-blocked-or-locked', remaining);
+            return false;
+        }
+        logAutoFinishState('ready', remaining);
+        return true;
+    }
+
+    private tryStartAutoFinish() {
+        if (this.isReadyForAutoFinish()) {
+            //一波带走
+            this.startAutoFinish();
+        }
+    }
+
+    private startAutoFinish() {
+        this.autoFinishing = true;
+        this.autoFinishIdleTicks = 0;
+        this.autoFinishLastRemovedCount = this.tiles.filter((t) => t.removed).length;
+        this.clearIdleTips();
+        // 屏蔽手点:被自动接管期间玩家点牌无效(自动流程直接调 moveTileToTarget,不走触摸)
+        this.setBoardTileTouchEnabled(false);
+        this.scheduleAutoFinishStep(0);
+    }
+
+    private scheduleAutoFinishStep(delay = GameCtrl.AUTO_FINISH_STEP) {
+        if (!this.autoFinishing || this.gameState !== 'playing') return;
+        this.unschedule(this.autoFinishStep);
+        this.scheduleOnce(this.autoFinishStep, delay);
+    }
+
+    private stopAutoFinish(restoreTouch: boolean) {
+        if (!this.autoFinishing) return;
+        this.autoFinishing = false;
+        this.unschedule(this.autoFinishStep);
+        if (restoreTouch && this.gameState === 'playing') this.setBoardTileTouchEnabled(true);
+    }
+
+    // 每拍挑一张"能匹配当前目标槽"的在场牌飞入。只走目标槽、绝不入底部存牌槽,
+    // 因此永不触发"槽位满"失败。匹配不到(目标槽刷新等瞬态)就空转等 collectStoredTargets 级联推进。
+    private autoFinishStep = () => {
+        const logAutoFinishStep = (reason: string, remaining: TileRecord[] = []) => {
+            const candidateStates = remaining.map((t) => {
+                const blocker = this.findBlockerTile(t);
+                const ironLock = this.getIronLock(t);
+                const chainLink = this.getActiveChainLink(t);
+                const boxIndex = this.targetBoxes.findIndex((b) =>
+                    b.unlocked
+                    && !b.refreshing
+                    && !b.movingIn
+                    && b.type === t.type
+                    && b.progress + b.pending < b.required
+                );
+                return {
+                    uid: t.uid,
+                    type: t.type,
+                    layer: t.layer,
+                    row: t.row,
+                    col: t.col,
+                    blocked: !!blocker,
+                    blocker: blocker ? {
+                        uid: blocker.uid,
+                        type: blocker.type,
+                        layer: blocker.layer,
+                        row: blocker.row,
+                        col: blocker.col,
+                    } : null,
+                    ironLocked: !!ironLock && (ironLock.locked || ironLock.unlocking),
+                    ironUnlocking: !!ironLock?.unlocking,
+                    chainId: chainLink?.id || null,
+                    matchingBoxIndex: boxIndex,
+                };
+            });
+            // console.log('[AutoFinish] step', {
+            //     reason,
+            //     level: this.nowLevel,
+            //     gameState: this.gameState,
+            //     autoFinishing: this.autoFinishing,
+            //     idleTicks: this.autoFinishIdleTicks,
+            //     removedCount: this.tiles.filter((t) => t.removed).length,
+            //     lastRemovedCount: this.autoFinishLastRemovedCount,
+            //     remainingCount: remaining.length,
+            //     remainingLayers: Array.from(new Set(remaining.map((t) => t.layer))),
+            //     flyLayerBusy: !!(this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)),
+            //     resolvingMatch: this.resolvingMatch,
+            //     targetBoxes: this.targetBoxes.map((b, index) => ({
+            //         index,
+            //         type: b.type,
+            //         progress: b.progress,
+            //         pending: b.pending,
+            //         required: b.required,
+            //         unlocked: b.unlocked,
+            //         refreshing: b.refreshing,
+            //         movingIn: b.movingIn,
+            //         movedOut: b.movedOut,
+            //     })),
+            //     candidateStates,
+            // });
+        };
+
+        if (this.gameState !== 'playing' || !this.autoFinishing) {
+            logAutoFinishStep('stop-state-not-ready');
+            this.autoFinishing = false;
+            return;
+        }
+
+        // 看门狗:只要有牌被消除就算有进度,清零空转计数;长时间无进度则放弃接管(理论上不会发生)
+        const removedCount = this.tiles.filter((t) => t.removed).length;
+        if (removedCount !== this.autoFinishLastRemovedCount) {
+            this.autoFinishLastRemovedCount = removedCount;
+            this.autoFinishIdleTicks = 0;
+            console.log('[AutoFinish] step progress', {
+                level: this.nowLevel,
+                removedCount,
+                idleTicks: this.autoFinishIdleTicks,
+            });
+        }
+
+        // 棋盘已空:剩下的(在飞 / 底部槽 / 挂起牌)交给既有 win 级联收尾,不再主动点牌
+        const remaining = this.tiles.filter((t) => !t.removed && this.isBoardTileOnBoard(t));
+        if (remaining.length === 0) {
+            logAutoFinishStep('board-empty', remaining);
+            this.checkEndState();
+            this.scheduleAutoFinishStep();
+            return;
+        }
+
+        logAutoFinishStep('tick', remaining);
+
+        let pickedTile: TileRecord | null = null;
+        let pickedBox: TargetBox | null = null;
+        for (const tile of remaining) {
+            if (this.isTileBlocked(tile) || this.isIronLockedTile(tile) || this.getActiveChainLink(tile)) continue;
+            const box = this.findMatchingTargetBox(tile.type);
+            if (box) {
+                pickedTile = tile;
+                pickedBox = box;
+                break;
+            }
+        }
+
+        if (pickedTile && pickedBox) {
+            this.autoFinishIdleTicks = 0;
+            // console.log('[AutoFinish] step pick', {
+            //     tile: {
+            //         uid: pickedTile.uid,
+            //         type: pickedTile.type,
+            //         layer: pickedTile.layer,
+            //         row: pickedTile.row,
+            //         col: pickedTile.col,
+            //     },
+            //     boxIndex: this.targetBoxes.indexOf(pickedBox),
+            //     box: {
+            //         type: pickedBox.type,
+            //         progress: pickedBox.progress,
+            //         pending: pickedBox.pending,
+            //         required: pickedBox.required,
+            //         refreshing: pickedBox.refreshing,
+            //         movingIn: pickedBox.movingIn,
+            //     },
+            // });
+            if (pickedTile.item.playTapFeedback) pickedTile.item.playTapFeedback();
+            this.moveTileToTarget(pickedTile, pickedBox);
+        } else if (++this.autoFinishIdleTicks >= GameCtrl.AUTO_FINISH_MAX_IDLE) {
+            // 防御性兜底:长时间推不动就把控制权还给玩家
+            logAutoFinishStep('idle-timeout-stop', remaining);
+            this.stopAutoFinish(true);
+            return;
+        } else {
+            logAutoFinishStep('no-pick-idle', remaining);
+        }
+
+        this.scheduleAutoFinishStep();
+    };
+
     private canStillCompleteTasks(): boolean {
         // 把"已上场目标 + 未来队列"按 type 合并需求量,与棋盘剩余张数对比;
         // 任一 type 不够就死局。box.required 通常为 3,队列每项也是 3。
@@ -1563,6 +1860,8 @@ export class GameCtrl extends Component {
     private winLevel() {
         this.gameState = 'win';
         this.clearIdleTips();
+        this.autoFinishing = false;
+        this.unschedule(this.autoFinishStep);
         // 上报关卡成功事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: Math.ceil(this.elapsedTime) });
         //
@@ -1586,6 +1885,8 @@ export class GameCtrl extends Component {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
         this.clearIdleTips();
+        this.autoFinishing = false;
+        this.unschedule(this.autoFinishStep);
         // 上报关卡失败事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
         window.dnSDK?.track?.('LEVEL_LOSE', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
@@ -2032,6 +2333,9 @@ export class GameCtrl extends Component {
             // assignNewTarget 内部会清理旧的 collectedNodes 与 previewNode，并生成新预览
             const assigned = this.assignNewTarget(box);
 
+            box.refreshing = false;
+            this.tryStartAutoFinish();
+
             if (assigned) {
                 // 有新目标：把槽位从屏幕外带回原位
                 this.startSlotMoveIn(box);
@@ -2041,13 +2345,13 @@ export class GameCtrl extends Component {
                 box.movedOut = true;
             }
 
-            box.refreshing = false;
             this.fillEmptyTargetBoxes();
             this.collectStoredTargets();
             this.updatePlayableStates();
             this.updateHud();
             this.checkEndState();
             this.saveProgressDeferred();
+            this.scheduleAutoFinishStep(0);
         }, Constants.slotAnim.MoveOutWait);
     }
 
@@ -2181,8 +2485,7 @@ export class GameCtrl extends Component {
         const remain = this.tiles.filter((t) => !t.removed).length;
         const failThreshold = Math.max(1, this.slotCapacity - 1);
         const hasTimer = this.config.levelTime > 0;
-        const comboActive = this.comboTimes > 1 && this.lastComboAt > 0 && Date.now() - this.lastComboAt <= 5000;
-
+        const comboActive = this.comboTimes > 1 && this.lastComboAt > 0;
         director.emit(Constants.eventNames.EventHudUpdate, {
             remain,
             total: this.tiles.length,
@@ -2204,7 +2507,7 @@ export class GameCtrl extends Component {
         }
 
         const now = Date.now();
-        this.comboTimes = (now - this.lastComboAt <= 5000) ? this.comboTimes + 1 : 1;
+        this.comboTimes = this.comboTimes > 0 ? this.comboTimes + 1 : 1;
         this.lastComboAt = now;
         // 0.18s 延迟跟槽位 MoveOut 起手对齐:让 combo 口号/进度条出现在"砸完→飞走"那一刻,
         // 而不是飞行落位那一帧。同时 collectStoredTargets 一次让多个 box 完成时,
@@ -2358,7 +2661,7 @@ export class GameCtrl extends Component {
 
     private onBtnUndoClick(event) {
         AudioManager.instance.playClick();
-        if (this.gameState !== 'playing' || this.resolvingMatch) return;
+        if (this.gameState !== 'playing' || this.resolvingMatch || this.autoFinishing) return;
 
         // 次数用完:点击=看广告补充次数(refill only,不撤回、不动 actionHistory)
         if (this.undoCount <= 0) {
@@ -2477,7 +2780,7 @@ export class GameCtrl extends Component {
     }
 
     private onBtnUnlockClick(event) {
-        if (this.gameState !== 'playing') return;
+        if (this.gameState !== 'playing' || this.autoFinishing) return;
         const box = this.targetBoxes.find((i) => !i.unlocked);
         //if (!box) return this.showToast('槽位已满', 0.8);
         if (!box) return LayerManager.instance.showToast('槽位已满');
@@ -2533,7 +2836,7 @@ export class GameCtrl extends Component {
     // }
 
     private onBtnShuffleBoardClick() {
-        if (this.gameState !== 'playing' || this.shuffleAnimating) return;
+        if (this.gameState !== 'playing' || this.shuffleAnimating || this.autoFinishing) return;
 
         // 次数用完:点击=看广告补充次数(refill only,不换牌)
         if (this.switchCount <= 0) {
@@ -2877,7 +3180,7 @@ export class GameCtrl extends Component {
     }
 
     public onBtnSlotUnlockClick(event, data: string) {
-        if (this.gameState !== 'playing') return;
+        if (this.gameState !== 'playing' || this.autoFinishing) return;
         // data "1" -> slot3,"2" -> slot4
         const slotName = data == "1" ? "slot3" : (data == "2" ? "slot4" : "");
         if (!slotName) return;
@@ -2898,7 +3201,7 @@ export class GameCtrl extends Component {
     private isFreePropState: string | null = null;
     public onBtnRandomPropClick(event, data: string) {
         AudioManager.instance.playClick();
-        if (this.gameState !== 'playing') return;
+        if (this.gameState !== 'playing' || this.autoFinishing) return;
         this.isFreePropState = data;
         if (sys.platform === sys.Platform.WECHAT_GAME) {
             wx.shareAppMessage({
