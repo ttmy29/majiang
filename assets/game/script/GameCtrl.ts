@@ -742,8 +742,8 @@ export class GameCtrl extends Component {
     private layoutIronNode(node: Node, tile: TileRecord) {
         const scale = this.getBoardTileScale();
         const pos = this.getOverlayTilePosition(tile);
-        node.setPosition(pos.x, pos.y, 0);
-        node.setScale(scale * 1.6, scale * 1.6, 1);
+        node.setPosition(pos.x - 3, pos.y + 3, 0);
+        node.setScale(scale * 1.3, scale * 1.3, 1);
         node.setRotationFromEuler(0, 0, 0);
     }
 
