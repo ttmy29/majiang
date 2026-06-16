@@ -169,6 +169,7 @@ export class GameCtrl extends Component {
         director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
         director.on(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
         director.on(Constants.eventNames.EventWinNextLevel, this.onEventWinNextLevel, this);
+        director.on(Constants.eventNames.EventClearAllMahjongTiles, this.clearAllMahjongTiles, this);
         // 切后台/关闭浏览器时强制同步一次快照,作为 checkpoint 保存的兜底
         game.on(Game.EVENT_HIDE, this.onAppHide, this);
         this.initSceneRefs();
@@ -236,6 +237,7 @@ export class GameCtrl extends Component {
     protected onDestroy(): void {
         // 防御性注销 — Canvas 是 persist 节点,GameCtrl 实际不会被销毁,
         // 但开发期 HMR / 场景切换会触发,避免重复监听
+        director.off(Constants.eventNames.EventClearAllMahjongTiles, this.clearAllMahjongTiles, this);
         game.off(Game.EVENT_HIDE, this.onAppHide, this);
     }
 
@@ -2617,17 +2619,63 @@ export class GameCtrl extends Component {
         return /^\d+$/.test(name) ? name : '';
     }
 
+    private clearAllMahjongTiles() {
+        if (this.hasStarted) {
+            this.unscheduleAllCallbacks();
+            this.levelRequestSeq++;
+        }
+        this.clearIdleTips();
+        this.autoFinishing = false;
+        this.dealingTiles = false;
+        this.dealOverlayLayoutReady = true;
+        this.resolvingMatch = false;
+        this.shuffleAnimating = false;
+        this.shuffleSeq++;
+        this.comboEmitPending = false;
+        this.targetsInitialized = false;
+        this.snapshotDirty = false;
+        this.snapshotFlushScheduled = false;
+        this.gameState = 'ready';
+
+        for (const tile of this.tiles) {
+            if (tile.node?.isValid) Tween.stopAllByTarget(tile.node);
+        }
+        this.clearBoard();
+        this.tiles = [];
+        this.slots = [];
+        this.discardedTiles = [];
+        this.actionHistory = [];
+    }
+
+    private destroyChildren(parent: Node | null) {
+        if (!parent?.isValid) return;
+        for (const child of parent.children.slice()) {
+            Tween.stopAllByTarget(child);
+            child.removeFromParent();
+            child.destroy();
+        }
+    }
+
+    private destroyNamedChildren(parent: Node | null, prefixes: string[]) {
+        if (!parent?.isValid) return;
+        for (const child of parent.children.slice()) {
+            if (!prefixes.some((prefix) => child.name.startsWith(prefix))) continue;
+            Tween.stopAllByTarget(child);
+            child.removeFromParent();
+            child.destroy();
+        }
+    }
+
     private clearBoard() {
         this.chainLinks = [];
         this.chainByTileUid.clear();
         this.ironLocks = [];
         this.ironByTileUid.clear();
-        if (this.mahjongPnode) this.mahjongPnode.removeAllChildren();
-        if (this.flyLayer?.isValid) this.flyLayer.removeAllChildren();
-        if (this.slotNode) {
-            for (const child of this.slotNode.children.slice()) {
-                if (child.name.startsWith('slotTile_')) child.destroy();
-            }
+        this.destroyChildren(this.mahjongPnode);
+        this.destroyChildren(this.flyLayer);
+        this.destroyNamedChildren(this.slotNode, ['slotTile_']);
+        for (const box of this.targetBoxes) {
+            this.destroyNamedChildren(box.node, ['targetTile_']);
         }
     }
 

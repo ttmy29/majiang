@@ -1,13 +1,30 @@
-import { _decorator, Component, Node, sys, UITransform, Vec3, view } from 'cc';
+import { _decorator, Component, Node, sp, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { ensureLevelJson, resolveLevelLoadOptions, warmupForwardWindow } from './config/LevelJsonLoader';
-import { AudioManager } from './manager/AudioManager';
+import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
 
-// 声明 wx 全局变量避免 TS 报错
 declare const wx: any;
 
 const { ccclass, property } = _decorator;
+
+const UI_FADE_DURATION = 1;
+const UI_FADE_STAGGER = 0;
+const RETURN_UI_FADE_DURATION = 0.25;
+const LOGO_BOUNCE_DURATION = 0.36;
+const LOGO_SETTLE_DURATION = 0.12;
+const RETURN_LOGO_BOUNCE_DURATION = 0.18;
+const RETURN_LOGO_SETTLE_DURATION = 0.06;
+const LOGO_START_SCALE = 0.2;
+const LOGO_OVERSHOOT_SCALE = 1.12;
+const HOME_SKELETON_DESIGN_WIDTH = 1200;
+const HOME_SKELETON_DESIGN_HEIGHT = 2665;
+const START_UI_EXIT_FADE_DURATION = 0.2;
+const HOME_INITIAL_APPEAR_ANIMATION = 'Appear';
+const HOME_RETURN_APPEAR_ANIMATION = 'Appear2';
+const HOME_DISAPPEAR_ANIMATION = 'Disappear';
+const HOME_IDLE_ANIMATION = 'Idle';
+const LEAF_LOOP_ANIMATION = 'Loop';
 
 @ccclass('UIStartLayer')
 export class UIStartLayer extends Component {
@@ -18,51 +35,66 @@ export class UIStartLayer extends Component {
     gameClubButton: Node = null!;
     @property(Node)
     customerServiceButton: Node = null!;
+    @property(Node)
+    UINodeArray: Node[] = [];
+    @property(Node)
+    logoNode: Node = null!;
+    @property(sp.Skeleton)
+    homeSkeleton: sp.Skeleton = null!;
+    @property(sp.Skeleton)
+    leafSkeleton: sp.Skeleton = null!;
 
     private enteringGame = false;
-
-    // 保存微信原生按钮的实例引用，方便后续显示/隐藏/销毁
+    private hasStarted = false;
+    private logoOriginScale: Vec3 | null = null;
+    private logoTargetOpacity = 255;
+    private uiNodeTargetOpacity: Map<Node, number> = new Map();
     private wxGameClubBtn: any = null;
     private wxFeedbackBtn: any = null;
 
     protected onLoad(): void {
-        // Adapt the start screen background to the current viewport.
-        const visibleSize = view.getVisibleSize();
-        const designSize = this.bgNode.getComponent(UITransform).contentSize;
-        const scaleX = visibleSize.width / designSize.width;
-        const scaleY = visibleSize.height / designSize.height;
-        const maxScale = Math.max(scaleX, scaleY);
-        this.bgNode.setScale(new Vec3(maxScale, maxScale, 1));
+        this.fitBackgroundToView();
+        this.captureStartAnimationState();
+        this.hideStartAnimationNodes();
     }
 
     protected onEnable(): void {
         this.enteringGame = false;
         this.refreshWarmupWindow();
 
-        // 界面显示时，展示微信原生按钮
+        if (this.hasStarted) {
+            this.playStartLayerEnterAnimation(HOME_RETURN_APPEAR_ANIMATION, true);
+        }
+
         if (this.wxGameClubBtn) this.wxGameClubBtn.show();
         if (this.wxFeedbackBtn) this.wxFeedbackBtn.show();
     }
 
     protected onDisable(): void {
-        // 界面隐藏时，必须隐藏微信原生按钮，否则会穿透到游戏层
+        this.stopStartAnimation();
+        this.clearHomeSkeletonListener();
+
         if (this.wxGameClubBtn) this.wxGameClubBtn.hide();
         if (this.wxFeedbackBtn) this.wxFeedbackBtn.hide();
     }
 
     protected onDestroy(): void {
-        // 节点销毁时，彻底销毁微信原生按钮
+        this.stopStartAnimation();
+        this.clearHomeSkeletonListener();
+
         if (this.wxGameClubBtn) this.wxGameClubBtn.destroy();
         if (this.wxFeedbackBtn) this.wxFeedbackBtn.destroy();
     }
 
     start() {
+        this.hasStarted = true;
         this.refreshWarmupWindow();
+        this.playStartLayerEnterAnimation(HOME_INITIAL_APPEAR_ANIMATION);
+
         this.scheduleOnce(() => {
             window.dnSDK?.track?.('LOAD_FINISH', {});
         }, 0);
 
-        // 初始化微信相关按钮
         if (sys.platform === sys.Platform.WECHAT_GAME && typeof wx !== 'undefined') {
             this.initWeChatButtons();
         }
@@ -72,7 +104,6 @@ export class UIStartLayer extends Component {
 
     }
 
-    // --- 微信按钮辅助逻辑 ---
     private initWeChatButtons() {
         if (this.gameClubButton) {
             this.wxGameClubBtn = this.createTransparentWeChatBtn(this.gameClubButton, 'gameClub');
@@ -82,9 +113,6 @@ export class UIStartLayer extends Component {
         }
     }
 
-    /**
-     * 将 Cocos 节点坐标转换为微信屏幕坐标，并创建透明覆盖按钮
-     */
     private createTransparentWeChatBtn(targetNode: Node, type: 'gameClub' | 'feedback') {
         const uiTrans = targetNode.getComponent(UITransform);
         if (!uiTrans) {
@@ -92,41 +120,35 @@ export class UIStartLayer extends Component {
             return null;
         }
 
-        // 1. 获取 Cocos 节点在世界坐标系下的位置和尺寸
         const worldPos = uiTrans.convertToWorldSpaceAR(new Vec3(0, 0, 0));
         const width = uiTrans.contentSize.width;
         const height = uiTrans.contentSize.height;
         const anchorX = uiTrans.anchorPoint.x;
         const anchorY = uiTrans.anchorPoint.y;
 
-        // 2. 获取屏幕和视图比例数据
-        const visibleSize = view.getVisibleSize(); // Cocos 视窗分辨率
-        const frameSize = view.getFrameSize();     // 设备实际屏幕物理分辨率
+        const visibleSize = view.getVisibleSize();
+        const frameSize = view.getFrameSize();
         const ratioW = frameSize.width / visibleSize.width;
         const ratioH = frameSize.height / visibleSize.height;
 
-        // 3. 计算微信所需的左上角绝对坐标 (微信坐标系左上角为 0,0)
         const left = (worldPos.x - width * anchorX) * ratioW;
-        // Cocos Y轴从下往上，微信 Y轴从上往下，需要反转
         const top = frameSize.height - (worldPos.y + height * (1 - anchorY)) * ratioH;
         const btnWidth = width * ratioW;
         const btnHeight = height * ratioH;
 
-        // 4. 定义透明按钮样式
         const style = {
             left: left,
             top: top,
             width: btnWidth,
             height: btnHeight,
-            backgroundColor: '#00000000', // 完全透明
+            backgroundColor: '#00000000',
             color: '#00000000',
             textAlign: 'center'
         };
 
-        // 5. 根据类型创建对应的微信原生按钮
         if (type === 'gameClub') {
             return wx.createGameClubButton({
-                type: 'text', // 使用文字类型并设为空，配合透明背景做隐形点击区
+                type: 'text',
                 text: '',
                 style: style
             });
@@ -137,21 +159,38 @@ export class UIStartLayer extends Component {
                 style: style
             });
         }
-    }
-    // ----------------------
 
-    // 点击开始游戏
+        return null;
+    }
+
     async onClickStartButton() {
         AudioManager.instance.playClick();
         if (this.enteringGame) return;
 
         this.enteringGame = true;
         try {
+            const exitAnimation = this.playExitAnimation();
             const level = ProgressManager.loadLevel();
             const opts = resolveLevelLoadOptions(level);
-            const json = await ensureLevelJson(level, opts);
+            let json = null;
+            let loadError: unknown = null;
+
+            try {
+                json = await ensureLevelJson(level, opts);
+            } catch (error) {
+                loadError = error;
+            }
+
+            await exitAnimation;
+
+            if (loadError) {
+                this.playStartLayerEnterAnimation(HOME_RETURN_APPEAR_ANIMATION, true);
+                throw loadError;
+            }
+
             if (!json) {
                 console.warn(`UIStartLayer: no level JSON ready for level ${level}`);
+                this.playStartLayerEnterAnimation(HOME_RETURN_APPEAR_ANIMATION, true);
                 return;
             }
             LayerManager.instance.showGameLayer();
@@ -176,5 +215,272 @@ export class UIStartLayer extends Component {
     private refreshWarmupWindow() {
         const level = ProgressManager.loadLevel();
         void warmupForwardWindow(level, 10);
+    }
+
+    private fitBackgroundToView() {
+        const visibleSize = view.getVisibleSize();
+
+        if (this.bgNode?.isValid) {
+            const bgTransform = this.bgNode.getComponent(UITransform);
+            if (bgTransform) {
+                const designSize = bgTransform.contentSize;
+                const scaleX = visibleSize.width / designSize.width;
+                const scaleY = visibleSize.height / designSize.height;
+                const maxScale = Math.max(scaleX, scaleY);
+                this.bgNode.setScale(new Vec3(maxScale, maxScale, 1));
+            }
+        }
+
+        if (this.homeSkeleton?.node?.isValid) {
+            const scaleX = visibleSize.width / HOME_SKELETON_DESIGN_WIDTH;
+            const scaleY = visibleSize.height / HOME_SKELETON_DESIGN_HEIGHT;
+            const maxScale = Math.max(scaleX, scaleY);
+            this.homeSkeleton.node.setScale(new Vec3(maxScale, maxScale, 1));
+        }
+    }
+
+    private captureStartAnimationState() {
+        if (this.logoNode?.isValid) {
+            this.logoOriginScale = this.logoNode.scale.clone();
+            const logoOpacity = this.logoNode.getComponent(UIOpacity);
+            this.logoTargetOpacity = logoOpacity && logoOpacity.opacity > 0 ? logoOpacity.opacity : 255;
+        }
+
+        this.uiNodeTargetOpacity.clear();
+        for (const node of this.UINodeArray) {
+            if (!node?.isValid) continue;
+
+            const opacity = node.getComponent(UIOpacity);
+            this.uiNodeTargetOpacity.set(node, opacity && opacity.opacity > 0 ? opacity.opacity : 255);
+        }
+    }
+
+    private hideStartAnimationNodes() {
+        if (this.logoNode?.isValid) {
+            this.logoNode.active = false;
+        }
+
+        for (const node of this.UINodeArray) {
+            if (!node?.isValid) continue;
+            node.active = false;
+        }
+    }
+
+    private revealStartAnimationNodes = (fastRestore = false) => {
+        if (this.logoNode?.isValid) {
+            this.logoNode.active = true;
+        }
+
+        for (const node of this.UINodeArray) {
+            if (!node?.isValid) continue;
+            node.active = true;
+        }
+
+        this.playStartAnimation(fastRestore);
+    };
+
+    private playStartLayerEnterAnimation(appearAnimation: string, fastRestore = false) {
+        this.stopStartAnimation();
+        this.clearHomeSkeletonListener();
+        this.hideStartAnimationNodes();
+        this.playHomeAppearAnimation(appearAnimation, () => {
+            this.revealStartAnimationNodes(fastRestore);
+        });
+    }
+
+    private playStartAnimation(fastRestore = false) {
+        this.playUINodeFadeIn(fastRestore);
+        this.playLogoBounceIn(fastRestore);
+    }
+
+    private playExitAnimation(): Promise<void> {
+        this.stopStartAnimation();
+        this.clearHomeSkeletonListener();
+        return Promise.all([
+            this.playStartNodesFadeOut(),
+            this.playHomeDisappearAnimation()
+        ]).then(() => undefined);
+    }
+
+    private playHomeAppearAnimation(appearAnimation: string, onComplete?: () => void) {
+        this.playHomeAppearAudio();
+
+        if (!this.homeSkeleton?.isValid) {
+            this.playLeafLoopAnimation();
+            this.playBackgroundMusic();
+            onComplete?.();
+            return;
+        }
+
+        this.clearHomeSkeletonListener();
+        let completed = false;
+        const finish = () => {
+            if (completed) return;
+            completed = true;
+            this.clearHomeSkeletonListener();
+            this.homeSkeleton.setAnimation(0, HOME_IDLE_ANIMATION, true);
+            this.playLeafLoopAnimation();
+            this.playBackgroundMusic();
+            onComplete?.();
+        };
+
+        this.homeSkeleton.setCompleteListener((trackEntry: sp.spine.TrackEntry) => {
+            const animationName = trackEntry.animation ? trackEntry.animation.name : '';
+            if (animationName !== appearAnimation) return;
+            finish();
+        });
+
+        const trackEntry = this.homeSkeleton.setAnimation(0, appearAnimation, false);
+        if (!trackEntry) {
+            finish();
+        }
+    }
+
+    private playHomeAppearAudio() {
+        AudioManager.instance.pause();
+        AudioManager.instance.playOneShot(AudioClipNames.close_door);
+    }
+
+    private playBackgroundMusic() {
+        AudioManager.instance.play();
+    }
+
+    private playLeafLoopAnimation() {
+        if (!this.leafSkeleton?.isValid) return;
+        this.leafSkeleton.setAnimation(0, LEAF_LOOP_ANIMATION, true);
+    }
+
+    private playHomeDisappearAnimation(): Promise<void> {
+        this.playHomeDisappearAudio();
+
+        if (!this.homeSkeleton?.isValid) {
+            this.playBackgroundMusic();
+            return Promise.resolve();
+        }
+
+        return new Promise<void>((resolve) => {
+            let completed = false;
+            const finish = () => {
+                if (completed) return;
+                completed = true;
+                this.clearHomeSkeletonListener();
+                this.playBackgroundMusic();
+                resolve();
+            };
+
+            this.homeSkeleton.setCompleteListener((trackEntry: sp.spine.TrackEntry) => {
+                const animationName = trackEntry.animation ? trackEntry.animation.name : '';
+                if (animationName !== HOME_DISAPPEAR_ANIMATION) return;
+                finish();
+            });
+
+            const trackEntry = this.homeSkeleton.setAnimation(0, HOME_DISAPPEAR_ANIMATION, false);
+            if (!trackEntry) {
+                finish();
+            }
+        });
+    }
+
+    private playHomeDisappearAudio() {
+        AudioManager.instance.pause();
+        AudioManager.instance.playOneShot(AudioClipNames.open_door);
+    }
+
+    private clearHomeSkeletonListener() {
+        if (!this.homeSkeleton?.isValid) return;
+        this.homeSkeleton.setCompleteListener(null);
+    }
+
+    private playStartNodesFadeOut(): Promise<void> {
+        if (this.logoNode?.isValid) {
+            this.logoNode.active = true;
+            const opacity = this.logoNode.getComponent(UIOpacity) || this.logoNode.addComponent(UIOpacity);
+            Tween.stopAllByTarget(opacity);
+            opacity.opacity = this.logoTargetOpacity;
+            tween(opacity)
+                .to(START_UI_EXIT_FADE_DURATION, { opacity: 0 }, { easing: 'sineIn' })
+                .start();
+        }
+
+        for (const node of this.UINodeArray) {
+            if (!node?.isValid) continue;
+
+            node.active = true;
+            const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+            Tween.stopAllByTarget(opacity);
+            tween(opacity)
+                .to(START_UI_EXIT_FADE_DURATION, { opacity: 0 }, { easing: 'sineIn' })
+                .start();
+        }
+
+        return new Promise<void>((resolve) => {
+            this.scheduleOnce(() => resolve(), START_UI_EXIT_FADE_DURATION);
+        });
+    }
+
+    private playUINodeFadeIn(fastRestore = false) {
+        const duration = fastRestore ? RETURN_UI_FADE_DURATION : UI_FADE_DURATION;
+
+        for (let i = 0; i < this.UINodeArray.length; i++) {
+            const node = this.UINodeArray[i];
+            if (!node?.isValid) continue;
+
+            const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+            const targetOpacity = this.uiNodeTargetOpacity.get(node) ?? 255;
+
+            Tween.stopAllByTarget(opacity);
+            opacity.opacity = 0;
+
+            tween(opacity)
+                .delay(i * UI_FADE_STAGGER)
+                .to(duration, { opacity: targetOpacity }, { easing: 'sineOut' })
+                .start();
+        }
+    }
+
+    private playLogoBounceIn(fastRestore = false) {
+        if (!this.logoNode?.isValid) return;
+
+        if (!this.logoOriginScale) {
+            this.logoOriginScale = this.logoNode.scale.clone();
+        }
+
+        const originScale = this.logoOriginScale;
+        const startScale = new Vec3(originScale.x * LOGO_START_SCALE, originScale.y * LOGO_START_SCALE, originScale.z);
+        const overshootScale = new Vec3(originScale.x * LOGO_OVERSHOOT_SCALE, originScale.y * LOGO_OVERSHOOT_SCALE, originScale.z);
+        const bounceDuration = fastRestore ? RETURN_LOGO_BOUNCE_DURATION : LOGO_BOUNCE_DURATION;
+        const settleDuration = fastRestore ? RETURN_LOGO_SETTLE_DURATION : LOGO_SETTLE_DURATION;
+        const fadeDuration = fastRestore ? RETURN_UI_FADE_DURATION : UI_FADE_DURATION;
+
+        Tween.stopAllByTarget(this.logoNode);
+        this.logoNode.setScale(startScale);
+
+        const opacity = this.logoNode.getComponent(UIOpacity) || this.logoNode.addComponent(UIOpacity);
+        Tween.stopAllByTarget(opacity);
+        opacity.opacity = 0;
+
+        tween(this.logoNode)
+            .to(bounceDuration, { scale: overshootScale }, { easing: 'backOut' })
+            .to(settleDuration, { scale: originScale.clone() }, { easing: 'sineInOut' })
+            .start();
+
+        tween(opacity)
+            .to(fadeDuration, { opacity: this.logoTargetOpacity }, { easing: 'sineOut' })
+            .start();
+    }
+
+    private stopStartAnimation() {
+        if (this.logoNode?.isValid) {
+            Tween.stopAllByTarget(this.logoNode);
+            const logoOpacity = this.logoNode.getComponent(UIOpacity);
+            if (logoOpacity) Tween.stopAllByTarget(logoOpacity);
+        }
+
+        for (const node of this.UINodeArray) {
+            if (!node?.isValid) continue;
+
+            const opacity = node.getComponent(UIOpacity);
+            if (opacity) Tween.stopAllByTarget(opacity);
+        }
     }
 }

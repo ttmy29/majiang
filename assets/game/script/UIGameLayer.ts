@@ -243,6 +243,7 @@ export class UIGameLayer extends Component {
     onDisable() {
         this.registerGlobalEvent(false);
         this.onEventCleanSlotContainers();
+        director.emit(Constants.eventNames.EventClearAllMahjongTiles);
         this.clearComboBoxEffects();
         // 界面隐藏时关闭连击显示并把状态复位,避免下次显示时残留上一局的进度条/口号
         this.resetComboNode();
@@ -649,38 +650,38 @@ export class UIGameLayer extends Component {
         this.hideComboLevelNodes(index);
         const opacity = this.comboLevelOpacities[index] || levelNode.getComponent(UIOpacity) || levelNode.addComponent(UIOpacity);
         this.comboLevelOpacities[index] = opacity;
-        const originPosition = this.comboLevelOriginPositions[index] || levelNode.position.clone();
-        const originScale = this.comboLevelOriginScales[index] || levelNode.scale.clone();
-        const dropStartPosition = new Vec3(originPosition.x, originPosition.y + 24, originPosition.z);
-        const impactPosition = new Vec3(originPosition.x, originPosition.y - 6, originPosition.z);
-        const fadePosition = new Vec3(originPosition.x, originPosition.y - 16, originPosition.z);
-        const startScale = new Vec3(originScale.x * 1.04, originScale.y * 1.04, originScale.z);
-        const impactScale = new Vec3(originScale.x * 1.08, originScale.y * 0.92, originScale.z);
+        // const originPosition = this.comboLevelOriginPositions[index] || levelNode.position.clone();
+        // const originScale = this.comboLevelOriginScales[index] || levelNode.scale.clone();
+        // const dropStartPosition = new Vec3(originPosition.x, originPosition.y + 24, originPosition.z);
+        // const impactPosition = new Vec3(originPosition.x, originPosition.y - 6, originPosition.z);
+        // const fadePosition = new Vec3(originPosition.x, originPosition.y - 16, originPosition.z);
+        // const startScale = new Vec3(originScale.x * 1.04, originScale.y * 1.04, originScale.z);
+        // const impactScale = new Vec3(originScale.x * 1.08, originScale.y * 0.92, originScale.z);
 
         Tween.stopAllByTarget(levelNode);
         Tween.stopAllByTarget(opacity);
         levelNode.active = true;
-        levelNode.setPosition(dropStartPosition);
-        levelNode.setScale(startScale);
+        // levelNode.setPosition(dropStartPosition);
+        // levelNode.setScale(startScale);
         opacity.opacity = 255;
 
-        tween(levelNode)
-            .to(0.1, { position: impactPosition, scale: impactScale }, { easing: 'quadIn' })
-            .to(0.08, { position: originPosition, scale: originScale }, { easing: 'backOut' })
-            .delay(0.35)
-            .to(0.38, { position: fadePosition }, { easing: 'sineIn' })
-            .call(() => {
-                if (!levelNode.isValid) return;
-                levelNode.setPosition(originPosition);
-                levelNode.setScale(originScale);
-                if (opacity.isValid) opacity.opacity = 0;
-                levelNode.active = false;
-            })
-            .start();
-        tween(opacity)
-            .delay(0.44)
-            .to(0.38, { opacity: 0 }, { easing: 'sineIn' })
-            .start();
+        // tween(levelNode)
+        //     .to(0.1, { position: impactPosition, scale: impactScale }, { easing: 'quadIn' })
+        //     .to(0.08, { position: originPosition, scale: originScale }, { easing: 'backOut' })
+        //     .delay(0.35)
+        //     .to(0.38, { position: fadePosition }, { easing: 'sineIn' })
+        //     .call(() => {
+        //         if (!levelNode.isValid) return;
+        //         levelNode.setPosition(originPosition);
+        //         levelNode.setScale(originScale);
+        //         if (opacity.isValid) opacity.opacity = 0;
+        //         levelNode.active = false;
+        //     })
+        //     .start();
+        // tween(opacity)
+        //     .delay(0.44)
+        //     .to(0.38, { opacity: 0 }, { easing: 'sineIn' })
+        //     .start();
     }
 
     private showComboBoxEffects(levelIndex: number) {

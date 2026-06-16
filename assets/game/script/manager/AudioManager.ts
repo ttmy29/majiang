@@ -23,7 +23,8 @@ export enum AudioClipNames {
     combo_level5 = 'taiqiangle5', //5_真厉害
     combo_level6 = 'yingmale6', // 6_太棒了
     combo_level7 = 'wudile7', //7_绝绝子
-
+    open_door = 'open_door', //打开门
+    close_door = 'close_door', //关闭门
 }
 
 export type AudioClipName = AudioClipNames | string | number;
@@ -65,7 +66,7 @@ export class AudioManager {
         this.effectSources = this.audioSources.length > 1 ? this.audioSources.slice(1) : this.audioSources;
         this.effectSourceIndex = 0;
 
-        this.play();
+        //this.play();
     }
 
     setMusicEnabled(enabled: boolean) {

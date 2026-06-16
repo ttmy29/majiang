@@ -24,6 +24,8 @@ const Constants = {
         EventResetSlots: 'ResetSlots',
         // 清理槽位容器内的脏子节点(上一局残留的 slotTile_* 等),并把 slot3/slot4 的 box_2/lock 重新点亮
         EventCleanSlotContainers: 'CleanSlotContainers',
+        // UI 隐藏时清理所有麻将牌节点和运行态引用
+        EventClearAllMahjongTiles: 'ClearAllMahjongTiles',
         // 撤回按钮置灰状态:true=灰(无可撤回),false=彩(有可撤回)
         EventSetUndoButtonStatus: 'SetUndoButtonStatus',
         // 道具剩余次数:GameCtrl -> UI,payload {undo, switch},>0 显示 di+countLabel,==0 显示 ad1
