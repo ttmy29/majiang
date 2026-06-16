@@ -103,7 +103,7 @@ export class UIGameLayer extends Component {
     // 每 3 次连击解锁下一级口号,与 COMBO_AUDIOS 长度对应,超过 7 后不再升级
     private static readonly COMBO_STEP = 3;
     // 连击展示进度条时长（秒）。计数由 GameCtrl 持续累加,这里仅控制 UI 隐藏节奏。
-    private static readonly COMBO_DURATION = 5;
+    private static readonly COMBO_DURATION = 2;
     private static readonly COMBO_AUDIOS: { audio: AudioClipNames }[] = [
         { audio: AudioClipNames.combo_level1 },
         { audio: AudioClipNames.combo_level2 },
@@ -124,6 +124,7 @@ export class UIGameLayer extends Component {
     private boxEffectLoading = false;
     private pendingBoxEffectLevel = -1;
     private activeBoxEffectLevel = -1;
+    private comboBoxEffectSyncScheduled = false;
     private comboBoxEffects: (Node | null)[] = [];
     private targetSlotUnlocked: boolean[] = [];
     private shuffleEffectNode: Node | null = null;
@@ -560,6 +561,22 @@ export class UIGameLayer extends Component {
     // 函数,Tween.stopAllByTarget 会打断旧动画并重新开始,countLabel 同步刷新
     onEventComboUpdate(comboTimes: number) {
         if (!this.comboNode || !this.comboBarSprite) return;
+
+        // GameCtrl 从 0 开始新一轮 combo 时,已播放过的口号等级要从头来过,
+        // 旧的 comboLabel 文本也要先收掉
+        if (comboTimes <= 1) {
+            this.resetComboNode();
+            this.comboAudioLevel = 0;
+            this.hideComboLevelNodes();
+            return;
+        }
+
+        // 每 COMBO_STEP 次连击解锁下一级口号:第 3/6/9/... 次时按顺序播一个
+        const targetLevel = Math.floor(comboTimes / UIGameLayer.COMBO_STEP);
+        const maxLevel = UIGameLayer.COMBO_AUDIOS.length;
+        const shouldPlayComboLevel = targetLevel > this.comboAudioLevel && targetLevel <= maxLevel;
+        if (!shouldPlayComboLevel) return;
+
         const seq = ++this.comboRefreshSeq;
         const originScale = this.comboNodeOriginScale.clone();
         const popStartScale = new Vec3(originScale.x * 0.78, originScale.y * 0.78, originScale.z);
@@ -567,23 +584,10 @@ export class UIGameLayer extends Component {
 
         Tween.stopAllByTarget(this.comboNode);
         Tween.stopAllByTarget(this.comboBarSprite);
-
+        this.hideComboLevelNodes();
         this.comboNode.active = true;
         this.comboNode.setScale(popStartScale);
         if (this.comboCountLabel) this.comboCountLabel.string = `${comboTimes}`;
-
-        // GameCtrl 从 0 开始新一轮 combo 时,已播放过的口号等级要从头来过,
-        // 旧的 comboLabel 文本也要先收掉
-        if (comboTimes <= 1) {
-            this.comboAudioLevel = 0;
-            this.hideComboLevelNodes();
-        }
-
-        // 每 COMBO_STEP 次连击解锁下一级口号:第 3/6/9/... 次时按顺序播一个
-        const targetLevel = Math.floor(comboTimes / UIGameLayer.COMBO_STEP);
-        const maxLevel = UIGameLayer.COMBO_AUDIOS.length;
-        const shouldPlayComboLevel = targetLevel > this.comboAudioLevel && targetLevel <= maxLevel;
-        if (shouldPlayComboLevel) this.hideComboLevelNodes();
 
         this.comboBarSprite.fillRange = 1;
         tween(this.comboNode)
@@ -689,11 +693,12 @@ export class UIGameLayer extends Component {
         }
 
         for (let slotID = 1; slotID <= 4; slotID++) {
-            this.showComboBoxEffectForSlot(slotID, levelIndex);
+            this.showComboBoxEffectForSlot(slotID, levelIndex, false);
         }
+        this.requestSyncComboBoxEffects();
     }
 
-    private showComboBoxEffectForSlot(slotID: number, levelIndex: number) {
+    private showComboBoxEffectForSlot(slotID: number, levelIndex: number, syncAfterShow: boolean = true) {
         const slot = this.slotNodeArr[slotID];
         if (!slot?.isValid) return;
         if (!this.targetSlotUnlocked[slotID]) {
@@ -724,7 +729,28 @@ export class UIGameLayer extends Component {
         effectNode.setSiblingIndex(UIGameLayer.COMBO_BOX_EFFECT_SIBLING_INDEX);
         const effect = effectNode.getComponent(boxEffect);
         if (effect) effect.setEffectLevel(levelIndex);
+        if (syncAfterShow) this.requestSyncComboBoxEffects();
     }
+
+    private requestSyncComboBoxEffects() {
+        if (this.comboBoxEffectSyncScheduled) return;
+        this.comboBoxEffectSyncScheduled = true;
+        this.scheduleOnce(this.syncComboBoxEffects, 0);
+    }
+
+    private syncComboBoxEffects = () => {
+        this.comboBoxEffectSyncScheduled = false;
+        if (this.activeBoxEffectLevel < 0) return;
+
+        for (let slotID = 1; slotID <= 4; slotID++) {
+            if (!this.targetSlotUnlocked[slotID]) continue;
+            const effectNode = this.comboBoxEffects[slotID];
+            if (!effectNode?.isValid || !effectNode.activeInHierarchy) continue;
+            effectNode.setSiblingIndex(UIGameLayer.COMBO_BOX_EFFECT_SIBLING_INDEX);
+            const effect = effectNode.getComponent(boxEffect);
+            if (effect) effect.setEffectLevel(this.activeBoxEffectLevel);
+        }
+    };
 
     private loadBoxEffectPrefab() {
         if (this.boxEffectPrefab || this.boxEffectLoading) return;
@@ -772,6 +798,8 @@ export class UIGameLayer extends Component {
     private clearComboBoxEffects() {
         this.pendingBoxEffectLevel = -1;
         this.activeBoxEffectLevel = -1;
+        this.comboBoxEffectSyncScheduled = false;
+        this.unschedule(this.syncComboBoxEffects);
         for (let slotID = 1; slotID <= 4; slotID++) {
             this.clearComboBoxEffect(slotID);
         }
