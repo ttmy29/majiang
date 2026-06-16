@@ -1,4 +1,4 @@
-import { _decorator, Component, EventTouch, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Component, EventTouch, MotionStreak, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
@@ -13,6 +13,8 @@ export class MahjongItem extends Component {
     shadowNode: Node = null!;
     @property(Node)
     maskNode: Node = null!;
+    @property(MotionStreak)
+    streak: MotionStreak = null!;
     item_id = '';
     row = 0;
     col = 0;
@@ -597,11 +599,27 @@ export class MahjongItem extends Component {
         MahjongItem.bringOverlayNodesToTop(parent);
     }
 
+    private getMotionStreak(): MotionStreak | null {
+        if (this.streak?.isValid) return this.streak;
+
+        const streak = this.node.getChildByName('motionStreak')?.getComponent(MotionStreak) || null;
+        if (streak) this.streak = streak;
+        return streak;
+    }
+
+    setMotionStreakEnabled(enabled: boolean) {
+        const streak = this.getMotionStreak();
+        if (!streak) return;
+        streak.reset();
+        streak.enabled = enabled;
+    }
+
     // 禁用触摸方法
     disableTileTouch() {
         this.node.off(Node.EventType.TOUCH_START, this.onTouchstart, this);
         this.node.off(Node.EventType.TOUCH_END, this.onTouchend, this);
         this.node.off(Node.EventType.TOUCH_CANCEL, this.onTouchcancel, this);
+        this.setMotionStreakEnabled(false);
     }
 
     // 重新启用触摸,撤回让牌从槽飞回棋盘时调;先 off 一次保证不会重复绑定
@@ -612,5 +630,6 @@ export class MahjongItem extends Component {
         this.node.on(Node.EventType.TOUCH_START, this.onTouchstart, this);
         this.node.on(Node.EventType.TOUCH_END, this.onTouchend, this);
         this.node.on(Node.EventType.TOUCH_CANCEL, this.onTouchcancel, this);
+        this.setMotionStreakEnabled(true);
     }
 }

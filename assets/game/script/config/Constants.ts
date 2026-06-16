@@ -15,6 +15,7 @@ const Constants = {
         EventShowToast: 'ShowToast',
         // 连击 label
         EventComboUpdate: 'ComboUpdate',
+        EventClearComboBoxEffects: 'ClearComboBoxEffects',
         // 渲染单个目标槽（预览图、锁/提示子节点）
         EventRenderSlot: 'RenderSlot',
         // 清理单个目标槽（销毁预览 + 已收集到槽里的牌）

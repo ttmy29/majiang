@@ -118,771 +118,771 @@ export class ProgressManager {
 
 
 
-        return {
-            "version": 1,
-            "level": 5,
-            "taskQueue": [
-                "4001",
-                "3001",
-                "5001",
-                "2001",
-                "4005",
-                "4006",
-                "2008"
-            ],
-            "tiles": [
-                {
-                    "layer": 0,
-                    "row": 14,
-                    "col": 2,
-                    "type": "2008",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 14,
-                    "col": 4,
-                    "type": "3001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 14,
-                    "col": 6,
-                    "type": "4001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 14,
-                    "col": 8,
-                    "type": "3001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 12,
-                    "col": 0,
-                    "type": "2001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 12,
-                    "col": 10,
-                    "type": "4006",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 10,
-                    "col": 0,
-                    "type": "5001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 10,
-                    "col": 10,
-                    "type": "5003",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 8,
-                    "col": 2,
-                    "type": "5001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 8,
-                    "col": 4,
-                    "type": "2003",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 8,
-                    "col": 6,
-                    "type": "4005",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 8,
-                    "col": 8,
-                    "type": "2008",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 6,
-                    "col": 2,
-                    "type": "2001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 6,
-                    "col": 4,
-                    "type": "4005",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 6,
-                    "col": 6,
-                    "type": "4001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 6,
-                    "col": 8,
-                    "type": "3004",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 4,
-                    "col": 0,
-                    "type": "1002",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 4,
-                    "col": 10,
-                    "type": "4006",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 2,
-                    "col": 0,
-                    "type": "2001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 2,
-                    "col": 10,
-                    "type": "5003",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 0,
-                    "col": 2,
-                    "type": "1002",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 0,
-                    "col": 4,
-                    "type": "2008",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 0,
-                    "col": 6,
-                    "type": "3001",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 0,
-                    "row": 0,
-                    "col": 8,
-                    "type": "4005",
-                    "collected": false,
-                    "removed": false,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 13,
-                    "col": 1,
-                    "type": "4006",
-                    "collected": true,
-                    "removed": false,
-                    "location": "slot"
-                },
-                {
-                    "layer": 1,
-                    "row": 13,
-                    "col": 3,
-                    "type": "4007",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 13,
-                    "col": 5,
-                    "type": "4001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 13,
-                    "col": 7,
-                    "type": "3001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 13,
-                    "col": 9,
-                    "type": "2008",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 11,
-                    "col": 1,
-                    "type": "4005",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 11,
-                    "col": 9,
-                    "type": "4001",
-                    "collected": true,
-                    "removed": false,
-                    "location": "slot"
-                },
-                {
-                    "layer": 1,
-                    "row": 9,
-                    "col": 1,
-                    "type": "4001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 9,
-                    "col": 9,
-                    "type": "2003",
-                    "collected": true,
-                    "removed": true,
-                    "location": "target"
-                },
-                {
-                    "layer": 1,
-                    "row": 7,
-                    "col": 2,
-                    "type": "5001",
-                    "collected": true,
-                    "removed": false,
-                    "location": "slot"
-                },
-                {
-                    "layer": 1,
-                    "row": 7,
-                    "col": 4,
-                    "type": "4006",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 7,
-                    "col": 6,
-                    "type": "2001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 7,
-                    "col": 8,
-                    "type": "2003",
-                    "collected": true,
-                    "removed": true,
-                    "location": "target"
-                },
-                {
-                    "layer": 1,
-                    "row": 5,
-                    "col": 1,
-                    "type": "1001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 5,
-                    "col": 9,
-                    "type": "3004",
-                    "collected": true,
-                    "removed": true,
-                    "location": "target"
-                },
-                {
-                    "layer": 1,
-                    "row": 3,
-                    "col": 1,
-                    "type": "1002",
-                    "collected": true,
-                    "removed": true,
-                    "location": "target"
-                },
-                {
-                    "layer": 1,
-                    "row": 3,
-                    "col": 9,
-                    "type": "4005",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 1,
-                    "col": 1,
-                    "type": "3001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 1,
-                    "col": 3,
-                    "type": "4006",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 1,
-                    "col": 5,
-                    "type": "2001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 1,
-                    "col": 7,
-                    "type": "1002",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 1,
-                    "row": 1,
-                    "col": 9,
-                    "type": "3004",
-                    "collected": true,
-                    "removed": true,
-                    "location": "target"
-                },
-                {
-                    "layer": 2,
-                    "row": 13,
-                    "col": 2,
-                    "type": "1001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 13,
-                    "col": 4,
-                    "type": "6001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 13,
-                    "col": 6,
-                    "type": "2003",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 13,
-                    "col": 8,
-                    "type": "3004",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 12,
-                    "col": 0,
-                    "type": "1001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 12,
-                    "col": 10,
-                    "type": "2003",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 10,
-                    "col": 0,
-                    "type": "5003",
-                    "collected": true,
-                    "removed": true,
-                    "location": "target"
-                },
-                {
-                    "layer": 2,
-                    "row": 10,
-                    "col": 10,
-                    "type": "4005",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 9,
-                    "col": 2,
-                    "type": "1002",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 9,
-                    "col": 8,
-                    "type": "1001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 7,
-                    "col": 2,
-                    "type": "2008",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 7,
-                    "col": 4,
-                    "type": "2008",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 7,
-                    "col": 6,
-                    "type": "1002",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 7,
-                    "col": 8,
-                    "type": "3004",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 5,
-                    "col": 2,
-                    "type": "3004",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 5,
-                    "col": 8,
-                    "type": "6001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 4,
-                    "col": 0,
-                    "type": "2003",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 4,
-                    "col": 10,
-                    "type": "4001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 2,
-                    "col": 0,
-                    "type": "2001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 2,
-                    "col": 10,
-                    "type": "4007",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 1,
-                    "col": 2,
-                    "type": "3001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 1,
-                    "col": 4,
-                    "type": "4006",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 1,
-                    "col": 6,
-                    "type": "1001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 2,
-                    "row": 1,
-                    "col": 8,
-                    "type": "4007",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 3,
-                    "row": 7,
-                    "col": 4,
-                    "type": "1001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                },
-                {
-                    "layer": 3,
-                    "row": 7,
-                    "col": 6,
-                    "type": "6001",
-                    "collected": true,
-                    "removed": true,
-                    "location": "board"
-                }
-            ],
-            "slotKeys": [
-                {
-                    "layer": 1,
-                    "row": 7,
-                    "col": 2
-                },
-                {
-                    "layer": 1,
-                    "row": 13,
-                    "col": 1
-                },
-                {
-                    "layer": 1,
-                    "row": 11,
-                    "col": 9
-                }
-            ],
-            "discardedKeys": [],
-            "actionHistoryKeys": [
-                {
-                    "layer": 1,
-                    "row": 7,
-                    "col": 2
-                },
-                {
-                    "layer": 1,
-                    "row": 13,
-                    "col": 1
-                },
-                {
-                    "layer": 1,
-                    "row": 11,
-                    "col": 9
-                }
-            ],
-            "ironLockedKeys": [],
-            "boxes": [
-                {
-                    "type": "2003",
-                    "progress": 2,
-                    "unlocked": true,
-                    "required": 3,
-                    "tileKeys": [
-                        {
-                            "layer": 1,
-                            "row": 7,
-                            "col": 8
-                        },
-                        {
-                            "layer": 1,
-                            "row": 9,
-                            "col": 9
-                        }
-                    ]
-                },
-                {
-                    "type": "3004",
-                    "progress": 2,
-                    "unlocked": true,
-                    "required": 3,
-                    "tileKeys": [
-                        {
-                            "layer": 1,
-                            "row": 5,
-                            "col": 9
-                        },
-                        {
-                            "layer": 1,
-                            "row": 1,
-                            "col": 9
-                        }
-                    ]
-                },
-                {
-                    "type": "1002",
-                    "progress": 1,
-                    "unlocked": true,
-                    "required": 3,
-                    "tileKeys": [
-                        {
-                            "layer": 1,
-                            "row": 3,
-                            "col": 1
-                        }
-                    ]
-                },
-                {
-                    "type": "5003",
-                    "progress": 1,
-                    "unlocked": true,
-                    "required": 3,
-                    "tileKeys": [
-                        {
-                            "layer": 2,
-                            "row": 10,
-                            "col": 0
-                        }
-                    ]
-                }
-            ],
-            "remainTime": 300,
-            "elapsedTime": 39.82610000000095
-        }
+        // return {
+        //     "version": 1,
+        //     "level": 5,
+        //     "taskQueue": [
+        //         "4001",
+        //         "3001",
+        //         "5001",
+        //         "2001",
+        //         "4005",
+        //         "4006",
+        //         "2008"
+        //     ],
+        //     "tiles": [
+        //         {
+        //             "layer": 0,
+        //             "row": 14,
+        //             "col": 2,
+        //             "type": "2008",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 14,
+        //             "col": 4,
+        //             "type": "3001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 14,
+        //             "col": 6,
+        //             "type": "4001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 14,
+        //             "col": 8,
+        //             "type": "3001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 12,
+        //             "col": 0,
+        //             "type": "2001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 12,
+        //             "col": 10,
+        //             "type": "4006",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 10,
+        //             "col": 0,
+        //             "type": "5001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 10,
+        //             "col": 10,
+        //             "type": "5003",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 8,
+        //             "col": 2,
+        //             "type": "5001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 8,
+        //             "col": 4,
+        //             "type": "2003",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 8,
+        //             "col": 6,
+        //             "type": "4005",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 8,
+        //             "col": 8,
+        //             "type": "2008",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 6,
+        //             "col": 2,
+        //             "type": "2001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 6,
+        //             "col": 4,
+        //             "type": "4005",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 6,
+        //             "col": 6,
+        //             "type": "4001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 6,
+        //             "col": 8,
+        //             "type": "3004",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 4,
+        //             "col": 0,
+        //             "type": "1002",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 4,
+        //             "col": 10,
+        //             "type": "4006",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 2,
+        //             "col": 0,
+        //             "type": "2001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 2,
+        //             "col": 10,
+        //             "type": "5003",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 0,
+        //             "col": 2,
+        //             "type": "1002",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 0,
+        //             "col": 4,
+        //             "type": "2008",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 0,
+        //             "col": 6,
+        //             "type": "3001",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 0,
+        //             "row": 0,
+        //             "col": 8,
+        //             "type": "4005",
+        //             "collected": false,
+        //             "removed": false,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 13,
+        //             "col": 1,
+        //             "type": "4006",
+        //             "collected": true,
+        //             "removed": false,
+        //             "location": "slot"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 13,
+        //             "col": 3,
+        //             "type": "4007",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 13,
+        //             "col": 5,
+        //             "type": "4001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 13,
+        //             "col": 7,
+        //             "type": "3001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 13,
+        //             "col": 9,
+        //             "type": "2008",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 11,
+        //             "col": 1,
+        //             "type": "4005",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 11,
+        //             "col": 9,
+        //             "type": "4001",
+        //             "collected": true,
+        //             "removed": false,
+        //             "location": "slot"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 9,
+        //             "col": 1,
+        //             "type": "4001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 9,
+        //             "col": 9,
+        //             "type": "2003",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "target"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 7,
+        //             "col": 2,
+        //             "type": "5001",
+        //             "collected": true,
+        //             "removed": false,
+        //             "location": "slot"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 7,
+        //             "col": 4,
+        //             "type": "4006",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 7,
+        //             "col": 6,
+        //             "type": "2001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 7,
+        //             "col": 8,
+        //             "type": "2003",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "target"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 5,
+        //             "col": 1,
+        //             "type": "1001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 5,
+        //             "col": 9,
+        //             "type": "3004",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "target"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 3,
+        //             "col": 1,
+        //             "type": "1002",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "target"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 3,
+        //             "col": 9,
+        //             "type": "4005",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 1,
+        //             "col": 1,
+        //             "type": "3001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 1,
+        //             "col": 3,
+        //             "type": "4006",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 1,
+        //             "col": 5,
+        //             "type": "2001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 1,
+        //             "col": 7,
+        //             "type": "1002",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 1,
+        //             "col": 9,
+        //             "type": "3004",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "target"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 13,
+        //             "col": 2,
+        //             "type": "1001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 13,
+        //             "col": 4,
+        //             "type": "6001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 13,
+        //             "col": 6,
+        //             "type": "2003",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 13,
+        //             "col": 8,
+        //             "type": "3004",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 12,
+        //             "col": 0,
+        //             "type": "1001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 12,
+        //             "col": 10,
+        //             "type": "2003",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 10,
+        //             "col": 0,
+        //             "type": "5003",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "target"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 10,
+        //             "col": 10,
+        //             "type": "4005",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 9,
+        //             "col": 2,
+        //             "type": "1002",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 9,
+        //             "col": 8,
+        //             "type": "1001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 7,
+        //             "col": 2,
+        //             "type": "2008",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 7,
+        //             "col": 4,
+        //             "type": "2008",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 7,
+        //             "col": 6,
+        //             "type": "1002",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 7,
+        //             "col": 8,
+        //             "type": "3004",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 5,
+        //             "col": 2,
+        //             "type": "3004",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 5,
+        //             "col": 8,
+        //             "type": "6001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 4,
+        //             "col": 0,
+        //             "type": "2003",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 4,
+        //             "col": 10,
+        //             "type": "4001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 2,
+        //             "col": 0,
+        //             "type": "2001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 2,
+        //             "col": 10,
+        //             "type": "4007",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 1,
+        //             "col": 2,
+        //             "type": "3001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 1,
+        //             "col": 4,
+        //             "type": "4006",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 1,
+        //             "col": 6,
+        //             "type": "1001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 2,
+        //             "row": 1,
+        //             "col": 8,
+        //             "type": "4007",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 3,
+        //             "row": 7,
+        //             "col": 4,
+        //             "type": "1001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         },
+        //         {
+        //             "layer": 3,
+        //             "row": 7,
+        //             "col": 6,
+        //             "type": "6001",
+        //             "collected": true,
+        //             "removed": true,
+        //             "location": "board"
+        //         }
+        //     ],
+        //     "slotKeys": [
+        //         {
+        //             "layer": 1,
+        //             "row": 7,
+        //             "col": 2
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 13,
+        //             "col": 1
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 11,
+        //             "col": 9
+        //         }
+        //     ],
+        //     "discardedKeys": [],
+        //     "actionHistoryKeys": [
+        //         {
+        //             "layer": 1,
+        //             "row": 7,
+        //             "col": 2
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 13,
+        //             "col": 1
+        //         },
+        //         {
+        //             "layer": 1,
+        //             "row": 11,
+        //             "col": 9
+        //         }
+        //     ],
+        //     "ironLockedKeys": [],
+        //     "boxes": [
+        //         {
+        //             "type": "2003",
+        //             "progress": 2,
+        //             "unlocked": true,
+        //             "required": 3,
+        //             "tileKeys": [
+        //                 {
+        //                     "layer": 1,
+        //                     "row": 7,
+        //                     "col": 8
+        //                 },
+        //                 {
+        //                     "layer": 1,
+        //                     "row": 9,
+        //                     "col": 9
+        //                 }
+        //             ]
+        //         },
+        //         {
+        //             "type": "3004",
+        //             "progress": 2,
+        //             "unlocked": true,
+        //             "required": 3,
+        //             "tileKeys": [
+        //                 {
+        //                     "layer": 1,
+        //                     "row": 5,
+        //                     "col": 9
+        //                 },
+        //                 {
+        //                     "layer": 1,
+        //                     "row": 1,
+        //                     "col": 9
+        //                 }
+        //             ]
+        //         },
+        //         {
+        //             "type": "1002",
+        //             "progress": 1,
+        //             "unlocked": true,
+        //             "required": 3,
+        //             "tileKeys": [
+        //                 {
+        //                     "layer": 1,
+        //                     "row": 3,
+        //                     "col": 1
+        //                 }
+        //             ]
+        //         },
+        //         {
+        //             "type": "5003",
+        //             "progress": 1,
+        //             "unlocked": true,
+        //             "required": 3,
+        //             "tileKeys": [
+        //                 {
+        //                     "layer": 2,
+        //                     "row": 10,
+        //                     "col": 0
+        //                 }
+        //             ]
+        //         }
+        //     ],
+        //     "remainTime": 300,
+        //     "elapsedTime": 39.82610000000095
+        // }
 
         if (!raw) return null;
         try {

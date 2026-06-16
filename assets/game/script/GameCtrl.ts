@@ -1859,6 +1859,7 @@ export class GameCtrl extends Component {
 
     private winLevel() {
         this.gameState = 'win';
+        director.emit(Constants.eventNames.EventClearComboBoxEffects);
         this.clearIdleTips();
         this.autoFinishing = false;
         this.unschedule(this.autoFinishStep);
@@ -1884,6 +1885,7 @@ export class GameCtrl extends Component {
     private failLevel(reason: string) {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
+        director.emit(Constants.eventNames.EventClearComboBoxEffects);
         this.clearIdleTips();
         this.autoFinishing = false;
         this.unschedule(this.autoFinishStep);
@@ -2720,6 +2722,7 @@ export class GameCtrl extends Component {
 
         // 撤回飞回棋盘的飞行声,跟 tween 起手对齐
         AudioManager.instance.playOneShot(AudioClipNames.taskFly);
+        tile.item.setMotionStreakEnabled(true);
 
         const boardScale = this.getBoardTileScale();
         tween(tile.node)

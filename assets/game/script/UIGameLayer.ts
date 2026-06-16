@@ -3,6 +3,7 @@ import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
+import { boxEffect } from './boxEffect';
 const { ccclass, property } = _decorator;
 
 interface HudPayload {
@@ -112,11 +113,19 @@ export class UIGameLayer extends Component {
         { audio: AudioClipNames.combo_level6 },
         { audio: AudioClipNames.combo_level7 },
     ];
+    private static readonly COMBO_BOX_EFFECT_NAME = 'comboBoxEffect';
+    private static readonly COMBO_BOX_EFFECT_SIBLING_INDEX = 0;
 
     // 目标槽预览相关 —— 由 EventGameUiInit 注入 prefab + 资源 map，EventRenderSlot 触发渲染
     private mahjongItem: Prefab = null!;
     private iconFrames: Map<string, SpriteFrame> = new Map();
     private slotPreviews: (Node | null)[] = [];
+    private boxEffectPrefab: Prefab | null = null;
+    private boxEffectLoading = false;
+    private pendingBoxEffectLevel = -1;
+    private activeBoxEffectLevel = -1;
+    private comboBoxEffects: (Node | null)[] = [];
+    private targetSlotUnlocked: boolean[] = [];
     private shuffleEffectNode: Node | null = null;
     private shuffleEffectAnimation: Animation | null = null;
     private shuffleEffectOpacity: UIOpacity | null = null;
@@ -233,6 +242,7 @@ export class UIGameLayer extends Component {
     onDisable() {
         this.registerGlobalEvent(false);
         this.onEventCleanSlotContainers();
+        this.clearComboBoxEffects();
         // 界面隐藏时关闭连击显示并把状态复位,避免下次显示时残留上一局的进度条/口号
         this.resetComboNode();
     }
@@ -265,6 +275,7 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.on(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
             director.on(Constants.eventNames.EventStopTipsAnimator, this.onStopTipsAnimator, this);
+            director.on(Constants.eventNames.EventClearComboBoxEffects, this.clearComboBoxEffects, this);
         } else {
             director.off(Constants.eventNames.EventShowSlotShake, this.onEventShowSlotShake, this);
             director.off(Constants.eventNames.EventShowSlotUnlock, this.onEventShowSlotUnlock, this);
@@ -286,6 +297,7 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventShowShuffleTileEffect, this.onEventShowShuffleTileEffect, this);
             director.off(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
             director.off(Constants.eventNames.EventStopTipsAnimator, this.onStopTipsAnimator, this);
+            director.off(Constants.eventNames.EventClearComboBoxEffects, this.clearComboBoxEffects, this);
         }
     }
 
@@ -297,6 +309,7 @@ export class UIGameLayer extends Component {
     onEventLevelStart(level: number) {
         this.hasLevelUiMode = true;
         this.isGuideLevel = level === 0;
+        this.clearComboBoxEffects();
         this.resetComboNode();
         this.applyLevelUiMode();
         this.setGuideVisible(this.isGuideLevel, level);
@@ -354,6 +367,9 @@ export class UIGameLayer extends Component {
             console.warn(`[UIGameLayer] onEventRenderSlot 找不到 slotID ${payload.slotID}`);
             return;
         }
+        this.targetSlotUnlocked[payload.slotID] = payload.unlocked;
+        if (!payload.unlocked) this.clearComboBoxEffect(payload.slotID);
+        else if (payload.type && this.activeBoxEffectLevel >= 0) this.showComboBoxEffectForSlot(payload.slotID, this.activeBoxEffectLevel);
 
         // 锁 / 提示 / 解锁按钮 等子节点的显隐
         const locked = !payload.unlocked;
@@ -429,6 +445,7 @@ export class UIGameLayer extends Component {
     onEventClearSlot(payload: ClearSlotPayload) {
         const slotNode = this.slotNodeArr[payload.slotID];
         if (!slotNode) return;
+        this.clearComboBoxEffect(payload.slotID);
 
         const preview = this.slotPreviews[payload.slotID];
         if (preview?.isValid) {
@@ -455,6 +472,7 @@ export class UIGameLayer extends Component {
     // 关卡重开时一次性把所有槽位的 transform/box_2 复位到场景初始状态，
     // 把上一局 MoveOut/Shake/Unlock 留下的脏 tween 全部冲掉
     onEventResetSlots(payload: ResetSlotsPayload) {
+        this.clearComboBoxEffects();
         for (let i = 0; i < this.slotNodeArr.length; i++) {
             const slot = this.slotNodeArr[i];
             if (!slot) continue;
@@ -468,6 +486,7 @@ export class UIGameLayer extends Component {
         for (const state of payload.targetBoxStates) {
             const slot = this.slotNodeArr[state.slotID];
             if (!slot) continue;
+            this.targetSlotUnlocked[state.slotID] = state.unlocked;
             const locked = !state.unlocked;
 
             const lockNode = slot.getChildByName('lock');
@@ -500,7 +519,8 @@ export class UIGameLayer extends Component {
     // 同时把 slot3/slot4 的 box_2/lock 重新点亮(被 onEventResetSlots 翻成 unlocked 时关掉的),
     // 让锁着的两个槽位回到"盖着箱子+挂锁"的初始外观,lock 顶到最上层避免被 box_2 盖住
     onEventCleanSlotContainers() {
-        const keep = ['item1', 'item2', 'item3', 'item4', 'box_2', 'lock', "motionStreak"];
+        this.clearComboBoxEffects();
+        const keep = ['item1', 'item2', 'item3', 'item4', 'box_2', 'lock', "motionStreak","box","box4"];
         for (let i = 1; i <= 4; i++) {
             const slot = this.slotNodeArr[i];
             if (!slot) continue;
@@ -618,6 +638,7 @@ export class UIGameLayer extends Component {
         const entry = UIGameLayer.COMBO_AUDIOS[index];
         if (!entry) return;
         AudioManager.instance.playOneShot(entry.audio);
+        this.showComboBoxEffects(index);
         const levelNode = this.comboLevelNodes[index];
         if (!levelNode?.isValid) return;
 
@@ -656,6 +677,104 @@ export class UIGameLayer extends Component {
             .delay(0.44)
             .to(0.38, { opacity: 0 }, { easing: 'sineIn' })
             .start();
+    }
+
+    private showComboBoxEffects(levelIndex: number) {
+        this.activeBoxEffectLevel = levelIndex;
+        const prefab = this.boxEffectPrefab;
+        if (!prefab) {
+            this.pendingBoxEffectLevel = levelIndex;
+            this.loadBoxEffectPrefab();
+            return;
+        }
+
+        for (let slotID = 1; slotID <= 4; slotID++) {
+            this.showComboBoxEffectForSlot(slotID, levelIndex);
+        }
+    }
+
+    private showComboBoxEffectForSlot(slotID: number, levelIndex: number) {
+        const slot = this.slotNodeArr[slotID];
+        if (!slot?.isValid) return;
+        if (!this.targetSlotUnlocked[slotID]) {
+            this.clearComboBoxEffect(slotID);
+            return;
+        }
+
+        const prefab = this.boxEffectPrefab;
+        if (!prefab) {
+            this.pendingBoxEffectLevel = levelIndex;
+            this.loadBoxEffectPrefab();
+            return;
+        }
+
+        let effectNode = this.comboBoxEffects[slotID];
+        if (!effectNode?.isValid) {
+            effectNode = slot.getChildByName(UIGameLayer.COMBO_BOX_EFFECT_NAME);
+            if (!effectNode?.isValid) {
+                effectNode = instantiate(prefab);
+                effectNode.name = UIGameLayer.COMBO_BOX_EFFECT_NAME;
+                slot.addChild(effectNode);
+            }
+            this.comboBoxEffects[slotID] = effectNode;
+        }
+
+        effectNode.active = true;
+        effectNode.setPosition(0, 0, 0);
+        effectNode.setSiblingIndex(UIGameLayer.COMBO_BOX_EFFECT_SIBLING_INDEX);
+        const effect = effectNode.getComponent(boxEffect);
+        if (effect) effect.setEffectLevel(levelIndex);
+    }
+
+    private loadBoxEffectPrefab() {
+        if (this.boxEffectPrefab || this.boxEffectLoading) return;
+        const bundle = assetManager.getBundle(Constants.GameBundleName);
+        if (!bundle) {
+            console.warn('[UIGameLayer] game bundle not found for boxEffect');
+            return;
+        }
+
+        this.boxEffectLoading = true;
+        bundle.load<Prefab>('prefab/boxEffect', Prefab, (err, prefab) => {
+            this.boxEffectLoading = false;
+            if (err || !prefab) {
+                console.warn('[UIGameLayer] load boxEffect prefab failed', err);
+                return;
+            }
+
+            this.boxEffectPrefab = prefab;
+            const pendingLevel = this.pendingBoxEffectLevel;
+            this.pendingBoxEffectLevel = -1;
+            if (pendingLevel >= 0 && this.node.activeInHierarchy) {
+                this.showComboBoxEffects(pendingLevel);
+            }
+        });
+    }
+
+    private clearComboBoxEffect(slotID: number) {
+        const effectNode = this.comboBoxEffects[slotID];
+        if (effectNode?.isValid) {
+            Tween.stopAllByTarget(effectNode);
+            effectNode.removeFromParent();
+            effectNode.destroy();
+        }
+        this.comboBoxEffects[slotID] = null;
+
+        const slot = this.slotNodeArr[slotID];
+        const stray = slot?.getChildByName(UIGameLayer.COMBO_BOX_EFFECT_NAME);
+        if (stray?.isValid) {
+            Tween.stopAllByTarget(stray);
+            stray.removeFromParent();
+            stray.destroy();
+        }
+    }
+
+    private clearComboBoxEffects() {
+        this.pendingBoxEffectLevel = -1;
+        this.activeBoxEffectLevel = -1;
+        for (let slotID = 1; slotID <= 4; slotID++) {
+            this.clearComboBoxEffect(slotID);
+        }
     }
 
     private resetComboNode() {
@@ -909,6 +1028,7 @@ export class UIGameLayer extends Component {
             console.warn(`[UIGameLayer] onEventShowSlotMoveIn 找不到 slotID 为 ${slotID} 的节点`);
             return;
         }
+        if (this.activeBoxEffectLevel >= 0) this.showComboBoxEffectForSlot(slotID, this.activeBoxEffectLevel);
         let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
             motionStreakNode.setPosition(new Vec3(0, 140, 0));
