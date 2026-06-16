@@ -1950,6 +1950,13 @@ export class GameCtrl extends Component {
         }
     }
 
+    private setBoardTileMotionStreakEnabled(enabled: boolean) {
+        for (const tile of this.tiles) {
+            if (!tile.node?.isValid) continue;
+            tile.item.setMotionStreakEnabled(enabled);
+        }
+    }
+
     // 失败弹窗"继续游戏(还有锁着的槽位)":解锁下一个槽位,并在动画结束后给它分配新目标
     private unlockNextSlotForContinue() {
         const box = this.targetBoxes.find((b) => !b.unlocked);
@@ -2109,6 +2116,7 @@ export class GameCtrl extends Component {
         }
         this.dealingTiles = true;
         this.dealOverlayLayoutReady = false;
+        this.setBoardTileMotionStreakEnabled(false);
 
         // ==========================================
         // 按照原版参数配置飞入动画节奏
@@ -2147,6 +2155,9 @@ export class GameCtrl extends Component {
                     position: tile.boardPos,
                     scale: new Vec3(boardScale, boardScale, 1)
                 }, {}) // 横向飞入配合 backOut 会有一种发牌“急停撞击”的干脆手感，如果不喜欢可以改为 'quadOut'
+                .call(() => {
+                    if (tile.node?.isValid) tile.item.setMotionStreakEnabled(true);
+                })
                 .start();
         }
 
