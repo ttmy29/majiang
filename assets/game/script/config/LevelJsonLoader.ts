@@ -1,6 +1,4 @@
 import { assetManager, AssetManager, JsonAsset } from 'cc';
-import { Constants } from './Constants';
-import { ProgressManager } from '../manager/ProgressManager';
 
 export interface LevelJsonPosition {
     z_layer: number;
@@ -11,6 +9,9 @@ export interface LevelJsonPosition {
 
 export interface LevelJson {
     level_no: number;
+    index_config?: {
+        [k: string]: any;
+    };
     positions: LevelJsonPosition[];
     decoded_config: {
         task: number[][];
@@ -23,24 +24,13 @@ export interface LevelJson {
     [k: string]: any;
 }
 
-type LevelVariant = 'default' | 'retry' | 'ad';
-
-interface BundleSegment {
-    start: number;
-    end: number;
-    bundleName: string;
-}
+export type LevelTier = 'base' | 'easy' | 'normal' | 'hard';
 
 interface VariantIndex {
+    bundleName: string;
     dir: string;
     indexedLevels: Set<number>;
     pathByLevel: Map<number, string>;
-}
-
-interface BundleIndexState {
-    segment: BundleSegment;
-    variantIndexes: Record<LevelVariant, VariantIndex>;
-    maxDefaultLevel: number;
     scanned: boolean;
     missing: boolean;
     readyPromise: Promise<void> | null;
@@ -53,28 +43,30 @@ interface VariantBucket {
 
 interface LevelAssetInfo {
     bundleName: string;
+    variant: LevelTier;
     level: number;
     path: string;
 }
 
-const DEFAULT_DIR = 'level_json';
-const RETRY_DIR = 'level_json2';
-const AD_DIR = 'level_json3';
+const BASE_BUNDLE = 'config_levels_base';
+const ADVANCED_BUNDLE = 'config_levels_advanced';
+const BASE_MAX_LEVEL = 11;
 
-const variantDirs: Record<LevelVariant, string> = {
-    default: DEFAULT_DIR,
-    retry: RETRY_DIR,
-    ad: AD_DIR,
+const variantIndexes: Record<LevelTier, VariantIndex> = {
+    base: createVariantIndex(BASE_BUNDLE, ''),
+    easy: createVariantIndex(ADVANCED_BUNDLE, 'level_easy'),
+    normal: createVariantIndex(ADVANCED_BUNDLE, 'level_normal'),
+    hard: createVariantIndex(ADVANCED_BUNDLE, 'level_hard'),
 };
 
-const variantBuckets: Record<LevelVariant, VariantBucket> = {
-    default: createVariantBucket(),
-    retry: createVariantBucket(),
-    ad: createVariantBucket(),
+const variantBuckets: Record<LevelTier, VariantBucket> = {
+    base: createVariantBucket(),
+    easy: createVariantBucket(),
+    normal: createVariantBucket(),
+    hard: createVariantBucket(),
 };
 
 const bundleLoadingPromises = new Map<string, Promise<AssetManager.Bundle | null>>();
-const bundleIndexes = new Map<string, BundleIndexState>();
 const bundleAssetRefState = new Map<string, number>();
 const bundleLoadingCounts = new Map<string, number>();
 const missingBundles = new Set<string>();
@@ -86,63 +78,21 @@ function createVariantBucket(): VariantBucket {
     };
 }
 
-function createVariantIndex(dir: string): VariantIndex {
+function createVariantIndex(bundleName: string, dir: string): VariantIndex {
     return {
+        bundleName,
         dir,
         indexedLevels: new Set(),
         pathByLevel: new Map(),
-    };
-}
-
-function createBundleIndexState(segment: BundleSegment): BundleIndexState {
-    return {
-        segment,
-        variantIndexes: {
-            default: createVariantIndex(DEFAULT_DIR),
-            retry: createVariantIndex(RETRY_DIR),
-            ad: createVariantIndex(AD_DIR),
-        },
-        maxDefaultLevel: -1,
         scanned: false,
         missing: false,
         readyPromise: null,
     };
 }
 
-function getSegmentSize(): number {
-    const configured = Math.floor(Constants.LevelConfigSegmentSize || 0);
-    return configured > 0 ? configured : 50;
-}
-
-function getBundlePrefix(): string {
-    return Constants.LevelConfigBundlePrefix || 'config_levels_';
-}
-
 function normalizeLevel(level: number): number {
     if (!Number.isFinite(level)) return 0;
     return Math.max(0, Math.floor(level));
-}
-
-function formatSegmentBound(value: number): string {
-    const text = String(Math.max(0, value));
-    return text.length >= 3 ? text : (`000${text}`).slice(-3);
-}
-
-function resolveSegmentByStart(start: number): BundleSegment {
-    const safeStart = Math.max(0, start);
-    const end = safeStart + getSegmentSize() - 1;
-    return {
-        start: safeStart,
-        end,
-        bundleName: `${getBundlePrefix()}${formatSegmentBound(safeStart)}_${formatSegmentBound(end)}`,
-    };
-}
-
-function resolveSegmentForLevel(level: number): BundleSegment {
-    const normalizedLevel = normalizeLevel(level);
-    const segmentSize = getSegmentSize();
-    const start = Math.floor(normalizedLevel / segmentSize) * segmentSize;
-    return resolveSegmentByStart(start);
 }
 
 function extractLevel(path: string): number | null {
@@ -152,7 +102,7 @@ function extractLevel(path: string): number | null {
     return Number.isFinite(level) ? level : null;
 }
 
-function getBucket(variant: LevelVariant): VariantBucket {
+function getBucket(variant: LevelTier): VariantBucket {
     return variantBuckets[variant];
 }
 
@@ -183,110 +133,68 @@ function adjustCount(store: Map<string, number>, key: string, delta: number) {
     store.delete(key);
 }
 
-function getIndexedPath(bundleName: string, variant: LevelVariant, level: number): string | null {
-    const state = bundleIndexes.get(bundleName);
-    if (!state) return null;
-    return state.variantIndexes[variant].pathByLevel.get(level) || null;
-}
+function readVariantIndex(bundle: AssetManager.Bundle, state: VariantIndex) {
+    state.indexedLevels.clear();
+    state.pathByLevel.clear();
 
-function readBundleIndex(bundle: AssetManager.Bundle, state: BundleIndexState) {
-    state.maxDefaultLevel = -1;
+    const infos = bundle.getDirWithPath(state.dir, JsonAsset, []);
+    for (const info of infos) {
+        const level = extractLevel(info.path);
+        if (level === null) continue;
 
-    (Object.keys(variantDirs) as LevelVariant[]).forEach((variant) => {
-        const variantIndex = state.variantIndexes[variant];
-        variantIndex.indexedLevels.clear();
-        variantIndex.pathByLevel.clear();
-
-        const infos = bundle.getDirWithPath(variantIndex.dir, JsonAsset, []);
-        for (const info of infos) {
-            const level = extractLevel(info.path);
-            if (level === null) continue;
-
-            variantIndex.indexedLevels.add(level);
-            variantIndex.pathByLevel.set(level, info.path);
-
-            if (variant === 'default' && level > state.maxDefaultLevel) {
-                state.maxDefaultLevel = level;
-            }
-        }
-    });
-}
-
-async function ensureBundleIndex(segment: BundleSegment): Promise<BundleIndexState> {
-    let state = bundleIndexes.get(segment.bundleName);
-    if (!state) {
-        state = createBundleIndexState(segment);
-        bundleIndexes.set(segment.bundleName, state);
+        state.indexedLevels.add(level);
+        state.pathByLevel.set(level, info.path);
     }
+}
 
+async function ensureVariantIndex(variant: LevelTier): Promise<VariantIndex> {
+    const state = variantIndexes[variant];
     if (state.scanned) return state;
     if (state.readyPromise) {
         await state.readyPromise;
         return state;
     }
 
-    state.readyPromise = ensureBundleReady(segment.bundleName).then((bundle) => {
+    state.readyPromise = ensureBundleReady(state.bundleName).then((bundle) => {
         if (!bundle) {
-            state!.missing = true;
-            state!.scanned = true;
+            state.missing = true;
+            state.scanned = true;
             return;
         }
 
-        readBundleIndex(bundle, state!);
-        state!.scanned = true;
+        readVariantIndex(bundle, state);
+        state.scanned = true;
     });
 
     await state.readyPromise;
     return state;
 }
 
-async function resolveVariantLevelInfo(level: number, variant: Exclude<LevelVariant, 'default'>): Promise<LevelAssetInfo | null> {
+async function resolveVariantLevelInfo(level: number, variant: LevelTier): Promise<LevelAssetInfo | null> {
     const normalizedLevel = normalizeLevel(level);
-    const segment = resolveSegmentForLevel(normalizedLevel);
-    const state = await ensureBundleIndex(segment);
-    const path = state.variantIndexes[variant].pathByLevel.get(normalizedLevel);
+    if (variant === 'base') {
+        return {
+            bundleName: variantIndexes.base.bundleName,
+            variant,
+            level: normalizedLevel,
+            path: `pure_level${normalizedLevel}_config`,
+        };
+    }
+
+    const state = await ensureVariantIndex(variant);
+    const path = state.pathByLevel.get(normalizedLevel);
     if (!path) return null;
 
     return {
-        bundleName: state.segment.bundleName,
+        bundleName: state.bundleName,
+        variant,
         level: normalizedLevel,
         path,
     };
 }
 
-async function resolveDefaultLevelInfo(level: number): Promise<LevelAssetInfo | null> {
-    const normalizedLevel = normalizeLevel(level);
-    const segment = resolveSegmentForLevel(normalizedLevel);
-    const segmentSize = getSegmentSize();
-
-    for (let start = segment.start; start >= 0; start -= segmentSize) {
-        const state = await ensureBundleIndex(resolveSegmentByStart(start));
-        const exactPath = state.variantIndexes.default.pathByLevel.get(normalizedLevel);
-        if (exactPath) {
-            return {
-                bundleName: state.segment.bundleName,
-                level: normalizedLevel,
-                path: exactPath,
-            };
-        }
-
-        if (state.maxDefaultLevel < 0) continue;
-
-        const fallbackPath = state.variantIndexes.default.pathByLevel.get(state.maxDefaultLevel);
-        if (!fallbackPath) continue;
-
-        return {
-            bundleName: state.segment.bundleName,
-            level: state.maxDefaultLevel,
-            path: fallbackPath,
-        };
-    }
-
-    return null;
-}
-
-async function ensureVariantAsset(variant: LevelVariant, info: LevelAssetInfo): Promise<JsonAsset | null> {
-    const bucket = getBucket(variant);
+async function ensureVariantAsset(info: LevelAssetInfo): Promise<JsonAsset | null> {
+    const bucket = getBucket(info.variant);
     const cacheKey = getCacheKey(info.bundleName, info.level);
     if (bucket.assets.has(cacheKey)) return bucket.assets.get(cacheKey)!;
     if (bucket.loading.has(cacheKey)) return bucket.loading.get(cacheKey)!;
@@ -348,13 +256,15 @@ function tryReleaseBundle(bundleName: string) {
     }
 }
 
-function releaseVariantLevel(variant: LevelVariant, bundleName: string, level: number) {
+function releaseVariantLevel(variant: LevelTier, bundleName: string, level: number) {
     const bucket = getBucket(variant);
     const cacheKey = getCacheKey(bundleName, level);
     if (!bucket.assets.has(cacheKey)) return;
 
     const bundle = assetManager.getBundle(bundleName);
-    const path = getIndexedPath(bundleName, variant, level);
+    const path = variant === 'base'
+        ? `pure_level${level}_config`
+        : variantIndexes[variant].pathByLevel.get(level);
     if (bundle && path) {
         bundle.release(path, JsonAsset);
     }
@@ -397,12 +307,9 @@ export async function ensureBundleReady(bundleName: string): Promise<AssetManage
     return trackedPromise;
 }
 
-export function resolveLevelLoadOptions(level: number): { ad: boolean; retry: boolean } {
-    const normalizedLevel = normalizeLevel(level);
-    return {
-        ad: ProgressManager.loadGlobalAdCount() >= Constants.LevelDifficulty.AdThreshold,
-        retry: ProgressManager.loadLevelRetryCount(normalizedLevel) > Constants.LevelDifficulty.RetryThreshold,
-    };
+export async function getAvailableBoardIds(tier: Exclude<LevelTier, 'base'>): Promise<number[]> {
+    const state = await ensureVariantIndex(tier);
+    return Array.from(state.indexedLevels).sort((a, b) => a - b);
 }
 
 export async function warmupForwardWindow(level: number, aheadCount = 10): Promise<void> {
@@ -410,65 +317,41 @@ export async function warmupForwardWindow(level: number, aheadCount = 10): Promi
     const targets = new Map<string, LevelAssetInfo>();
 
     for (let offset = 0; offset <= aheadCount; offset++) {
-        const info = await resolveDefaultLevelInfo(normalizedLevel + offset);
+        const targetLevel = normalizedLevel + offset;
+        if (targetLevel > BASE_MAX_LEVEL) break;
+
+        const info = await resolveVariantLevelInfo(targetLevel, 'base');
         if (!info) continue;
         targets.set(getCacheKey(info.bundleName, info.level), info);
     }
 
-    await Promise.all(Array.from(targets.values(), (info) => ensureVariantAsset('default', info)));
+    await Promise.all(Array.from(targets.values(), (info) => ensureVariantAsset(info)));
 }
 
-export async function ensureLevelJson(level: number, opts?: { ad?: boolean; retry?: boolean }): Promise<LevelJson | null> {
+export async function ensureLevelJson(level: number, tier: LevelTier = 'base'): Promise<LevelJson | null> {
     const normalizedLevel = normalizeLevel(level);
-
-    if (opts?.ad) {
-        const adInfo = await resolveVariantLevelInfo(normalizedLevel, 'ad');
-        if (adInfo) {
-            const adAsset = await ensureVariantAsset('ad', adInfo);
-            if (adAsset?.json) return adAsset.json as LevelJson;
-        }
+    const info = await resolveVariantLevelInfo(normalizedLevel, tier);
+    if (!info) {
+        console.warn(`LevelJsonLoader: missing ${tier} level ${normalizedLevel}`);
+        return null;
     }
 
-    if (opts?.retry) {
-        const retryInfo = await resolveVariantLevelInfo(normalizedLevel, 'retry');
-        if (retryInfo) {
-            const retryAsset = await ensureVariantAsset('retry', retryInfo);
-            if (retryAsset?.json) return retryAsset.json as LevelJson;
-        }
-    }
-
-    const defaultInfo = await resolveDefaultLevelInfo(normalizedLevel);
-    if (!defaultInfo) return null;
-
-    const asset = await ensureVariantAsset('default', defaultInfo);
+    const asset = await ensureVariantAsset(info);
     return asset?.json ? asset.json as LevelJson : null;
 }
 
 export function releaseOutsideWindow(level: number, aheadCount = 10): void {
     void (async () => {
         const normalizedLevel = normalizeLevel(level);
-        const defaultKeepKeys = new Set<string>();
-
-        for (let offset = 0; offset <= aheadCount; offset++) {
-            const info = await resolveDefaultLevelInfo(normalizedLevel + offset);
-            if (!info) continue;
-            defaultKeepKeys.add(getCacheKey(info.bundleName, info.level));
-        }
-
-        for (const cacheKey of Array.from(getBucket('default').assets.keys())) {
-            if (defaultKeepKeys.has(cacheKey)) continue;
-
-            const parsed = parseCacheKey(cacheKey);
-            if (!parsed) continue;
-            releaseVariantLevel('default', parsed.bundleName, parsed.level);
-        }
-
         const minLevel = normalizedLevel;
         const maxLevel = normalizedLevel + aheadCount;
-        (['retry', 'ad'] as Array<Exclude<LevelVariant, 'default'>>).forEach((variant) => {
+
+        (['base', 'easy', 'normal', 'hard'] as LevelTier[]).forEach((variant) => {
+            const bundleName = variantIndexes[variant].bundleName;
             for (const cacheKey of Array.from(getBucket(variant).assets.keys())) {
                 const parsed = parseCacheKey(cacheKey);
                 if (!parsed) continue;
+                if (parsed.bundleName !== bundleName) continue;
                 if (parsed.level >= minLevel && parsed.level <= maxLevel) continue;
                 releaseVariantLevel(variant, parsed.bundleName, parsed.level);
             }

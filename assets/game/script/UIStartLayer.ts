@@ -1,8 +1,9 @@
 import { _decorator, Component, Node, sp, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
-import { ensureLevelJson, resolveLevelLoadOptions, warmupForwardWindow } from './config/LevelJsonLoader';
+import { ensureLevelJson, warmupForwardWindow } from './config/LevelJsonLoader';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
+import { StreakManager } from './manager/StreakManager';
 
 declare const wx: any;
 
@@ -164,19 +165,19 @@ export class UIStartLayer extends Component {
     }
 
     async onClickStartButton() {
-        AudioManager.instance.playClick();
         if (this.enteringGame) return;
-
+        AudioManager.instance.playClick();
         this.enteringGame = true;
         try {
             const exitAnimation = this.playExitAnimation();
             const level = ProgressManager.loadLevel();
-            const opts = resolveLevelLoadOptions(level);
+            // 与 GameCtrl 一致地解出开局方案（resolveLevelPlanForStart 会持久化盘面与难度，GameCtrl 随后复用同一方案，资源只加载一次）
+            const plan = await StreakManager.resolveLevelPlanForStart(level);
             let json = null;
             let loadError: unknown = null;
 
             try {
-                json = await ensureLevelJson(level, opts);
+                json = await ensureLevelJson(plan.boardId, plan.tier);
             } catch (error) {
                 loadError = error;
             }

@@ -31,11 +31,15 @@ export class ArchiveManager {
         StorageKey.Vibrate,
         StorageKey.CurrentLevel,
         StorageKey.LevelSnapshot,
-        StorageKey.Level15TipsShown,
+        StorageKey.IronTipsShown,
         StorageKey.UndoCount,
         StorageKey.SwitchCount,
         StorageKey.GlobalAdCount,
         StorageKey.LevelRetryCount,
+        StorageKey.WinStreak,
+        StorageKey.WinStreakDate,
+        StorageKey.LevelDiffState,
+        StorageKey.PlayedLevels,
     ];
 
     private static _instance: ArchiveManager;

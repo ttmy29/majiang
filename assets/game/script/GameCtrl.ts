@@ -1,7 +1,7 @@
 import { _decorator, assetManager, AssetManager, Component, director, find, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, sys, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
-import { ensureLevelJson, LevelJson, LevelJsonPosition, releaseOutsideWindow, resolveLevelLoadOptions, warmupForwardWindow } from './config/LevelJsonLoader';
+import { ensureLevelJson, LevelJson, LevelJsonPosition, releaseOutsideWindow, warmupForwardWindow } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { ironItem } from './ironItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
@@ -9,6 +9,7 @@ import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
 import { ArchiveManager } from './manager/ArchiveManager';
+import { StreakManager } from './manager/StreakManager';
 import { Utils } from './util/Utils';
 import { SDKEvent, SDKManager } from '../../loading/SDKManager';
 
@@ -142,7 +143,6 @@ export class GameCtrl extends Component {
     private tipsActive = false;
     private static readonly IDLE_TIPS_SECONDS = 10;
     private static readonly GUIDE_LEVEL = 0;
-    private static readonly FIRST_TIPS_POPUP_LEVEL = 15;
     private static readonly FAILURE_POPUP_DELAY = 1.25;
 
     // 自动完成:清到"只剩最后一层"(剩余牌全在同一层、必然无遮挡)时接管,
@@ -252,10 +252,12 @@ export class GameCtrl extends Component {
         return { level, snapshot };
     }
 
-    private async requestStartLevel(level: number, snapshot: ProgressSnapshot | null = null) {
+    private async requestStartLevel(level: number, snapshot: ProgressSnapshot | null = null, forceReroll = false) {
         const requestSeq = ++this.levelRequestSeq;
-        const opts = resolveLevelLoadOptions(level);
-        const json = await ensureLevelJson(level, opts);
+        // 连胜分档 + 难度池：≤10 用基础盘面；11+ 按连胜摇难度档并抽没玩过的盘面。
+        // 内部已含每日清零、同关盘面复用(快照命中)、失败重开重摇难度。
+        const plan = await StreakManager.resolveLevelPlanForStart(level, { forceReroll });
+        const json = await ensureLevelJson(plan.boardId, plan.tier);
         if (requestSeq !== this.levelRequestSeq) return;
         if (!json) {
             console.warn(`GameCtrl: no level JSON for level ${level}`);
@@ -268,7 +270,7 @@ export class GameCtrl extends Component {
 
         this.hasStarted = true;
         void warmupForwardWindow(level, 10);
-        releaseOutsideWindow(level, 10);
+        releaseOutsideWindow(plan.boardId, 10);
     }
 
     private onAppHide = () => {
@@ -390,15 +392,24 @@ export class GameCtrl extends Component {
         this.scheduleOnce(this.showFirstTipsPopup, 0.2);
     }
 
+    private hasIronTipsConfig(): boolean {
+        const ironData = this.levelJson?.decoded_config?.ironData;
+        return Array.isArray(ironData) && ironData.length > 0;
+    }
+
+    private markIronTipsShown(): void {
+        StorageManager.instance.setBoolean(StorageKey.IronTipsShown, true);
+        ArchiveManager.instance.scheduleUpload();
+    }
+
     private showFirstTipsPopup = () => {
         if (this.gameState !== 'playing') return;
-        if (this.nowLevel !== GameCtrl.FIRST_TIPS_POPUP_LEVEL) return;
-        if (StorageManager.instance.getBoolean(StorageKey.Level15TipsShown, false)) return;
+        if (!this.hasIronTipsConfig()) return;
+        if (StorageManager.instance.getBoolean(StorageKey.IronTipsShown, false)) return;
 
         const tipsNode = LayerManager.instance.showUI('tips');
         if (tipsNode) {
-            StorageManager.instance.setBoolean(StorageKey.Level15TipsShown, true);
-            ArchiveManager.instance.scheduleUpload();
+            this.markIronTipsShown();
         }
     };
 
@@ -1870,6 +1881,8 @@ export class GameCtrl extends Component {
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
         window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
+        // 通关结算：记该盘面为已玩(去重) + 干净通关(本关未失败)则连胜 +1（须在 saveLevel 推进关号前结算本关）
+        StreakManager.commitClear(this.nowLevel);
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -1887,6 +1900,8 @@ export class GameCtrl extends Component {
     private failLevel(reason: string) {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
+        // 进入失败状态即清零连胜并标记本关 failed（含"槽位满"弹窗；之后复活/重开通关也不 +1）
+        StreakManager.markFailed(this.nowLevel);
         director.emit(Constants.eventNames.EventClearComboBoxEffects);
         this.clearIdleTips();
         this.autoFinishing = false;
@@ -1913,15 +1928,16 @@ export class GameCtrl extends Component {
         ProgressManager.addLevelRetryCount(this.nowLevel, 1);
         ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
-        this.scheduleOnce(() => void this.requestStartLevel(this.nowLevel), 1.5);
+        this.scheduleOnce(() => void this.requestStartLevel(this.nowLevel, null, true), 1.5);
     }
 
     private onEventFailureRestart() {
-        // 真正重开本关：累加该关重拾次数（用于难度自适应）
+        // 真正重开本关：累加该关重拾次数（仅埋点/统计；难度已改由连胜分档，不再依赖它）
         ProgressManager.addLevelRetryCount(this.nowLevel, 1);
         ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
-        void this.requestStartLevel(this.nowLevel);
+        // 失败后重开：强制重摇难度档（此时连胜已清零，多半落到一档=更简单；failed 保留 → 通关不 +1）
+        void this.requestStartLevel(this.nowLevel, null, true);
     }
 
     private onEventWinNextLevel() {
