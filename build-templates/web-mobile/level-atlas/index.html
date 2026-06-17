@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>麻将关卡图鉴 · 真实难度</title>
+  <title>麻将关卡图鉴 · 校准难度</title>
   <style>
     :root {
       --ink: #1f2933;
@@ -106,7 +106,7 @@
 
 <body>
   <header>
-    <h1>麻将关卡图鉴 · 真实难度</h1>
+    <h1>麻将关卡图鉴 · 校准难度</h1>
     <div class="summary" id="summary"></div>
   </header>
 
@@ -138,8 +138,8 @@
       <label for="sort">排序</label>
       <select id="sort">
         <option value="no">按关号</option>
-        <option value="score-desc">难度高→低</option>
-        <option value="score-asc">难度低→高</option>
+        <option value="score-desc">校准难度高→低</option>
+        <option value="score-asc">校准难度低→高</option>
         <option value="tiles-desc">牌数多→少</option>
         <option value="peak-desc">槽位压力高→低</option>
       </select>
@@ -412,7 +412,7 @@
         card.innerHTML =
           '<div class="card-head"><div class="title"><strong>第 ' + lv.no + ' 关</strong>' +
           '<small>' + controls.variant.value + ' · ' + d.metrics.tiles + ' 牌 / ' + d.metrics.layers + ' 层</small></div>' +
-          '<span class="difficulty ' + d.difficulty.band + '">' + d.difficulty.label + ' ' + d.difficulty.score + '</span></div>' +
+          '<span class="difficulty ' + d.difficulty.band + '">校准 ' + d.difficulty.label + ' ' + d.difficulty.score + '</span></div>' +
           '<div class="board-wrap"><canvas></canvas></div>' +
           '<div class="metrics">' +
           '<div class="metric"><b>' + d.metrics.peak + '</b><span>峰值槽位</span></div>' +
@@ -480,7 +480,7 @@
         '    </div>' +
         '  </div>' +
         '</div>' +
-        '<div class="section-title">真实难度分解</div>' +
+        '<div class="section-title">校准难度分解</div>' +
         '<div id="breakdown"></div>';
 
       body.querySelectorAll('.variant-tabs button[data-vk]').forEach(function (b) {
@@ -575,12 +575,29 @@
       else st.textContent = '进度 ' + snap.removedCount + ' / ' + total + ' · 步 ' + demo.idx + '/' + demo.actions.length;
     }
 
+    function formatPct(v) {
+      return v == null ? '—' : (Math.round(v * 10) / 10) + '%';
+    }
+
     function renderBreakdown(lv, vkey, d) {
       var m = d.metrics;
+      var stats = lv.userStats || null;
+      var sim = d.simDifficulty || d.difficulty;
+      var cal = d.calibration || {};
+      var calibrationSource = cal.source === 'observed-blend'
+        ? '真实通关率校准（观测 ' + cal.observedScore + ' + 模型 ' + cal.predictedScore + '）'
+        : '模型预测（该关暂无 CSV 观测）';
+      var statsRows = stats
+        ? '<b>用户通关数据</b><span>进入 ' + stats.entries + ' · 通关 ' + formatPct(stats.passRate) + ' · 平滑失败 ' + formatPct(stats.smoothedFailRate) + ' · 置信度 ' + Math.round(stats.confidence * 100) + '%</span>' +
+          '<b>视频 / 耗时</b><span>视频提示 ' + stats.videoCount + ' 次 · IPU ' + stats.ipu + ' · 人均视频 ' + stats.videoRate + ' · 均时 ' + stats.timeSec + 's</span>'
+        : '<b>用户通关数据</b><span>无 CSV 观测，使用前 ' + ((ATLAS.calibration && ATLAS.calibration.observedLevels) || 0) + ' 关校准模型预测</span>';
       var solv = m.solvable ? '可解' : '<b style="color:var(--very-hard)">2 槽 cap' + (ATLAS.slotFailThreshold - 1) + ' 内不可解 (需解锁/广告)</b>';
       document.getElementById('breakdown').innerHTML =
         '<div class="kv">' +
-        '<b>真实难度</b><span><span class="difficulty ' + d.difficulty.band + '">' + d.difficulty.label + ' ' + d.difficulty.score + '</span> / 100</span>' +
+        '<b>校准难度</b><span><span class="difficulty ' + d.difficulty.band + '">' + d.difficulty.label + ' ' + d.difficulty.score + '</span> / 100</span>' +
+        '<b>校准来源</b><span>' + calibrationSource + '</span>' +
+        '<b>模拟结构分</b><span><span class="difficulty ' + sim.band + '">' + sim.label + ' ' + sim.score + '</span> / 100</span>' +
+        statsRows +
         '<b>可解性</b><span>' + solv + '</span>' +
         '<b>峰值槽位</b><span>' + m.peak + ' (越接近 ' + ATLAS.slotFailThreshold + ' 越危险)</span>' +
         '<b>平均槽位占用</b><span>' + m.avgSlot + '</span>' +
@@ -591,7 +608,7 @@
         '<b>机关</b><span>链 ' + m.chainCount + ' · 铁锁 ' + m.ironCount + '</span>' +
         '<b>配置自带值</b><span>base_diff ' + (d.baseDiff != null ? d.baseDiff : '—') + ' · hard ' + (d.hard != null ? d.hard : '—') + ' (固定占位，非真实)</span>' +
         '</div>' +
-        '<p class="note">难度按游戏真实规则模拟求解：2 个默认目标槽 (三消)、任务队列顺序 + 急需插队、底部槽位自动补全、遮挡、链/铁锁。难度主因是<b>最小峰值槽位压力</b>——即按最优玩法仍被迫同时存放的牌数；不可解表示必须看广告解锁第 3/4 槽。点上方"自动演示"可观看这条求解线。</p>';
+        '<p class="note">校准难度以真实用户通关率为目标：CSV 覆盖的关卡用观测通关压力 + 模型平滑，未覆盖关卡用同一模型预测。模拟结构分仍按真实玩法求解，保留用于解释槽位压力、遮挡和机关负载。点上方"自动演示"可观看模拟求解线。</p>';
     }
 
     document.getElementById('closeBtn').addEventListener('click', function () { stopDemo(); dialog.close(); });
@@ -608,7 +625,8 @@
       });
       document.getElementById('summary').innerHTML =
         '<span>共 ' + ATLAS.levels.length + ' 关</span>' +
-        '<span>真实难度 = 模拟求解</span>' +
+        '<span>校准难度 = 用户数据 + 模拟结构</span>' +
+        '<span>观测 ' + ((ATLAS.calibration && ATLAS.calibration.observedLevels) || 0) + ' 关</span>' +
         '<span>简单 ' + counts.easy + '</span><span>普通 ' + counts.normal + '</span>' +
         '<span>困难 ' + counts.hard + '</span><span>极难 ' + counts['very-hard'] + '</span>' +
         '<span>重开档 ' + withRetry + '</span><span>广告档 ' + withAd + '</span>' +
@@ -618,7 +636,7 @@
         '<div><span>简单</span><span>≤ ' + t.easy + '</span></div>' +
         '<div><span>普通</span><span>≤ ' + t.normal + '</span></div>' +
         '<div><span>困难</span><span>≤ ' + t.hard + '</span></div>' +
-        '<div><span>极难</span><span>&gt; ' + t.hard + ' 或不可解</span></div>';
+        '<div><span>极难</span><span>&gt; ' + t.hard + '</span></div>';
     }
 
     Object.keys(controls).forEach(function (k) {
