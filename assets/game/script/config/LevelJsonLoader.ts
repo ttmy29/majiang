@@ -55,8 +55,8 @@ const BASE_MAX_LEVEL = 11;
 const variantIndexes: Record<LevelTier, VariantIndex> = {
     base: createVariantIndex(BASE_BUNDLE, ''),
     easy: createVariantIndex(ADVANCED_BUNDLE, 'level_easy'),
-    normal: createVariantIndex(ADVANCED_BUNDLE, 'level_normal'),
-    hard: createVariantIndex(ADVANCED_BUNDLE, 'level_hard'),
+    normal: createVariantIndex(ADVANCED_BUNDLE, 'level_hard'),
+    hard: createVariantIndex(ADVANCED_BUNDLE, 'level_normal'),
 };
 
 const variantBuckets: Record<LevelTier, VariantBucket> = {

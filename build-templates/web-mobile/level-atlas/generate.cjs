@@ -27,6 +27,23 @@ const VARIANTS = [
   { key: 'ad', dir: 'level_json3' },
 ];
 
+const ADVANCED_VARIANTS = [
+  { key: 'default', dir: 'level_easy' },
+  { key: 'retry', dir: 'level_hard' },
+  { key: 'ad', dir: 'level_normal' },
+];
+
+function listAdvancedVariantDirs() {
+  const root = path.join(ASSETS, 'config_levels_advanced');
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return [];
+
+  const dirs = ADVANCED_VARIANTS
+    .map((variant) => ({ ...variant, path: path.join(root, variant.dir) }))
+    .filter((variant) => fs.existsSync(variant.path) && fs.statSync(variant.path).isDirectory());
+
+  return dirs.length ? dirs : [];
+}
+
 function listSegmentDirs() {
   return fs.readdirSync(ASSETS)
     .filter((n) => /^config_levels_\d+_\d+$/.test(n))
@@ -42,6 +59,27 @@ function listSegmentDirs() {
 function levelNoFromFile(file) {
   const m = file.match(/pure_level(\d+)_config\.json$/);
   return m ? Number(m[1]) : null;
+}
+
+function collectLevelFile(levels, variant, filePath) {
+  const f = path.basename(filePath);
+  if (!/pure_level\d+_config\.json$/.test(f)) return false;
+
+  const no = levelNoFromFile(f);
+  if (no == null) return false;
+
+  let json;
+  try { json = JSON.parse(fs.readFileSync(filePath, 'utf8')); }
+  catch (e) { console.warn('瑙ｆ瀽澶辫触', f, e.message); return false; }
+
+  const v = extractVariant(json);
+  let analyzed;
+  try { analyzed = analyzeVariant(v); }
+  catch (e) { console.warn('寮曟搸鍒嗘瀽澶辫触 level', no, variant.key, e.message); return false; }
+
+  if (!levels.has(no)) levels.set(no, { no });
+  levels.get(no)[variant.key] = analyzed;
+  return true;
 }
 
 // 从 config JSON 提炼引擎输入 + 展示字段
@@ -481,10 +519,19 @@ function main() {
 
   // 收集 level -> { default?, retry?, ad? }
   const levels = new Map();
-  const segs = listSegmentDirs();
+  const advancedDirs = listAdvancedVariantDirs();
+  const segs = advancedDirs.length ? [] : listSegmentDirs();
   console.log('关卡分段目录:', segs.length);
 
   let fileCount = 0;
+  if (advancedDirs.length) {
+    console.log('config_levels_advanced variant dirs:', advancedDirs.map((v) => v.dir).join(', '));
+    for (const variant of advancedDirs) {
+      for (const f of fs.readdirSync(variant.path)) {
+        if (collectLevelFile(levels, variant, path.join(variant.path, f))) fileCount++;
+      }
+    }
+  } else {
   for (const seg of segs) {
     for (const variant of VARIANTS) {
       const dir = path.join(seg, variant.dir);
@@ -505,6 +552,8 @@ function main() {
         levels.get(no)[variant.key] = analyzed;
       }
     }
+  }
+
   }
 
   const list = Array.from(levels.values()).sort((a, b) => a.no - b.no);
