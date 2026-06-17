@@ -55,19 +55,20 @@ assets/config_levels_050_099/
 assets/config_levels_1350_1399/
 ```
 
-每个分段下最多包含三套变体：
+每个分段下包含以下盘面目录：
 
-- `level_json`：默认关卡
-- `level_json2`：重开次数较多时使用的变体
-- `level_json3`：累计广告次数达到阈值时使用的变体
+- `level_json`：基础/兜底盘面（保留全部关卡，也是 level-atlas 难度分析的输入）
+- `level_base`：前 10 关（含引导关 0）的固定盘面
+- `level_easy` / `level_normal` / `level_hard`：第 11 关起按连胜值分配的 简单/普通/困难 三档盘面
+- `level_json2` / `level_json3`：旧「重开/看广告变简单」变体，运行时已停用，仅保留供 level-atlas 分析
 
 加载逻辑在 [LevelJsonLoader.ts](assets/game/script/config/LevelJsonLoader.ts)：
 
 - 分段大小由 `Constants.LevelConfigSegmentSize = 50` 控制。
 - bundle 前缀由 `Constants.LevelConfigBundlePrefix = 'config_levels_'` 控制。
-- `ensureLevelJson(level, opts)` 会优先尝试广告变体，再尝试重开变体，最后回落到默认关卡。
-- `resolveLevelLoadOptions(level)` 中，广告变体阈值为累计广告次数 `>= 10`，重开变体阈值为当前关重开次数 `> 5`。
-- 当前关卡会预热后续 10 关，并释放窗口外的默认/变体资源。
+- `ensureLevelJson(boardId, tier)` 先在对应难度档目录找该盘面，缺档回退到 `level_json`。
+- 难度档与盘面由 [StreakManager](assets/game/script/manager/StreakManager.ts) 按连胜值决定（见 `Constants.WinStreak`）：前 10 关固定基础盘面；第 11 关起按连胜摇 简单/普通/困难，并从难度池抽一个玩家没玩过的盘面（已玩 id 云端同步去重，全玩过再循环）。
+- 当前盘面会预热后续 10 关，并释放窗口外资源。
 - 请求超过现有默认关卡范围时，会回落到已存在的最高默认关卡。
 
 当前资源目录中的关卡数量：
