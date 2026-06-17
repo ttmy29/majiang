@@ -33,6 +33,8 @@ export class UIStartLayer extends Component {
     @property(Node)
     bgNode: Node = null!;
     @property(Node)
+    bgNode2: Node = null!;
+    @property(Node)
     gameClubButton: Node = null!;
     @property(Node)
     customerServiceButton: Node = null!;
@@ -57,6 +59,9 @@ export class UIStartLayer extends Component {
         this.fitBackgroundToView();
         this.captureStartAnimationState();
         this.hideStartAnimationNodes();
+
+        this.bgNode2.active = false;
+        this.bgNode.active = true;
     }
 
     protected onEnable(): void {
@@ -229,6 +234,7 @@ export class UIStartLayer extends Component {
                 const scaleY = visibleSize.height / designSize.height;
                 const maxScale = Math.max(scaleX, scaleY);
                 this.bgNode.setScale(new Vec3(maxScale, maxScale, 1));
+                this.bgNode2.setScale(new Vec3(maxScale, maxScale, 1));
             }
         }
 
@@ -359,6 +365,8 @@ export class UIStartLayer extends Component {
             return Promise.resolve();
         }
 
+        this.bgNode.active = false;
+        this.bgNode2.active = true;
         return new Promise<void>((resolve) => {
             let completed = false;
             const finish = () => {

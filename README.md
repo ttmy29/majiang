@@ -193,3 +193,6 @@ library/ temp/ build/      Cocos 生成目录或构建产物
 - 关卡中同类牌数量应能被 3 整除，并与 `decoded_config.task` 对齐。
 - 改任务盒动画耗时，需要同步检查 `Constants.slotAnim`，玩法层会按这些等待时间推进状态。
 - `library/`、`temp/`、`build/` 多数是 Cocos 生成目录；改源码和资源时优先看 `assets/`、`settings/`、`build-templates/`。
+level_easy   = easy 简单
+level_hard   = normal 普通
+level_normal = hard 困难/最高档

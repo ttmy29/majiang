@@ -308,13 +308,22 @@ export class UIGameLayer extends Component {
         this.iconFrames = payload.iconFrames;
     }
 
-    onEventLevelStart(level: number) {
+    onEventLevelStart(level: number,difficultyLevel = 0) {
         this.hasLevelUiMode = true;
         this.isGuideLevel = level === 0;
         this.clearComboBoxEffects();
         this.resetComboNode();
         this.applyLevelUiMode();
         this.setGuideVisible(this.isGuideLevel, level);
+
+
+
+        if(difficultyLevel >= 3 || level === 6) {
+            const names = Constants.celebrityNames;
+            const name = names[Math.floor(Math.random() * names.length)];
+            LayerManager.instance.showToast(`这关需要${name}的智商！`);
+        }
+
     }
 
     private onEventHideGuide() {

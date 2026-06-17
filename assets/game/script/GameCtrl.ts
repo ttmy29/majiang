@@ -265,7 +265,8 @@ export class GameCtrl extends Component {
         }
 
         this.levelJson = json;
-        this.startLevel(level, snapshot);
+        const difficultyLevel = plan.tier === 'hard' ? 1 : plan.tier === 'normal' ? 3 : plan.tier === 'easy' ? 1 : 0;
+        this.startLevel(level, snapshot, difficultyLevel);
         if (requestSeq !== this.levelRequestSeq) return;
 
         this.hasStarted = true;
@@ -309,11 +310,11 @@ export class GameCtrl extends Component {
         if (this.remainTime <= 0) this.failLevel('时间到');
     }
 
-    private startLevel(level: number, snapshot: ProgressSnapshot | null = null) {
+    private startLevel(level: number, snapshot: ProgressSnapshot | null = null, difficultyLevel = 0) {
         this.gameState = 'playing';
         this.nowLevel = level;
         this._guideTapCount = 0;
-        director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
+        director.emit(Constants.eventNames.EventLevelStart, this.nowLevel, difficultyLevel);
         // 随机道具(额外免费道具)按钮:仅在配置关卡显示。失败重开/重新进入会再走一遍 startLevel,按钮按关卡重新出现
         director.emit(Constants.eventNames.EventSetRandomPropButton, Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0);
         // 上报关卡进入事件
@@ -1534,21 +1535,19 @@ export class GameCtrl extends Component {
             return this.winLevel();
         }
         if (this.slots.length >= Math.max(1, this.slotCapacity - 1)) {
-            // 【新增防护】：检查棋盘是否处于“忙碌”状态
-            // resolvingMatch: 正在从底部往目标槽吸牌
-            // refreshing: 正在执行 MoveOut 移出动画并准备更换目标
-            // movingIn: 正在执行 MoveIn 移入屏幕动画
-            // progress >= required: 已经收满3个，但还在等 0.18s 的延迟才开始 refreshing
-            const isBoardBusy = this.resolvingMatch || this.targetBoxes.some(b =>
-                b.refreshing ||
-                b.movingIn ||
-                (b.progress >= b.required)
-            );
+            // 【修复】：将 pending > 0 和 flyLayer 上的牌也纳入棋盘忙碌判定中
+            const isBoardBusy = this.resolvingMatch ||
+                this.targetBoxes.some(b =>
+                    b.pending > 0 ||          // 👈 新增：有牌正飞向目标槽
+                    b.refreshing ||
+                    b.movingIn ||
+                    (b.progress + b.pending >= b.required) // 👈 修改：把 pending 加上
+                ) ||
+                (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)); // 👈 新增：保证空中有牌飞向底部时也不立刻判死刑
 
             if (isBoardBusy) {
-                // 棋盘正在忙，后续大概率会触发 collectStoredTargets() 吸走底部的牌。
-                // 此时不能冤枉玩家，暂缓判负，0.2秒后再重新检查（类似于轮询机制）
-                this.unschedule(this.checkEndState); // 防止高频连点导致的回调堆积
+                // 棋盘正在忙，暂缓判负，0.2秒后再重新检查
+                this.unschedule(this.checkEndState);
                 this.scheduleOnce(this.checkEndState, 0.2);
                 return;
             }
@@ -1680,7 +1679,7 @@ export class GameCtrl extends Component {
 
     private tryStartAutoFinish() {
         //暂时屏蔽这个功能
-        return 
+        return
         if (this.isReadyForAutoFinish()) {
             //一波带走
             this.startAutoFinish();
