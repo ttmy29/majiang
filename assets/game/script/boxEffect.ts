@@ -95,8 +95,8 @@ export class boxEffect extends Component {
         opacity.opacity = 255;
 
         tween(opacity)
-            .to(0.45, { opacity: boxEffect.BOX1_MIN_OPACITY }, { easing: 'sineInOut' })
-            .to(0.45, { opacity: 255 }, { easing: 'sineInOut' })
+            .to(0.6, { opacity: boxEffect.BOX1_MIN_OPACITY }, { easing: 'sineInOut' })
+            .to(0.6, { opacity: 255 }, { easing: 'sineInOut' })
             .union()
             .repeatForever()
             .start();

@@ -1679,6 +1679,8 @@ export class GameCtrl extends Component {
     }
 
     private tryStartAutoFinish() {
+        //暂时屏蔽这个功能
+        return 
         if (this.isReadyForAutoFinish()) {
             //一波带走
             this.startAutoFinish();

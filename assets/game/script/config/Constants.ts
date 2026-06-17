@@ -86,7 +86,7 @@ const Constants = {
     // 失败清零、每天清零、干净通关 +1。详见 StreakManager。
     WinStreak: {
         // 从该关号起启用分档；之前的关恒定用基础盘面（base）
-        StartLevel: 11,
+        StartLevel: 12,
         // 难度池：开启后按已摇到的 easy/normal/hard 档，从 config_levels_advanced 对应目录中
         // 随机抽「没玩过」的盘面；关号仅作进度计数，全玩过再循环。
         UseDifficultyPool: true,

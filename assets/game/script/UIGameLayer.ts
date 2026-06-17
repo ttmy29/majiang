@@ -573,9 +573,13 @@ export class UIGameLayer extends Component {
         }
 
         // 每 COMBO_STEP 次连击解锁下一级口号:第 3/6/9/... 次时按顺序播一个
-        const targetLevel = Math.floor(comboTimes / UIGameLayer.COMBO_STEP);
+        if (comboTimes % UIGameLayer.COMBO_STEP !== 0) return;
+
+        const targetLevel = comboTimes / UIGameLayer.COMBO_STEP;
         const maxLevel = UIGameLayer.COMBO_AUDIOS.length;
         const shouldPlayComboLevel = targetLevel > this.comboAudioLevel && targetLevel <= maxLevel;
+
+        // 只有在解锁新口号时才显示 UI(第 3/6/9/... 次)
         if (!shouldPlayComboLevel) return;
 
         const seq = ++this.comboRefreshSeq;
@@ -597,10 +601,9 @@ export class UIGameLayer extends Component {
             .call(() => {
                 if (seq !== this.comboRefreshSeq || !this.comboNode?.isValid) return;
 
-                if (shouldPlayComboLevel) {
-                    this.comboAudioLevel = targetLevel;
-                    this.playComboLevel(targetLevel - 1);
-                }
+                // 播放对应等级的口号音效和图片
+                this.comboAudioLevel = targetLevel;
+                this.playComboLevel(targetLevel - 1);
 
                 Tween.stopAllByTarget(this.comboBarSprite);
                 this.comboBarSprite.fillRange = 1;
