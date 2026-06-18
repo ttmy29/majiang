@@ -536,7 +536,7 @@
 
     .summary-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 8px;
     }
 
@@ -574,6 +574,16 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    #countsMessage {
+      height: auto;
+      min-height: 34px;
+      line-height: 1.45;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
 
     .message.error {
@@ -788,6 +798,7 @@
           <div class="metric"><span>层数</span><strong id="layerCountMetric">0</strong></div>
           <div class="metric"><span>任务</span><strong id="taskCountMetric">0</strong></div>
           <div class="metric"><span>牌型</span><strong id="typeCountMetric">0</strong></div>
+          <div class="metric"><span>难度</span><strong id="difficultyMetric">0/10</strong></div>
         </div>
         <div id="countsMessage" class="message">暂无统计</div>
       </div>
@@ -823,6 +834,10 @@
       const MIN_BOARD_FIT_RATIO = 0.5;
       const MAX_BOARD_FIT_RATIO = 1.18;
       const EXCLUDED_FRAMES = new Set(["flip", "yinying"]);
+      const DIFFICULTY_TARGET_REQUIRED = 3;
+      const DIFFICULTY_UNLOCKED_TARGETS = 2;
+      const DIFFICULTY_SLOT_FAIL_THRESHOLD = 6;
+      const DIFFICULTY_BLOCK_LIMIT = 1.64;
       const EMBEDDED_LEVELS = {
         0: {"level_no":0,"level_json":"level_0","index_config":{"level_json":"level_0","level_json2":"","level_json3":"","base_diff":7,"type":0,"typeNum":0,"guideType":0,"leveltipsTrigger":0},"summary":{"data_layers":2,"rows_per_layer":[7,7],"cols_per_row_minmax":[[8,8],[8,8]],"non_zero_tiles":9,"tile_counts":{"4001":3,"4005":3,"4007":3},"hard":4,"task_count":3,"chain_count":0},"positions":[{"z_layer":0,"y_row":0,"x_col":0,"tile_id":4001},{"z_layer":0,"y_row":0,"x_col":3,"tile_id":4001},{"z_layer":0,"y_row":0,"x_col":6,"tile_id":4001},{"z_layer":0,"y_row":3,"x_col":1,"tile_id":4007},{"z_layer":0,"y_row":3,"x_col":3,"tile_id":4007},{"z_layer":0,"y_row":3,"x_col":5,"tile_id":4007},{"z_layer":0,"y_row":5,"x_col":3,"tile_id":4005},{"z_layer":1,"y_row":3,"x_col":2,"tile_id":4005},{"z_layer":1,"y_row":3,"x_col":4,"tile_id":4005}],"decoded_config":{"data":[[[4001,0,0,4001,0,0,4001,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,4007,0,4007,0,4007,0,0],[0,0,0,0,0,0,0,0],[0,0,0,4005,0,0,0,0],[0,0,0,0,0,0,0,0]],[[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,4005,0,4005,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0]]],"task":[[4005,4007,4001]],"taskNum":[[3,3,3]],"hard":4,"chain":[]}}
       };
@@ -870,6 +885,7 @@
         layerCountMetric: document.getElementById("layerCountMetric"),
         taskCountMetric: document.getElementById("taskCountMetric"),
         typeCountMetric: document.getElementById("typeCountMetric"),
+        difficultyMetric: document.getElementById("difficultyMetric"),
         countsMessage: document.getElementById("countsMessage"),
         fileInput: document.getElementById("fileInput"),
         importBtn: document.getElementById("importBtn"),
@@ -878,9 +894,15 @@
 
       const state = {
         manifest: null,
+        manifestPromise: null,
         pathToUuid: new Map(),
         levels: new Map(),
+        bundleConfigs: new Map(),
+        packAssets: new Map(),
+        packAssetPromises: new Map(),
+        tileFrameSpecs: new Map(),
         tileAssets: new Map(),
+        tileAssetPromises: new Map(),
         tileIds: [],
         currentLevel: 0,
         levelJson: null,
@@ -952,9 +974,13 @@
         return template.join("") + suffix;
       }
 
-      function importUrlForUuid(uuid) {
+      function importPathForUuid(uuid) {
         const decoded = decodeUuid(uuid).split("@")[0];
-        return `assets/game/import/${decoded.slice(0, 2)}/${decoded}.json`;
+        return `import/${decoded.slice(0, 2)}/${decoded}.json`;
+      }
+
+      function importUrlForUuid(uuid, bundleName = "game") {
+        return `assets/${bundleName}/${importPathForUuid(uuid)}`;
       }
 
       function nativeUrlForUuid(uuid, extension = "png") {
@@ -993,8 +1019,295 @@
         }
       }
 
+      function uniqueFetchUrls(urls) {
+        const seen = new Set();
+        const result = [];
+        for (const raw of urls) {
+          if (!raw) continue;
+          let resolved = "";
+          try {
+            const url = new URL(raw, window.location.href);
+            if (url.pathname.includes("/build/web-mobile/build/web-mobile/")) continue;
+            resolved = url.href;
+          } catch (error) {
+            resolved = raw;
+          }
+          if (seen.has(resolved)) continue;
+          seen.add(resolved);
+          result.push(raw);
+        }
+        return result;
+      }
+
+      function assetUrlCandidates(assetPath) {
+        const cleanPath = String(assetPath || "").replace(/^\/+/, "").replace(/^assets\//, "");
+        const path = `assets/${cleanPath}`;
+        return uniqueFetchUrls([
+          path,
+          `../${path}`,
+          `../../${path}`,
+          `/${path}`,
+          `/web-mobile/${path}`,
+          `/build/web-mobile/${path}`,
+        ]);
+      }
+
+      function bundleAssetUrlCandidates(bundleName, assetPath) {
+        return assetUrlCandidates(`${bundleName}/${assetPath}`);
+      }
+
+      async function tryFetchFirstJson(urls) {
+        for (const url of uniqueFetchUrls(urls)) {
+          const payload = await tryFetchJson(url);
+          if (payload) return payload;
+        }
+        return null;
+      }
+
+      function formatLevelSegmentBound(value) {
+        const text = String(Math.max(0, value));
+        return text.length >= 3 ? text : (`000${text}`).slice(-3);
+      }
+
+      function getLevelSegmentName(level) {
+        const normalized = Math.max(0, normalizeInt(level));
+        const start = Math.floor(normalized / 50) * 50;
+        const end = start + 49;
+        return `config_levels_${formatLevelSegmentBound(start)}_${formatLevelSegmentBound(end)}`;
+      }
+
+      async function loadBundleConfig(bundleName) {
+        if (state.bundleConfigs.has(bundleName)) return state.bundleConfigs.get(bundleName);
+        const config = await tryFetchFirstJson(bundleAssetUrlCandidates(bundleName, "config.json"));
+        state.bundleConfigs.set(bundleName, config || null);
+        return config || null;
+      }
+
+      function findLevelInBundleConfig(config, level) {
+        if (!config?.paths || !Array.isArray(config.uuids)) return null;
+        const targetPath = `level_json/pure_level${Math.max(0, normalizeInt(level))}_config`;
+        for (const [index, pathInfo] of Object.entries(config.paths)) {
+          if (!Array.isArray(pathInfo) || pathInfo[0] !== targetPath) continue;
+          const uuid = config.uuids[Number(index)];
+          if (!uuid) continue;
+          return { uuid, path: targetPath };
+        }
+        return null;
+      }
+
+      async function loadPackedLevelFromBundle(level) {
+        const bundleName = getLevelSegmentName(level);
+        const config = await loadBundleConfig(bundleName);
+        const info = findLevelInBundleConfig(config, level);
+        if (!info) return null;
+        const packed = await tryFetchFirstJson(bundleAssetUrlCandidates(bundleName, importPathForUuid(info.uuid)));
+        if (!packed) return null;
+        return extractCocosPayload(packed, (value) => {
+          return typeof value.level_no === "number" && Array.isArray(value.positions);
+        });
+      }
+
+      function compareTileIds(a, b) {
+        const left = String(a);
+        const right = String(b);
+        const leftIsNum = /^\d+$/.test(left);
+        const rightIsNum = /^\d+$/.test(right);
+        if (leftIsNum && rightIsNum) return Number(left) - Number(right);
+        if (leftIsNum) return -1;
+        if (rightIsNum) return 1;
+        return left.localeCompare(right);
+      }
+
+      function getTileImageUrls(id) {
+        return assetUrlCandidates(`game/resources/mahjong/${id}.png`);
+      }
+
+      function findPackKeyForAssetIndex(index) {
+        for (const [packKey, indices] of Object.entries(state.manifest?.packs || {})) {
+          if (!Array.isArray(indices)) continue;
+          if (indices.some((value) => Number(value) === index)) return packKey;
+        }
+        return "";
+      }
+
+      function nativeImageUrlCandidates(uuid, extension = "png") {
+        const decoded = decodeUuid(uuid).split("@")[0];
+        return bundleAssetUrlCandidates("game", `native/${decoded.slice(0, 2)}/${decoded}.${extension}`);
+      }
+
+      function loadImageElement(url) {
+        return new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error(url));
+          image.src = url;
+        });
+      }
+
+      async function loadFirstImage(urls) {
+        for (const url of uniqueFetchUrls(urls)) {
+          try {
+            const image = await loadImageElement(url);
+            return { image, url };
+          } catch (error) {
+            // Continue until one candidate succeeds.
+          }
+        }
+        return null;
+      }
+
+      function getPackFrame(entry) {
+        const frame = Array.isArray(entry?.[0]) ? entry[0][0] : null;
+        return frame && typeof frame.name === "string" && frame.rect ? frame : null;
+      }
+
+      function cropSpriteFrame(atlasImage, frame) {
+        const rect = frame.rect || {};
+        const original = frame.originalSize || {};
+        const sourceX = Math.round(Number(rect.x) || 0);
+        const sourceY = Math.round(Number(rect.y) || 0);
+        const rectW = Math.max(1, Math.round(Number(rect.width) || 1));
+        const rectH = Math.max(1, Math.round(Number(rect.height) || 1));
+        const rotated = !!frame.rotated;
+        const sourceW = rotated ? rectH : rectW;
+        const sourceH = rotated ? rectW : rectH;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(Number(original.width) || rectW));
+        canvas.height = Math.max(1, Math.round(Number(original.height) || rectH));
+        const context = canvas.getContext("2d");
+        if (!context) return "";
+        context.save();
+        if (rotated) {
+          context.translate(canvas.width / 2, canvas.height / 2);
+          context.rotate(Math.PI / 2);
+          context.drawImage(atlasImage, sourceX, sourceY, sourceW, sourceH, -sourceW / 2, -sourceH / 2, sourceW, sourceH);
+        } else {
+          context.drawImage(atlasImage, sourceX, sourceY, sourceW, sourceH, 0, 0, sourceW, sourceH);
+        }
+        context.restore();
+        return canvas.toDataURL("image/png");
+      }
+
+      async function loadPackAsset(packKey) {
+        if (!packKey) return null;
+        if (state.packAssets.has(packKey)) return state.packAssets.get(packKey);
+        if (state.packAssetPromises.has(packKey)) return state.packAssetPromises.get(packKey);
+        const promise = (async () => {
+          const packed = await tryFetchFirstJson(bundleAssetUrlCandidates("game", importPathForUuid(packKey)));
+          if (!packed) return null;
+          const textureUuid = Array.isArray(packed[1]) ? packed[1][0] : "";
+          const loadedImage = textureUuid ? await loadFirstImage(nativeImageUrlCandidates(textureUuid, "png")) : null;
+          if (!loadedImage) return null;
+          const frames = new Map();
+          for (const entry of Array.isArray(packed[5]) ? packed[5] : []) {
+            const frame = getPackFrame(entry);
+            if (frame) frames.set(String(frame.name), frame);
+          }
+          return {
+            textureUuid,
+            atlasUrl: loadedImage.url,
+            image: loadedImage.image,
+            frames,
+          };
+        })()
+          .catch(() => null)
+          .then((asset) => {
+            state.packAssets.set(packKey, asset);
+            return asset;
+          })
+          .finally(() => state.packAssetPromises.delete(packKey));
+        state.packAssetPromises.set(packKey, promise);
+        return promise;
+      }
+
+      async function buildTileAsset(id) {
+        const key = String(id);
+        if (!key || EXCLUDED_FRAMES.has(key)) return null;
+        const spec = state.tileFrameSpecs.get(key);
+        const fallbacks = getTileImageUrls(key);
+        if (spec?.packKey) {
+          const pack = await loadPackAsset(spec.packKey);
+          const frame = pack?.frames?.get(key);
+          if (pack?.image && frame) {
+            const url = cropSpriteFrame(pack.image, frame);
+            if (url) {
+              return {
+                id: key,
+                uuid: spec.uuid,
+                url,
+                fallbackUrl: pack.atlasUrl || fallbacks[0] || "",
+              };
+            }
+          }
+        }
+        if (spec?.uuid) {
+          return {
+            id: key,
+            uuid: spec.uuid,
+            url: nativeUrlForUuid(spec.uuid, "png"),
+            fallbackUrl: fallbacks[0] || "",
+          };
+        }
+        return {
+          id: key,
+          uuid: "",
+          url: fallbacks[0] || "",
+          fallbackUrl: fallbacks[1] || "",
+        };
+      }
+
+      async function ensureTileAsset(id) {
+        const key = String(id);
+        if (!key || EXCLUDED_FRAMES.has(key)) return null;
+        const existing = state.tileAssets.get(key);
+        if (existing?.url) return existing;
+        if (state.tileAssetPromises.has(key)) return state.tileAssetPromises.get(key);
+        const promise = buildTileAsset(key)
+          .then((asset) => {
+            if (!asset) return null;
+            state.tileAssets.set(key, asset);
+            if (!state.tileIds.includes(key)) {
+              state.tileIds.push(key);
+              state.tileIds.sort(compareTileIds);
+            }
+            return asset;
+          })
+          .finally(() => state.tileAssetPromises.delete(key));
+        state.tileAssetPromises.set(key, promise);
+        return promise;
+      }
+
+      async function ensureTileAssets(ids) {
+        const keys = Array.from(new Set(Array.from(ids || [], (id) => String(id)).filter((id) => id && !EXCLUDED_FRAMES.has(id))));
+        await Promise.all(keys.map((id) => ensureTileAsset(id)));
+      }
+
+      async function ensureManifestLoaded() {
+        if (state.manifest) return state.manifest;
+        if (!state.manifestPromise) {
+          state.manifestPromise = loadManifest().catch((error) => {
+            state.manifestPromise = null;
+            throw error;
+          });
+        }
+        return state.manifestPromise;
+      }
+
       async function loadManifest() {
-        const manifest = await fetchJson("assets/game/config.json");
+        const manifest = await tryFetchFirstJson(assetUrlCandidates("game/config.json"));
+        if (!manifest) {
+          state.manifest = { paths: {}, uuids: [] };
+          state.pathToUuid.clear();
+          state.levels.clear();
+          state.packAssets.clear();
+          state.packAssetPromises.clear();
+          state.tileFrameSpecs.clear();
+          state.tileAssets.clear();
+          state.tileAssetPromises.clear();
+          state.tileIds = [];
+          renderPalette();
+          return state.manifest;
+        }
         state.manifest = manifest;
         state.pathToUuid.clear();
         for (const [index, pathInfo] of Object.entries(manifest.paths || {})) {
@@ -1003,25 +1316,33 @@
             state.pathToUuid.set(assetPath, manifest.uuids[Number(index)]);
           }
         }
-        indexTiles();
+        await indexTiles();
         indexLevels();
+        return state.manifest;
       }
 
-      function indexTiles() {
+      async function indexTiles() {
+        state.packAssets.clear();
+        state.packAssetPromises.clear();
+        state.tileFrameSpecs.clear();
         state.tileAssets.clear();
-        for (const [assetPath, uuid] of state.pathToUuid.entries()) {
-          const match = assetPath.match(/^resources\/mahjong\/([^/]+)$/);
+        state.tileAssetPromises.clear();
+        for (const [index, pathInfo] of Object.entries(state.manifest?.paths || {})) {
+          const assetPath = pathInfo && pathInfo[0];
+          const match = typeof assetPath === "string" ? assetPath.match(/^resources\/mahjong\/([^/]+)\/spriteFrame$/) : null;
           if (!match) continue;
           const id = match[1];
           if (!/^\d+$/.test(id) || EXCLUDED_FRAMES.has(id)) continue;
-          state.tileAssets.set(id, {
+          const assetIndex = Number(index);
+          state.tileFrameSpecs.set(id, {
             id,
-            uuid,
-            url: nativeUrlForUuid(uuid, "png"),
-            fallbackUrl: `../../assets/game/resources/mahjong/${id}.png`,
+            uuid: state.manifest?.uuids?.[assetIndex] || "",
+            packKey: findPackKeyForAssetIndex(assetIndex),
           });
         }
-        state.tileIds = Array.from(state.tileAssets.keys()).sort((a, b) => Number(a) - Number(b));
+        state.tileIds = Array.from(state.tileFrameSpecs.keys()).sort(compareTileIds);
+        await ensureTileAssets(state.tileIds);
+        state.tileIds = Array.from(state.tileAssets.keys()).sort(compareTileIds);
         renderPalette();
       }
 
@@ -1034,32 +1355,13 @@
             level: Number(match[1]),
             uuid,
             url: importUrlForUuid(uuid),
-            fallbackUrl: `../../assets/game/json/pure_level${match[1]}_config.json`,
           });
         }
       }
 
       async function loadLevel(level) {
-        if (!state.manifest) await loadManifest();
-        const record = state.levels.get(level) || {
-          level,
-          uuid: "",
-          url: "",
-          fallbackUrl: `../../assets/game/json/pure_level${level}_config.json`,
-          fallbackOnly: true,
-        };
-        let payload = null;
-        if (record.url) {
-          const packed = await tryFetchJson(record.url);
-          if (packed) {
-            payload = extractCocosPayload(packed, (value) => {
-              return typeof value.level_no === "number" && Array.isArray(value.positions);
-            });
-          }
-        }
-        if (!payload && record.fallbackUrl) {
-          payload = await tryFetchJson(record.fallbackUrl);
-        }
+        await ensureManifestLoaded();
+        let payload = await loadPackedLevelFromBundle(level);
         if (!payload && EMBEDDED_LEVELS[level]) {
           payload = cloneJson(EMBEDDED_LEVELS[level]);
         }
@@ -1070,6 +1372,7 @@
         state.positions = normalizePositions(payload.positions);
         const loadedTask = normalizeTaskOrder(payload.decoded_config?.task?.[0]);
         state.taskOrder = loadedTask.length > 0 ? loadedTask : buildAutoTaskSequence(getTileCounts(state.positions), []);
+        await ensureTileAssets(getTileCounts(state.positions).keys());
         state.selectedTaskIndex = -1;
         state.selectedIndex = -1;
         state.zoom = 1;
@@ -1404,15 +1707,17 @@
         const counts = getTileCounts(state.positions);
         const layers = uniqueLayers();
         const task = getExportTaskOrder();
+        const difficulty = computeLevelDifficulty(state.positions, task, state.levelJson);
         dom.tileCountMetric.textContent = String(state.positions.length);
         dom.layerCountMetric.textContent = String(layers.length);
         dom.taskCountMetric.textContent = String(task.length);
         dom.typeCountMetric.textContent = String(counts.size);
+        dom.difficultyMetric.textContent = `${difficulty.hard}/10`;
         const invalid = Array.from(counts.entries()).filter(([, count]) => count % 3 !== 0);
         if (invalid.length > 0) {
           setCountsMessage(`数量不是 3 的倍数: ${invalid.map(([id, count]) => `${id}=${count}`).join(", ")}`, "error");
         } else {
-          setCountsMessage(`牌型数量正常，任务 ${task.length} 组`, "ok");
+          setCountsMessage(`牌型数量正常，任务 ${task.length} 组；${formatDifficulty(difficulty)}`, difficulty.failed ? "error" : "ok");
         }
       }
 
@@ -1665,6 +1970,406 @@
         return errors;
       }
 
+      function computeLevelDifficulty(positions, task, levelJson) {
+        try {
+          return simulateLevelDifficulty(positions, task, levelJson);
+        } catch (error) {
+          return {
+            hard: 10,
+            maxSlotPressure: DIFFICULTY_SLOT_FAIL_THRESHOLD,
+            wrongTargetMoves: 0,
+            blockedPeakRatio: 1,
+            failed: true,
+            reason: error?.message || "难度计算失败",
+          };
+        }
+      }
+
+      function formatDifficulty(difficulty) {
+        const status = difficulty.failed ? `模拟有风险${difficulty.reason ? `: ${difficulty.reason}` : ""}` : "模拟可完成";
+        return `难度 ${difficulty.hard}/10，底槽峰值 ${difficulty.maxSlotPressure}/${DIFFICULTY_SLOT_FAIL_THRESHOLD}，非目标 ${difficulty.wrongTargetMoves} 次，${status}`;
+      }
+
+      function simulateLevelDifficulty(positions, task, levelJson) {
+        const tiles = positions.map((item, index) => ({
+          key: positionKey(item),
+          type: String(item.tile_id),
+          layer: item.z_layer,
+          row: item.y_row,
+          col: item.x_col,
+          index,
+          removed: false,
+        }));
+        const tileByKey = new Map(tiles.map((tile) => [tile.key, tile]));
+        const chainLinks = buildDifficultyChainLinks(levelJson, tileByKey);
+        const ironKeys = buildDifficultyIronKeys(levelJson, tileByKey);
+        const sim = {
+          tiles,
+          chainLinks,
+          chainByKey: buildDifficultyChainMap(chainLinks),
+          ironKeys,
+          initialIronCount: ironKeys.size,
+          taskQueue: task.map((id) => String(id)),
+          boxes: Array.from({ length: DIFFICULTY_UNLOCKED_TARGETS }, () => ({ type: "", progress: 0 })),
+          slots: [],
+          maxSlotPressure: 0,
+          wrongTargetMoves: 0,
+          blockedPeakRatio: 0,
+          failed: false,
+          reason: "",
+        };
+
+        for (const box of sim.boxes) assignDifficultyTarget(sim, box);
+        resolveDifficultyTargets(sim);
+        updateDifficultyPeaks(sim);
+
+        const maxSteps = Math.max(1, tiles.length * 2 + task.length * 4);
+        for (let step = 0; step < maxSteps && !sim.failed; step++) {
+          if (isDifficultyComplete(sim)) break;
+          const actions = getDifficultyActions(sim);
+          if (actions.length === 0) {
+            sim.failed = true;
+            sim.reason = "无可点击牌";
+            break;
+          }
+          const beforePlayable = countDifficultyPlayableTiles(sim);
+          const scored = actions.map((action) => scoreDifficultyAction(sim, action, beforePlayable));
+          scored.sort(compareDifficultyActionScores);
+          applyDifficultyAction(sim, scored[0].action);
+          resolveDifficultyTargets(sim);
+          updateDifficultyPeaks(sim);
+          if (sim.slots.length >= DIFFICULTY_SLOT_FAIL_THRESHOLD) {
+            sim.failed = true;
+            sim.reason = "底部槽达到失败阈值";
+          }
+        }
+
+        if (!sim.failed && !isDifficultyComplete(sim)) {
+          sim.failed = true;
+          sim.reason = "模拟步数耗尽";
+        }
+
+        const mechanicScore = Math.min(1.5, chainLinks.length * 0.15 + sim.initialIronCount * 0.2);
+        const hardFloat =
+          1 +
+          (sim.maxSlotPressure / DIFFICULTY_SLOT_FAIL_THRESHOLD) * 5 +
+          sim.blockedPeakRatio * 2 +
+          Math.min(2, sim.wrongTargetMoves / Math.max(1, positions.length) * 4) +
+          mechanicScore +
+          (sim.failed ? 2.5 : 0);
+        const hard = Math.max(1, Math.min(10, Math.round(hardFloat)));
+
+        return {
+          hard,
+          maxSlotPressure: sim.maxSlotPressure,
+          wrongTargetMoves: sim.wrongTargetMoves,
+          blockedPeakRatio: sim.blockedPeakRatio,
+          failed: sim.failed,
+          reason: sim.reason,
+        };
+      }
+
+      function buildDifficultyChainLinks(levelJson, tileByKey) {
+        const rawLinks = levelJson?.decoded_config?.chain;
+        if (!Array.isArray(rawLinks)) return [];
+        const used = new Set();
+        const links = [];
+        for (const raw of rawLinks) {
+          if (!Array.isArray(raw) || raw.length < 6) continue;
+          const values = raw.slice(0, 6).map((value) => normalizeInt(value, NaN));
+          if (values.some((value) => !Number.isFinite(value))) continue;
+          const [layerA, rowA, colA, layerB, rowB, colB] = values;
+          if (layerA !== layerB) continue;
+          const aKey = `${layerA},${rowA},${colA}`;
+          const bKey = `${layerB},${rowB},${colB}`;
+          if (aKey === bKey || used.has(aKey) || used.has(bKey)) continue;
+          if (!tileByKey.has(aKey) || !tileByKey.has(bKey)) continue;
+          used.add(aKey);
+          used.add(bKey);
+          links.push({ id: links.length + 1, aKey, bKey });
+        }
+        return links;
+      }
+
+      function buildDifficultyChainMap(chainLinks) {
+        const map = new Map();
+        for (const link of chainLinks) {
+          map.set(link.aKey, link);
+          map.set(link.bKey, link);
+        }
+        return map;
+      }
+
+      function buildDifficultyIronKeys(levelJson, tileByKey) {
+        const rawLocks = levelJson?.decoded_config?.ironData;
+        const keys = new Set();
+        if (!Array.isArray(rawLocks)) return keys;
+        for (const raw of rawLocks) {
+          if (!Array.isArray(raw) || raw.length < 3) continue;
+          const values = raw.slice(0, 3).map((value) => normalizeInt(value, NaN));
+          if (values.some((value) => !Number.isFinite(value))) continue;
+          const key = `${values[0]},${values[1]},${values[2]}`;
+          if (tileByKey.has(key)) keys.add(key);
+        }
+        return keys;
+      }
+
+      function cloneDifficultySim(sim) {
+        return {
+          tiles: sim.tiles.map((tile) => ({ ...tile })),
+          chainLinks: sim.chainLinks.map((link) => ({ ...link })),
+          chainByKey: buildDifficultyChainMap(sim.chainLinks),
+          ironKeys: new Set(sim.ironKeys),
+          initialIronCount: sim.initialIronCount,
+          taskQueue: sim.taskQueue.slice(),
+          boxes: sim.boxes.map((box) => ({ ...box })),
+          slots: sim.slots.map((slot) => ({ ...slot })),
+          maxSlotPressure: sim.maxSlotPressure,
+          wrongTargetMoves: sim.wrongTargetMoves,
+          blockedPeakRatio: sim.blockedPeakRatio,
+          failed: sim.failed,
+          reason: sim.reason,
+        };
+      }
+
+      function getDifficultyTile(sim, key) {
+        return sim.tiles.find((tile) => tile.key === key) || null;
+      }
+
+      function isDifficultyTileBlocked(sim, tile) {
+        return sim.tiles.some((other) =>
+          other !== tile &&
+          !other.removed &&
+          other.layer > tile.layer &&
+          Math.abs(other.col - tile.col) < DIFFICULTY_BLOCK_LIMIT &&
+          Math.abs(other.row - tile.row) < DIFFICULTY_BLOCK_LIMIT
+        );
+      }
+
+      function isDifficultyChainActive(sim, link) {
+        const a = getDifficultyTile(sim, link.aKey);
+        const b = getDifficultyTile(sim, link.bKey);
+        return !!a && !!b && !a.removed && !b.removed;
+      }
+
+      function getDifficultyActions(sim) {
+        const actions = [];
+        const usedChains = new Set();
+        for (const tile of sim.tiles) {
+          if (tile.removed || isDifficultyTileBlocked(sim, tile)) continue;
+          const link = sim.chainByKey.get(tile.key);
+          if (link && isDifficultyChainActive(sim, link)) {
+            if (usedChains.has(link.id)) continue;
+            const otherKey = link.aKey === tile.key ? link.bKey : link.aKey;
+            const other = getDifficultyTile(sim, otherKey);
+            if (!other || other.removed || sim.ironKeys.has(tile.key) || sim.ironKeys.has(other.key)) continue;
+            if (isDifficultyTileBlocked(sim, other)) continue;
+            if (!canPlanDifficultyChain(sim, [tile, other])) continue;
+            usedChains.add(link.id);
+            actions.push({ kind: "chain", tiles: [tile.key, other.key], index: Math.min(tile.index, other.index) });
+            continue;
+          }
+          if (link || sim.ironKeys.has(tile.key)) continue;
+          actions.push({ kind: "tile", tiles: [tile.key], index: tile.index });
+        }
+        return actions;
+      }
+
+      function canPlanDifficultyChain(sim, tiles) {
+        const planned = new Map();
+        let slotNeeded = 0;
+        for (const tile of tiles) {
+          const boxIndex = findDifficultyMatchingBoxIndex(sim, tile.type, planned);
+          if (boxIndex >= 0) {
+            planned.set(boxIndex, (planned.get(boxIndex) || 0) + 1);
+          } else {
+            slotNeeded++;
+          }
+        }
+        return sim.slots.length + slotNeeded <= DIFFICULTY_SLOT_FAIL_THRESHOLD;
+      }
+
+      function scoreDifficultyAction(sim, action, beforePlayable) {
+        const trial = cloneDifficultySim(sim);
+        applyDifficultyAction(trial, action);
+        resolveDifficultyTargets(trial);
+        const targetTypes = new Set(trial.boxes.filter((box) => box.type && box.progress < DIFFICULTY_TARGET_REQUIRED).map((box) => box.type));
+        const uncoveredSlotTypes = new Set(trial.slots.filter((slot) => !targetTypes.has(slot.type)).map((slot) => slot.type));
+        const taskIndex = getDifficultyActionTaskIndex(sim, action);
+        return {
+          action,
+          failedMove: trial.failed || trial.slots.length >= DIFFICULTY_SLOT_FAIL_THRESHOLD ? 1 : 0,
+          slotCount: trial.slots.length,
+          uncoveredTypeCount: uncoveredSlotTypes.size,
+          exposedDelta: countDifficultyPlayableTiles(trial) - beforePlayable,
+          taskIndex,
+          index: action.index,
+        };
+      }
+
+      function compareDifficultyActionScores(a, b) {
+        return a.failedMove - b.failedMove ||
+          a.slotCount - b.slotCount ||
+          a.uncoveredTypeCount - b.uncoveredTypeCount ||
+          b.exposedDelta - a.exposedDelta ||
+          a.taskIndex - b.taskIndex ||
+          a.index - b.index;
+      }
+
+      function getDifficultyActionTaskIndex(sim, action) {
+        let best = Number.POSITIVE_INFINITY;
+        for (const key of action.tiles) {
+          const tile = getDifficultyTile(sim, key);
+          if (!tile) continue;
+          if (findDifficultyMatchingBoxIndex(sim, tile.type) >= 0) return -1;
+          const index = sim.taskQueue.indexOf(tile.type);
+          if (index >= 0) best = Math.min(best, index);
+        }
+        return Number.isFinite(best) ? best : sim.taskQueue.length + 1;
+      }
+
+      function applyDifficultyAction(sim, action) {
+        if (action.kind === "chain") {
+          const planned = new Map();
+          const slotTiles = [];
+          const targetTiles = [];
+          for (const key of action.tiles) {
+            const tile = getDifficultyTile(sim, key);
+            if (!tile || tile.removed) continue;
+            const boxIndex = findDifficultyMatchingBoxIndex(sim, tile.type, planned);
+            if (boxIndex >= 0) {
+              planned.set(boxIndex, (planned.get(boxIndex) || 0) + 1);
+              targetTiles.push({ tile, boxIndex });
+            } else {
+              slotTiles.push(tile);
+            }
+          }
+          for (const tile of slotTiles) collectDifficultyTileToSlot(sim, tile);
+          for (const entry of targetTiles) collectDifficultyTileToTarget(sim, entry.tile, sim.boxes[entry.boxIndex]);
+          return;
+        }
+
+        const tile = getDifficultyTile(sim, action.tiles[0]);
+        if (!tile || tile.removed) return;
+        const boxIndex = findDifficultyMatchingBoxIndex(sim, tile.type);
+        if (boxIndex >= 0) {
+          collectDifficultyTileToTarget(sim, tile, sim.boxes[boxIndex]);
+        } else {
+          collectDifficultyTileToSlot(sim, tile);
+        }
+      }
+
+      function collectDifficultyTileToTarget(sim, tile, box) {
+        tile.removed = true;
+        box.progress = Math.min(DIFFICULTY_TARGET_REQUIRED, box.progress + 1);
+        unlockAdjacentDifficultyIron(sim, tile);
+      }
+
+      function collectDifficultyTileToSlot(sim, tile) {
+        tile.removed = true;
+        const slotTile = { type: tile.type, key: tile.key };
+        const lastSame = sim.slots.reduce((last, item, index) => item.type === tile.type ? index : last, -1);
+        sim.slots.splice(lastSame >= 0 ? lastSame + 1 : sim.slots.length, 0, slotTile);
+        sim.wrongTargetMoves += 1;
+        sim.maxSlotPressure = Math.max(sim.maxSlotPressure, sim.slots.length);
+        unlockAdjacentDifficultyIron(sim, tile);
+      }
+
+      function unlockAdjacentDifficultyIron(sim, sourceTile) {
+        for (const key of Array.from(sim.ironKeys)) {
+          const tile = getDifficultyTile(sim, key);
+          if (!tile || tile.removed) {
+            sim.ironKeys.delete(key);
+            continue;
+          }
+          if (isSameLayerOrthogonalDifficultyNeighbor(sourceTile, tile)) {
+            sim.ironKeys.delete(key);
+          }
+        }
+      }
+
+      function isSameLayerOrthogonalDifficultyNeighbor(a, b) {
+        if (a.layer !== b.layer) return false;
+        const rowDiff = Math.abs(a.row - b.row);
+        const colDiff = Math.abs(a.col - b.col);
+        if ((rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2)) return true;
+        return colDiff === 1 && (rowDiff === 2 || rowDiff === 3);
+      }
+
+      function assignDifficultyTarget(sim, box) {
+        const urgentTypes = [];
+        for (const slot of sim.slots) {
+          if (!urgentTypes.includes(slot.type)) urgentTypes.push(slot.type);
+        }
+
+        let type = "";
+        for (const urgentType of urgentTypes) {
+          const index = sim.taskQueue.indexOf(urgentType);
+          if (index >= 0) {
+            type = sim.taskQueue.splice(index, 1)[0];
+            break;
+          }
+        }
+        if (!type) type = sim.taskQueue.shift() || "";
+        box.type = type;
+        box.progress = 0;
+        return !!type;
+      }
+
+      function resolveDifficultyTargets(sim) {
+        for (let guard = 0; guard < 200; guard++) {
+          let changed = false;
+          for (let i = 0; i < sim.slots.length; i++) {
+            const slot = sim.slots[i];
+            const boxIndex = findDifficultyMatchingBoxIndex(sim, slot.type);
+            if (boxIndex < 0) continue;
+            sim.slots.splice(i, 1);
+            i--;
+            sim.boxes[boxIndex].progress = Math.min(DIFFICULTY_TARGET_REQUIRED, sim.boxes[boxIndex].progress + 1);
+            changed = true;
+          }
+
+          for (const box of sim.boxes) {
+            if (box.type && box.progress >= DIFFICULTY_TARGET_REQUIRED) {
+              assignDifficultyTarget(sim, box);
+              changed = true;
+            }
+          }
+          sim.maxSlotPressure = Math.max(sim.maxSlotPressure, sim.slots.length);
+          if (!changed) return;
+        }
+        sim.failed = true;
+        sim.reason = "目标回收循环异常";
+      }
+
+      function findDifficultyMatchingBoxIndex(sim, type, planned = null) {
+        for (let i = 0; i < sim.boxes.length; i++) {
+          const box = sim.boxes[i];
+          if (!box.type || box.type !== type) continue;
+          if (box.progress + (planned?.get(i) || 0) < DIFFICULTY_TARGET_REQUIRED) return i;
+        }
+        return -1;
+      }
+
+      function updateDifficultyPeaks(sim) {
+        const active = sim.tiles.filter((tile) => !tile.removed);
+        if (active.length === 0) return;
+        const blocked = active.filter((tile) => isDifficultyTileBlocked(sim, tile)).length;
+        sim.blockedPeakRatio = Math.max(sim.blockedPeakRatio, blocked / active.length);
+        sim.maxSlotPressure = Math.max(sim.maxSlotPressure, sim.slots.length);
+      }
+
+      function countDifficultyPlayableTiles(sim) {
+        return getDifficultyActions(sim).reduce((total, action) => total + action.tiles.length, 0);
+      }
+
+      function isDifficultyComplete(sim) {
+        return sim.tiles.every((tile) => tile.removed) &&
+          sim.slots.length === 0 &&
+          sim.taskQueue.length === 0 &&
+          sim.boxes.every((box) => !box.type && box.progress === 0);
+      }
+
       function validatePositions() {
         if (!state.levelJson) return { ok: false, errors: ["请先加载关卡"] };
         const errors = [];
@@ -1711,14 +2416,15 @@
         const data = buildDataArray(next.positions);
         const task = getExportTaskOrder();
         const taskNum = task.map(() => 3);
-        const summary = buildSummary(next.positions, counts, task);
+        const difficulty = computeLevelDifficulty(next.positions, task, next);
+        const summary = buildSummary(next.positions, counts, task, difficulty);
 
         next.decoded_config = {
           ...(next.decoded_config || {}),
           data,
           task: [task],
           taskNum: [taskNum],
-          hard: next.decoded_config?.hard ?? next.summary?.hard ?? next.index_config?.base_diff ?? 0,
+          hard: difficulty.hard,
         };
         if (!Array.isArray(next.decoded_config.chain)) next.decoded_config.chain = [];
         next.summary = {
@@ -1749,7 +2455,7 @@
         return data;
       }
 
-      function buildSummary(positions, counts, task) {
+      function buildSummary(positions, counts, task, difficulty = null) {
         const layers = uniqueLayersFromPositions(positions);
         const rowsPerLayer = [];
         const colsPerRowMinmax = [];
@@ -1772,7 +2478,7 @@
           cols_per_row_minmax: colsPerRowMinmax,
           non_zero_tiles: positions.length,
           tile_counts: tileCounts,
-          hard: state.levelJson?.summary?.hard ?? state.levelJson?.decoded_config?.hard ?? state.levelJson?.index_config?.base_diff ?? 0,
+          hard: difficulty?.hard ?? computeLevelDifficulty(positions, task, state.levelJson).hard,
           task_count: task.length,
           chain_count: Array.isArray(state.levelJson?.decoded_config?.chain) ? state.levelJson.decoded_config.chain.length : 0,
         };
@@ -1829,6 +2535,8 @@
         state.selectedIndex = -1;
         dom.levelInput.value = String(json.level_no);
         dom.previewSub.textContent = `${file.name}，${state.positions.length} 张牌`;
+        await ensureManifestLoaded();
+        await ensureTileAssets(getTileCounts(state.positions).keys());
         renderAll();
         setMessage("导入完成", "ok");
       }
@@ -1837,9 +2545,7 @@
         if (state.loading) return;
         state.loading = true;
         try {
-          setStatus("正在加载构建资源");
-          await loadManifest();
-          setStatus(`已加载 ${state.levels.size} 个关卡，${state.tileIds.length} 张牌`);
+          setStatus("正在加载关卡");
           await loadLevel(normalizeInt(dom.levelInput.value, 0));
           setStatus(`关卡 ${state.currentLevel} 已就绪`);
         } catch (error) {

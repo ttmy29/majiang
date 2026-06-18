@@ -1,7 +1,7 @@
 import { _decorator, assetManager, AssetManager, Component, director, find, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, sys, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
-import { ensureLevelJson, LevelJson, LevelJsonPosition, releaseOutsideWindow, resolveLevelLoadOptions, warmupForwardWindow } from './config/LevelJsonLoader';
+import { ensureLevelJson, LevelJson, LevelJsonPosition, releaseOutsideWindow, warmupForwardWindow } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { ironItem } from './ironItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
@@ -9,6 +9,7 @@ import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
 import { ArchiveManager } from './manager/ArchiveManager';
+import { StreakManager } from './manager/StreakManager';
 import { Utils } from './util/Utils';
 import { SDKEvent, SDKManager } from '../../loading/SDKManager';
 
@@ -142,8 +143,16 @@ export class GameCtrl extends Component {
     private tipsActive = false;
     private static readonly IDLE_TIPS_SECONDS = 10;
     private static readonly GUIDE_LEVEL = 0;
-    private static readonly FIRST_TIPS_POPUP_LEVEL = 15;
     private static readonly FAILURE_POPUP_DELAY = 1.25;
+
+    // 自动完成:清到"只剩最后一层"(剩余牌全在同一层、必然无遮挡)时接管,
+    // 自动把剩余牌逐张飞入目标槽直到通关。期间禁用一切交互。
+    private autoFinishing = false;
+    private initialLayerCount = 1;            // 开局时不同 z_layer 的数量;==1 的纯单层关不触发(否则一开局就自动通关)
+    private autoFinishIdleTicks = 0;          // 连续多少拍没有任何牌被消除(看门狗用)
+    private autoFinishLastRemovedCount = 0;   // 上一拍已消除的牌数,用来判断是否有进度
+    private static readonly AUTO_FINISH_STEP = 0.16;       // 每次自动点牌的间隔(秒)
+    private static readonly AUTO_FINISH_MAX_IDLE = 25;     // 看门狗:连续无进度拍数上限(~4s)后放弃接管
 
     // UI 相关 —— targetLabel/statusLabel/comboLabel/toastLabel 已搬到 UIGameLayer，
     // levelLabel 是 @property 由场景绑定，留在这里直接读写
@@ -160,6 +169,7 @@ export class GameCtrl extends Component {
         director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
         director.on(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
         director.on(Constants.eventNames.EventWinNextLevel, this.onEventWinNextLevel, this);
+        director.on(Constants.eventNames.EventClearAllMahjongTiles, this.clearAllMahjongTiles, this);
         // 切后台/关闭浏览器时强制同步一次快照,作为 checkpoint 保存的兜底
         game.on(Game.EVENT_HIDE, this.onAppHide, this);
         this.initSceneRefs();
@@ -227,6 +237,7 @@ export class GameCtrl extends Component {
     protected onDestroy(): void {
         // 防御性注销 — Canvas 是 persist 节点,GameCtrl 实际不会被销毁,
         // 但开发期 HMR / 场景切换会触发,避免重复监听
+        director.off(Constants.eventNames.EventClearAllMahjongTiles, this.clearAllMahjongTiles, this);
         game.off(Game.EVENT_HIDE, this.onAppHide, this);
     }
 
@@ -241,10 +252,12 @@ export class GameCtrl extends Component {
         return { level, snapshot };
     }
 
-    private async requestStartLevel(level: number, snapshot: ProgressSnapshot | null = null) {
+    private async requestStartLevel(level: number, snapshot: ProgressSnapshot | null = null, forceReroll = false) {
         const requestSeq = ++this.levelRequestSeq;
-        const opts = resolveLevelLoadOptions(level);
-        const json = await ensureLevelJson(level, opts);
+        // 连胜分档 + 难度池：≤10 用基础盘面；11+ 按连胜摇难度档并抽没玩过的盘面。
+        // 内部已含每日清零、同关盘面复用(快照命中)、失败重开重摇难度。
+        const plan = await StreakManager.resolveLevelPlanForStart(level, { forceReroll });
+        const json = await ensureLevelJson(plan.boardId, plan.tier);
         if (requestSeq !== this.levelRequestSeq) return;
         if (!json) {
             console.warn(`GameCtrl: no level JSON for level ${level}`);
@@ -252,12 +265,13 @@ export class GameCtrl extends Component {
         }
 
         this.levelJson = json;
-        this.startLevel(level, snapshot);
+        const difficultyLevel = plan.tier === 'hard' ? 1 : plan.tier === 'normal' ? 3 : plan.tier === 'easy' ? 1 : 0;
+        this.startLevel(level, snapshot, difficultyLevel);
         if (requestSeq !== this.levelRequestSeq) return;
 
         this.hasStarted = true;
         void warmupForwardWindow(level, 10);
-        releaseOutsideWindow(level, 10);
+        releaseOutsideWindow(plan.boardId, 10);
     }
 
     private onAppHide = () => {
@@ -296,11 +310,11 @@ export class GameCtrl extends Component {
         if (this.remainTime <= 0) this.failLevel('时间到');
     }
 
-    private startLevel(level: number, snapshot: ProgressSnapshot | null = null) {
+    private startLevel(level: number, snapshot: ProgressSnapshot | null = null, difficultyLevel = 0) {
         this.gameState = 'playing';
         this.nowLevel = level;
         this._guideTapCount = 0;
-        director.emit(Constants.eventNames.EventLevelStart, this.nowLevel);
+        director.emit(Constants.eventNames.EventLevelStart, this.nowLevel, difficultyLevel);
         // 随机道具(额外免费道具)按钮:仅在配置关卡显示。失败重开/重新进入会再走一遍 startLevel,按钮按关卡重新出现
         director.emit(Constants.eventNames.EventSetRandomPropButton, Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0);
         // 上报关卡进入事件
@@ -331,6 +345,8 @@ export class GameCtrl extends Component {
         this.lastComboAt = 0;
         this.comboEmitPending = false;
         this.resolvingMatch = false;
+        this.autoFinishing = false;
+        this.unschedule(this.autoFinishStep);
         this.unschedule(this.finishDealAnimation);
         this.dealingTiles = true;
         this.dealOverlayLayoutReady = false;
@@ -377,15 +393,24 @@ export class GameCtrl extends Component {
         this.scheduleOnce(this.showFirstTipsPopup, 0.2);
     }
 
+    private hasIronTipsConfig(): boolean {
+        const ironData = this.levelJson?.decoded_config?.ironData;
+        return Array.isArray(ironData) && ironData.length > 0;
+    }
+
+    private markIronTipsShown(): void {
+        StorageManager.instance.setBoolean(StorageKey.IronTipsShown, true);
+        ArchiveManager.instance.scheduleUpload();
+    }
+
     private showFirstTipsPopup = () => {
         if (this.gameState !== 'playing') return;
-        if (this.nowLevel !== GameCtrl.FIRST_TIPS_POPUP_LEVEL) return;
-        if (StorageManager.instance.getBoolean(StorageKey.Level15TipsShown, false)) return;
+        if (!this.hasIronTipsConfig()) return;
+        if (StorageManager.instance.getBoolean(StorageKey.IronTipsShown, false)) return;
 
         const tipsNode = LayerManager.instance.showUI('tips');
         if (tipsNode) {
-            StorageManager.instance.setBoolean(StorageKey.Level15TipsShown, true);
-            ArchiveManager.instance.scheduleUpload();
+            this.markIronTipsShown();
         }
     };
 
@@ -457,6 +482,7 @@ export class GameCtrl extends Component {
         for (const tile of this.tiles) {
             layers.add(tile.layer);
         }
+        this.initialLayerCount = layers.size;
         layers.forEach((layer) => this.refreshLayerDisplayOrder(this.getOrCreateLayerContainer(layer)));
 
         this.refreshChainLinkVisuals();
@@ -742,8 +768,8 @@ export class GameCtrl extends Component {
     private layoutIronNode(node: Node, tile: TileRecord) {
         const scale = this.getBoardTileScale();
         const pos = this.getOverlayTilePosition(tile);
-        node.setPosition(pos.x, pos.y, 0);
-        node.setScale(scale * 1.6, scale * 1.6, 1);
+        node.setPosition(pos.x - 3, pos.y + 3, 0);
+        node.setScale(scale * 1.3, scale * 1.3, 1);
         node.setRotationFromEuler(0, 0, 0);
     }
 
@@ -1045,7 +1071,7 @@ export class GameCtrl extends Component {
     }
 
     private onTileTap(tile: TileRecord) {
-        if (this.gameState !== 'playing' || this.dealingTiles || this.shuffleAnimating || tile.collected || tile.removed) {
+        if (this.gameState !== 'playing' || this.autoFinishing || this.dealingTiles || this.shuffleAnimating || tile.collected || tile.removed) {
             return;
         }
         if (this.isTileBlocked(tile)) {
@@ -1413,6 +1439,7 @@ export class GameCtrl extends Component {
             }, 0.18);
             this.updatePlayableStates();
             this.updateHud();
+            this.scheduleAutoFinishStep(0);
             return;
         }
 
@@ -1424,6 +1451,7 @@ export class GameCtrl extends Component {
         this.updateHud();
         this.checkEndState();
         this.saveProgressDeferred();
+        this.scheduleAutoFinishStep(0);
     }
 
     private collectStoredTargets() {
@@ -1507,21 +1535,19 @@ export class GameCtrl extends Component {
             return this.winLevel();
         }
         if (this.slots.length >= Math.max(1, this.slotCapacity - 1)) {
-            // 【新增防护】：检查棋盘是否处于“忙碌”状态
-            // resolvingMatch: 正在从底部往目标槽吸牌
-            // refreshing: 正在执行 MoveOut 移出动画并准备更换目标
-            // movingIn: 正在执行 MoveIn 移入屏幕动画
-            // progress >= required: 已经收满3个，但还在等 0.18s 的延迟才开始 refreshing
-            const isBoardBusy = this.resolvingMatch || this.targetBoxes.some(b =>
-                b.refreshing ||
-                b.movingIn ||
-                (b.progress >= b.required)
-            );
+            // 【修复】：将 pending > 0 和 flyLayer 上的牌也纳入棋盘忙碌判定中
+            const isBoardBusy = this.resolvingMatch ||
+                this.targetBoxes.some(b =>
+                    b.pending > 0 ||          // 👈 新增：有牌正飞向目标槽
+                    b.refreshing ||
+                    b.movingIn ||
+                    (b.progress + b.pending >= b.required) // 👈 修改：把 pending 加上
+                ) ||
+                (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)); // 👈 新增：保证空中有牌飞向底部时也不立刻判死刑
 
             if (isBoardBusy) {
-                // 棋盘正在忙，后续大概率会触发 collectStoredTargets() 吸走底部的牌。
-                // 此时不能冤枉玩家，暂缓判负，0.2秒后再重新检查（类似于轮询机制）
-                this.unschedule(this.checkEndState); // 防止高频连点导致的回调堆积
+                // 棋盘正在忙，暂缓判负，0.2秒后再重新检查
+                this.unschedule(this.checkEndState);
                 this.scheduleOnce(this.checkEndState, 0.2);
                 return;
             }
@@ -1534,6 +1560,291 @@ export class GameCtrl extends Component {
         //     this.failLevel('死局，目标牌不足');
         // }
     }
+
+    // ==========================================
+    // 自动完成(最后一层自动飞入)
+    // ==========================================
+
+    // 棋盘安定且"只剩最后一层"时返回 true。遮挡判断:同层之间不会互相遮挡
+    // (findBlockerTile 只算更高层),所以剩余牌全在同一层即等价于"全部无遮挡"。
+    private isReadyForAutoFinish(): boolean {
+        const logAutoFinishState = (reason: string, remainingOverride: TileRecord[] | null = null) => {
+            const remaining = remainingOverride || this.tiles.filter((t) => !t.removed && this.isBoardTileOnBoard(t));
+            const boxStates = this.targetBoxes.map((b, index) => ({
+                index,
+                type: b.type,
+                progress: b.progress,
+                pending: b.pending,
+                required: b.required,
+                unlocked: b.unlocked,
+                refreshing: b.refreshing,
+                movingIn: b.movingIn,
+                movedOut: b.movedOut,
+            }));
+            const remainingStates = remaining.map((t) => {
+                const blocker = this.findBlockerTile(t);
+                const ironLock = this.getIronLock(t);
+                const chainLink = this.getActiveChainLink(t);
+                return {
+                    uid: t.uid,
+                    type: t.type,
+                    layer: t.layer,
+                    row: t.row,
+                    col: t.col,
+                    collected: t.collected,
+                    removed: t.removed,
+                    active: !!t.node?.activeInHierarchy,
+                    parent: t.node?.parent?.name || '',
+                    blocked: !!blocker,
+                    blocker: blocker ? {
+                        uid: blocker.uid,
+                        type: blocker.type,
+                        layer: blocker.layer,
+                        row: blocker.row,
+                        col: blocker.col,
+                    } : null,
+                    ironLocked: !!ironLock && (ironLock.locked || ironLock.unlocking),
+                    ironUnlocking: !!ironLock?.unlocking,
+                    chainId: chainLink?.id || null,
+                    matchingBoxIndex: this.targetBoxes.findIndex((b) =>
+                        b.unlocked
+                        && !b.refreshing
+                        && !b.movingIn
+                        && b.type === t.type
+                        && b.progress + b.pending < b.required
+                    ),
+                };
+            });
+            // console.log('[AutoFinish] isReadyForAutoFinish', {
+            //     reason,
+            //     level: this.nowLevel,
+            //     gameState: this.gameState,
+            //     autoFinishing: this.autoFinishing,
+            //     isGuideLevel: this.isGuideLevel(),
+            //     initialLayerCount: this.initialLayerCount,
+            //     dealingTiles: this.dealingTiles,
+            //     shuffleAnimating: this.shuffleAnimating,
+            //     resolvingMatch: this.resolvingMatch,
+            //     hasUnlockingIron: this.hasUnlockingIron(),
+            //     flyLayerBusy: !!(this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)),
+            //     remainingCount: remaining.length,
+            //     remainingLayers: Array.from(new Set(remaining.map((t) => t.layer))),
+            //     slotCount: this.slots.length,
+            //     slotTypes: this.slots.map((t) => t.type),
+            //     boxStates,
+            //     remainingStates,
+            // });
+        };
+
+        if (this.gameState !== 'playing' || this.autoFinishing || this.isGuideLevel()) {
+            logAutoFinishState('state-not-ready');
+            return false;
+        }
+        if (this.initialLayerCount <= 1) {
+            logAutoFinishState('single-layer-level');
+            return false;
+        }
+        // 棋盘必须安定:发牌/换牌/吸牌/铁链解锁中,或有目标槽在飞/刷新/移入,或飞行层上还有牌,都不接管
+        if (this.dealingTiles || this.shuffleAnimating || this.resolvingMatch || this.hasUnlockingIron()) {
+            logAutoFinishState('board-busy');
+            return false;
+        }
+        if (this.targetBoxes.some((b) => b.pending > 0 || b.refreshing || b.movingIn)) {
+            logAutoFinishState('target-box-busy');
+            return false;
+        }
+        if (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)) {
+            logAutoFinishState('fly-layer-busy');
+            return false;
+        }
+
+        const remaining = this.tiles.filter((t) => !t.removed && this.isBoardTileOnBoard(t));
+        if (remaining.length === 0) {
+            logAutoFinishState('no-board-tiles', remaining);
+            return false;
+        }
+        const layer = remaining[0].layer;
+        if (remaining.some((t) => t.layer !== layer)) {
+            logAutoFinishState('multiple-remaining-layers', remaining);
+            return false;
+        }
+        // 防御:同层内仍有未解的链/铁链(或异常遮挡)时不接管,留给玩家手动清,清完再触发
+        if (remaining.some((t) => this.isTileBlocked(t) || this.isIronLockedTile(t) || !!this.getActiveChainLink(t))) {
+            logAutoFinishState('remaining-tile-blocked-or-locked', remaining);
+            return false;
+        }
+        logAutoFinishState('ready', remaining);
+        return true;
+    }
+
+    private tryStartAutoFinish() {
+        //暂时屏蔽这个功能
+        return
+        if (this.isReadyForAutoFinish()) {
+            //一波带走
+            this.startAutoFinish();
+        }
+    }
+
+    private startAutoFinish() {
+        this.autoFinishing = true;
+        this.autoFinishIdleTicks = 0;
+        this.autoFinishLastRemovedCount = this.tiles.filter((t) => t.removed).length;
+        this.clearIdleTips();
+        // 屏蔽手点:被自动接管期间玩家点牌无效(自动流程直接调 moveTileToTarget,不走触摸)
+        this.setBoardTileTouchEnabled(false);
+        this.scheduleAutoFinishStep(0);
+    }
+
+    private scheduleAutoFinishStep(delay = GameCtrl.AUTO_FINISH_STEP) {
+        if (!this.autoFinishing || this.gameState !== 'playing') return;
+        this.unschedule(this.autoFinishStep);
+        this.scheduleOnce(this.autoFinishStep, delay);
+    }
+
+    private stopAutoFinish(restoreTouch: boolean) {
+        if (!this.autoFinishing) return;
+        this.autoFinishing = false;
+        this.unschedule(this.autoFinishStep);
+        if (restoreTouch && this.gameState === 'playing') this.setBoardTileTouchEnabled(true);
+    }
+
+    // 每拍挑一张"能匹配当前目标槽"的在场牌飞入。只走目标槽、绝不入底部存牌槽,
+    // 因此永不触发"槽位满"失败。匹配不到(目标槽刷新等瞬态)就空转等 collectStoredTargets 级联推进。
+    private autoFinishStep = () => {
+        const logAutoFinishStep = (reason: string, remaining: TileRecord[] = []) => {
+            const candidateStates = remaining.map((t) => {
+                const blocker = this.findBlockerTile(t);
+                const ironLock = this.getIronLock(t);
+                const chainLink = this.getActiveChainLink(t);
+                const boxIndex = this.targetBoxes.findIndex((b) =>
+                    b.unlocked
+                    && !b.refreshing
+                    && !b.movingIn
+                    && b.type === t.type
+                    && b.progress + b.pending < b.required
+                );
+                return {
+                    uid: t.uid,
+                    type: t.type,
+                    layer: t.layer,
+                    row: t.row,
+                    col: t.col,
+                    blocked: !!blocker,
+                    blocker: blocker ? {
+                        uid: blocker.uid,
+                        type: blocker.type,
+                        layer: blocker.layer,
+                        row: blocker.row,
+                        col: blocker.col,
+                    } : null,
+                    ironLocked: !!ironLock && (ironLock.locked || ironLock.unlocking),
+                    ironUnlocking: !!ironLock?.unlocking,
+                    chainId: chainLink?.id || null,
+                    matchingBoxIndex: boxIndex,
+                };
+            });
+            // console.log('[AutoFinish] step', {
+            //     reason,
+            //     level: this.nowLevel,
+            //     gameState: this.gameState,
+            //     autoFinishing: this.autoFinishing,
+            //     idleTicks: this.autoFinishIdleTicks,
+            //     removedCount: this.tiles.filter((t) => t.removed).length,
+            //     lastRemovedCount: this.autoFinishLastRemovedCount,
+            //     remainingCount: remaining.length,
+            //     remainingLayers: Array.from(new Set(remaining.map((t) => t.layer))),
+            //     flyLayerBusy: !!(this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)),
+            //     resolvingMatch: this.resolvingMatch,
+            //     targetBoxes: this.targetBoxes.map((b, index) => ({
+            //         index,
+            //         type: b.type,
+            //         progress: b.progress,
+            //         pending: b.pending,
+            //         required: b.required,
+            //         unlocked: b.unlocked,
+            //         refreshing: b.refreshing,
+            //         movingIn: b.movingIn,
+            //         movedOut: b.movedOut,
+            //     })),
+            //     candidateStates,
+            // });
+        };
+
+        if (this.gameState !== 'playing' || !this.autoFinishing) {
+            logAutoFinishStep('stop-state-not-ready');
+            this.autoFinishing = false;
+            return;
+        }
+
+        // 看门狗:只要有牌被消除就算有进度,清零空转计数;长时间无进度则放弃接管(理论上不会发生)
+        const removedCount = this.tiles.filter((t) => t.removed).length;
+        if (removedCount !== this.autoFinishLastRemovedCount) {
+            this.autoFinishLastRemovedCount = removedCount;
+            this.autoFinishIdleTicks = 0;
+            console.log('[AutoFinish] step progress', {
+                level: this.nowLevel,
+                removedCount,
+                idleTicks: this.autoFinishIdleTicks,
+            });
+        }
+
+        // 棋盘已空:剩下的(在飞 / 底部槽 / 挂起牌)交给既有 win 级联收尾,不再主动点牌
+        const remaining = this.tiles.filter((t) => !t.removed && this.isBoardTileOnBoard(t));
+        if (remaining.length === 0) {
+            logAutoFinishStep('board-empty', remaining);
+            this.checkEndState();
+            this.scheduleAutoFinishStep();
+            return;
+        }
+
+        logAutoFinishStep('tick', remaining);
+
+        let pickedTile: TileRecord | null = null;
+        let pickedBox: TargetBox | null = null;
+        for (const tile of remaining) {
+            if (this.isTileBlocked(tile) || this.isIronLockedTile(tile) || this.getActiveChainLink(tile)) continue;
+            const box = this.findMatchingTargetBox(tile.type);
+            if (box) {
+                pickedTile = tile;
+                pickedBox = box;
+                break;
+            }
+        }
+
+        if (pickedTile && pickedBox) {
+            this.autoFinishIdleTicks = 0;
+            // console.log('[AutoFinish] step pick', {
+            //     tile: {
+            //         uid: pickedTile.uid,
+            //         type: pickedTile.type,
+            //         layer: pickedTile.layer,
+            //         row: pickedTile.row,
+            //         col: pickedTile.col,
+            //     },
+            //     boxIndex: this.targetBoxes.indexOf(pickedBox),
+            //     box: {
+            //         type: pickedBox.type,
+            //         progress: pickedBox.progress,
+            //         pending: pickedBox.pending,
+            //         required: pickedBox.required,
+            //         refreshing: pickedBox.refreshing,
+            //         movingIn: pickedBox.movingIn,
+            //     },
+            // });
+            if (pickedTile.item.playTapFeedback) pickedTile.item.playTapFeedback();
+            this.moveTileToTarget(pickedTile, pickedBox);
+        } else if (++this.autoFinishIdleTicks >= GameCtrl.AUTO_FINISH_MAX_IDLE) {
+            // 防御性兜底:长时间推不动就把控制权还给玩家
+            logAutoFinishStep('idle-timeout-stop', remaining);
+            this.stopAutoFinish(true);
+            return;
+        } else {
+            logAutoFinishStep('no-pick-idle', remaining);
+        }
+
+        this.scheduleAutoFinishStep();
+    };
 
     private canStillCompleteTasks(): boolean {
         // 把"已上场目标 + 未来队列"按 type 合并需求量,与棋盘剩余张数对比;
@@ -1562,12 +1873,17 @@ export class GameCtrl extends Component {
 
     private winLevel() {
         this.gameState = 'win';
+        director.emit(Constants.eventNames.EventClearComboBoxEffects);
         this.clearIdleTips();
+        this.autoFinishing = false;
+        this.unschedule(this.autoFinishStep);
         // 上报关卡成功事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: Math.ceil(this.elapsedTime) });
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
         window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
+        // 通关结算：记该盘面为已玩(去重) + 干净通关(本关未失败)则连胜 +1（须在 saveLevel 推进关号前结算本关）
+        StreakManager.commitClear(this.nowLevel);
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -1585,7 +1901,12 @@ export class GameCtrl extends Component {
     private failLevel(reason: string) {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
+        // 进入失败状态即清零连胜并标记本关 failed（含"槽位满"弹窗；之后复活/重开通关也不 +1）
+        StreakManager.markFailed(this.nowLevel);
+        director.emit(Constants.eventNames.EventClearComboBoxEffects);
         this.clearIdleTips();
+        this.autoFinishing = false;
+        this.unschedule(this.autoFinishStep);
         // 上报关卡失败事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
         window.dnSDK?.track?.('LEVEL_LOSE', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
@@ -1608,15 +1929,16 @@ export class GameCtrl extends Component {
         ProgressManager.addLevelRetryCount(this.nowLevel, 1);
         ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
-        this.scheduleOnce(() => void this.requestStartLevel(this.nowLevel), 1.5);
+        this.scheduleOnce(() => void this.requestStartLevel(this.nowLevel, null, true), 1.5);
     }
 
     private onEventFailureRestart() {
-        // 真正重开本关：累加该关重拾次数（用于难度自适应）
+        // 真正重开本关：累加该关重拾次数（仅埋点/统计；难度已改由连胜分档，不再依赖它）
         ProgressManager.addLevelRetryCount(this.nowLevel, 1);
         ArchiveManager.instance.scheduleUpload();
         ProgressManager.clearSnapshot();
-        void this.requestStartLevel(this.nowLevel);
+        // 失败后重开：强制重摇难度档（此时连胜已清零，多半落到一档=更简单；failed 保留 → 通关不 +1）
+        void this.requestStartLevel(this.nowLevel, null, true);
     }
 
     private onEventWinNextLevel() {
@@ -1644,6 +1966,13 @@ export class GameCtrl extends Component {
             } else {
                 tile.item.disableTileTouch();
             }
+        }
+    }
+
+    private setBoardTileMotionStreakEnabled(enabled: boolean) {
+        for (const tile of this.tiles) {
+            if (!tile.node?.isValid) continue;
+            tile.item.setMotionStreakEnabled(enabled);
         }
     }
 
@@ -1737,9 +2066,10 @@ export class GameCtrl extends Component {
             return true;
         }
 
-        // 保持全局任务队列顺序:挂起牌不要从未来队列里插队消耗,
-        // 等对应 type 按 FIFO 正常出现在目标槽时再回收。
-        return false;
+        const taskIndex = this.taskQueue.indexOf(type);
+        if (taskIndex < 0) return false;
+        this.taskQueue.splice(taskIndex, 1);
+        return true;
     }
 
     // ==========================================
@@ -1805,6 +2135,7 @@ export class GameCtrl extends Component {
         }
         this.dealingTiles = true;
         this.dealOverlayLayoutReady = false;
+        this.setBoardTileMotionStreakEnabled(false);
 
         // ==========================================
         // 按照原版参数配置飞入动画节奏
@@ -1843,6 +2174,9 @@ export class GameCtrl extends Component {
                     position: tile.boardPos,
                     scale: new Vec3(boardScale, boardScale, 1)
                 }, {}) // 横向飞入配合 backOut 会有一种发牌“急停撞击”的干脆手感，如果不喜欢可以改为 'quadOut'
+                .call(() => {
+                    if (tile.node?.isValid) tile.item.setMotionStreakEnabled(true);
+                })
                 .start();
         }
 
@@ -1910,8 +2244,36 @@ export class GameCtrl extends Component {
 
     // 严格按 task[] 顺序出队:队列空了 box.type='' 返回 false,上层会把槽位标记 movedOut
     private assignNewTarget(box: TargetBox): boolean {
-        const type = this.taskQueue.shift() || '';
+        let type = '';
 
+        // 1. 收集玩家当前“急需解救”的牌的类型
+        // 包括被失败弹窗挂起的牌 (discardedTiles) 和底部存牌槽里的牌 (slots)
+        const urgentTypes = new Set<string>();
+        for (const tile of this.discardedTiles) {
+            if (tile.node?.isValid) urgentTypes.add(tile.type);
+        }
+        for (const tile of this.slots) {
+            if (tile.node?.isValid) urgentTypes.add(tile.type);
+        }
+
+        // 2. 尝试在任务队列 (taskQueue) 中寻找这些急需的类型，将其“插队”提取出来
+        let foundUrgent = false;
+        for (const uType of urgentTypes) {
+            const taskIndex = this.taskQueue.indexOf(uType);
+            if (taskIndex >= 0) {
+                // 在队列中找到了对应的任务！用 splice 把它从原位置抽出来
+                type = this.taskQueue.splice(taskIndex, 1)[0];
+                foundUrgent = true;
+                break;
+            }
+        }
+
+        // 3. 如果没找到急需的（或者底部槽位本来就是空的），就按原逻辑取队列第一个
+        if (!foundUrgent) {
+            type = this.taskQueue.shift() || '';
+        }
+
+        // 4. 继续执行后续的原有渲染和归位逻辑
         this.emitClearSlot(box);
         box.type = type;
         box.progress = 0;
@@ -2003,6 +2365,9 @@ export class GameCtrl extends Component {
             // assignNewTarget 内部会清理旧的 collectedNodes 与 previewNode，并生成新预览
             const assigned = this.assignNewTarget(box);
 
+            box.refreshing = false;
+            this.tryStartAutoFinish();
+
             if (assigned) {
                 // 有新目标：把槽位从屏幕外带回原位
                 this.startSlotMoveIn(box);
@@ -2012,13 +2377,13 @@ export class GameCtrl extends Component {
                 box.movedOut = true;
             }
 
-            box.refreshing = false;
             this.fillEmptyTargetBoxes();
             this.collectStoredTargets();
             this.updatePlayableStates();
             this.updateHud();
             this.checkEndState();
             this.saveProgressDeferred();
+            this.scheduleAutoFinishStep(0);
         }, Constants.slotAnim.MoveOutWait);
     }
 
@@ -2152,8 +2517,7 @@ export class GameCtrl extends Component {
         const remain = this.tiles.filter((t) => !t.removed).length;
         const failThreshold = Math.max(1, this.slotCapacity - 1);
         const hasTimer = this.config.levelTime > 0;
-        const comboActive = this.comboTimes > 1 && this.lastComboAt > 0 && Date.now() - this.lastComboAt <= 5000;
-
+        const comboActive = this.comboTimes > 1 && this.lastComboAt > 0;
         director.emit(Constants.eventNames.EventHudUpdate, {
             remain,
             total: this.tiles.length,
@@ -2175,7 +2539,7 @@ export class GameCtrl extends Component {
         }
 
         const now = Date.now();
-        this.comboTimes = (now - this.lastComboAt <= 5000) ? this.comboTimes + 1 : 1;
+        this.comboTimes = this.comboTimes > 0 ? this.comboTimes + 1 : 1;
         this.lastComboAt = now;
         // 0.18s 延迟跟槽位 MoveOut 起手对齐:让 combo 口号/进度条出现在"砸完→飞走"那一刻,
         // 而不是飞行落位那一帧。同时 collectStoredTargets 一次让多个 box 完成时,
@@ -2272,17 +2636,63 @@ export class GameCtrl extends Component {
         return /^\d+$/.test(name) ? name : '';
     }
 
+    private clearAllMahjongTiles() {
+        if (this.hasStarted) {
+            this.unscheduleAllCallbacks();
+            this.levelRequestSeq++;
+        }
+        this.clearIdleTips();
+        this.autoFinishing = false;
+        this.dealingTiles = false;
+        this.dealOverlayLayoutReady = true;
+        this.resolvingMatch = false;
+        this.shuffleAnimating = false;
+        this.shuffleSeq++;
+        this.comboEmitPending = false;
+        this.targetsInitialized = false;
+        this.snapshotDirty = false;
+        this.snapshotFlushScheduled = false;
+        this.gameState = 'ready';
+
+        for (const tile of this.tiles) {
+            if (tile.node?.isValid) Tween.stopAllByTarget(tile.node);
+        }
+        this.clearBoard();
+        this.tiles = [];
+        this.slots = [];
+        this.discardedTiles = [];
+        this.actionHistory = [];
+    }
+
+    private destroyChildren(parent: Node | null) {
+        if (!parent?.isValid) return;
+        for (const child of parent.children.slice()) {
+            Tween.stopAllByTarget(child);
+            child.removeFromParent();
+            child.destroy();
+        }
+    }
+
+    private destroyNamedChildren(parent: Node | null, prefixes: string[]) {
+        if (!parent?.isValid) return;
+        for (const child of parent.children.slice()) {
+            if (!prefixes.some((prefix) => child.name.startsWith(prefix))) continue;
+            Tween.stopAllByTarget(child);
+            child.removeFromParent();
+            child.destroy();
+        }
+    }
+
     private clearBoard() {
         this.chainLinks = [];
         this.chainByTileUid.clear();
         this.ironLocks = [];
         this.ironByTileUid.clear();
-        if (this.mahjongPnode) this.mahjongPnode.removeAllChildren();
-        if (this.flyLayer?.isValid) this.flyLayer.removeAllChildren();
-        if (this.slotNode) {
-            for (const child of this.slotNode.children.slice()) {
-                if (child.name.startsWith('slotTile_')) child.destroy();
-            }
+        this.destroyChildren(this.mahjongPnode);
+        this.destroyChildren(this.flyLayer);
+        this.destroyNamedChildren(this.slotNode, ['slotTile_']);
+        for (const box of this.targetBoxes) {
+            this.destroyNamedChildren(box.node, ['targetTile_']);
         }
     }
 
@@ -2329,7 +2739,7 @@ export class GameCtrl extends Component {
 
     private onBtnUndoClick(event) {
         AudioManager.instance.playClick();
-        if (this.gameState !== 'playing' || this.resolvingMatch) return;
+        if (this.gameState !== 'playing' || this.resolvingMatch || this.autoFinishing) return;
 
         // 次数用完:点击=看广告补充次数(refill only,不撤回、不动 actionHistory)
         if (this.undoCount <= 0) {
@@ -2388,6 +2798,7 @@ export class GameCtrl extends Component {
 
         // 撤回飞回棋盘的飞行声,跟 tween 起手对齐
         AudioManager.instance.playOneShot(AudioClipNames.taskFly);
+        tile.item.setMotionStreakEnabled(true);
 
         const boardScale = this.getBoardTileScale();
         tween(tile.node)
@@ -2448,7 +2859,7 @@ export class GameCtrl extends Component {
     }
 
     private onBtnUnlockClick(event) {
-        if (this.gameState !== 'playing') return;
+        if (this.gameState !== 'playing' || this.autoFinishing) return;
         const box = this.targetBoxes.find((i) => !i.unlocked);
         //if (!box) return this.showToast('槽位已满', 0.8);
         if (!box) return LayerManager.instance.showToast('槽位已满');
@@ -2504,7 +2915,7 @@ export class GameCtrl extends Component {
     // }
 
     private onBtnShuffleBoardClick() {
-        if (this.gameState !== 'playing' || this.shuffleAnimating) return;
+        if (this.gameState !== 'playing' || this.shuffleAnimating || this.autoFinishing) return;
 
         // 次数用完:点击=看广告补充次数(refill only,不换牌)
         if (this.switchCount <= 0) {
@@ -2848,7 +3259,7 @@ export class GameCtrl extends Component {
     }
 
     public onBtnSlotUnlockClick(event, data: string) {
-        if (this.gameState !== 'playing') return;
+        if (this.gameState !== 'playing' || this.autoFinishing) return;
         // data "1" -> slot3,"2" -> slot4
         const slotName = data == "1" ? "slot3" : (data == "2" ? "slot4" : "");
         if (!slotName) return;
@@ -2869,7 +3280,7 @@ export class GameCtrl extends Component {
     private isFreePropState: string | null = null;
     public onBtnRandomPropClick(event, data: string) {
         AudioManager.instance.playClick();
-        if (this.gameState !== 'playing') return;
+        if (this.gameState !== 'playing' || this.autoFinishing) return;
         this.isFreePropState = data;
         if (sys.platform === sys.Platform.WECHAT_GAME) {
             wx.shareAppMessage({

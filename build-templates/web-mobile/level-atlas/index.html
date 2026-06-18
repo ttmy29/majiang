@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>麻将关卡图鉴 · 校准难度</title>
+  <style>
+    :root {
+      --ink: #1f2933;
+      --muted: #64717f;
+      --line: #d8e0e7;
+      --panel: #ffffff;
+      --paper: #f5f7f1;
+      --accent: #1f7a77;
+      --easy: #2f855a;
+      --normal: #3b6ea8;
+      --hard: #b7791f;
+      --very-hard: #b83232;
+      --shadow: 0 14px 34px rgba(31, 41, 51, .12);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(120deg, rgba(31,122,119,.08), transparent 38%), linear-gradient(260deg, rgba(180,85,45,.08), transparent 35%), var(--paper); }
+    header { position: sticky; top: 0; z-index: 20; padding: 16px 22px; background: rgba(245,247,241,.94);
+      border-bottom: 1px solid var(--line); backdrop-filter: blur(14px); }
+    h1 { margin: 0 0 8px; font-size: 22px; font-weight: 760; }
+    .summary { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 13px; }
+    .summary span { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 9px;
+      border: 1px solid var(--line); background: rgba(255,255,255,.7); border-radius: 6px; }
+    .layout { display: grid; grid-template-columns: 248px 1fr; gap: 18px; padding: 18px 22px 28px; }
+    aside { position: sticky; top: 92px; align-self: start; padding: 14px; border: 1px solid var(--line);
+      background: rgba(255,255,255,.86); box-shadow: var(--shadow); border-radius: 8px; }
+    label { display: block; margin: 12px 0 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    input, select { width: 100%; min-height: 36px; padding: 7px 9px; color: var(--ink); background: #fff;
+      border: 1px solid var(--line); border-radius: 6px; font: inherit; outline-color: var(--accent); }
+    .legend { display: grid; gap: 6px; margin-top: 14px; font-size: 12px; color: var(--muted); }
+    .legend div { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid #eef2f4; padding-top: 6px; }
+    .resultbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+    .page-controls { display: flex; align-items: center; gap: 8px; }
+    .page-controls button { min-height: 32px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+      background: #fff; color: var(--ink); cursor: pointer; font: inherit; font-weight: 700; }
+    .page-controls button:disabled { cursor: not-allowed; opacity: .42; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 14px; }
+    .card { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; overflow: hidden;
+      box-shadow: var(--shadow); cursor: pointer; transition: transform .12s; }
+    .card:hover { transform: translateY(-2px); }
+    .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 10px 12px 6px; }
+    .card-head .title strong { font-size: 15px; }
+    .card-head .title small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .board-wrap { display: flex; justify-content: center; align-items: center; padding: 6px 8px; min-height: 150px; background:
+      radial-gradient(circle at 50% 30%, rgba(31,122,119,.05), transparent 70%); }
+    .board-wrap canvas { max-width: 100%; height: auto; }
+    .metrics { display: flex; gap: 6px; padding: 6px 12px 4px; }
+    .metric { flex: 1; text-align: center; background: var(--panel-soft, #f0f4f3); border-radius: 6px; padding: 5px 2px; }
+    .metric b { display: block; font-size: 15px; }
+    .metric span { font-size: 10px; color: var(--muted); }
+    .flags { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 12px 12px; }
+    .flag { font-size: 11px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); }
+    .difficulty { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 7px; color: #fff;
+      font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .difficulty.easy { background: var(--easy); } .difficulty.normal { background: var(--normal); }
+    .difficulty.hard { background: var(--hard); } .difficulty.very-hard { background: var(--very-hard); }
+    .empty { padding: 40px; text-align: center; color: var(--muted); }
+
+    dialog { width: min(960px, 94vw); max-height: 92vh; border: none; border-radius: 14px; padding: 0; box-shadow: var(--shadow); }
+    dialog::backdrop { background: rgba(20,28,33,.5); }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 20px;
+      border-bottom: 1px solid var(--line); position: sticky; top: 0; background: #fff; z-index: 2; }
+    .modal-head h2 { margin: 0; font-size: 19px; }
+    .modal-head .close { border: 1px solid var(--line); background: #fff; border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 16px; }
+    .modal-body { padding: 18px 20px 24px; overflow: auto; }
+    .demo { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }
+    .demo-board { border: 1px solid var(--line); border-radius: 10px; background:
+      radial-gradient(circle at 50% 25%, rgba(31,122,119,.06), transparent 70%); display: flex; justify-content: center; align-items: center; padding: 10px; min-height: 320px; }
+    .demo-side { display: flex; flex-direction: column; gap: 12px; }
+    .boxes { display: flex; gap: 8px; }
+    .tbox { flex: 1; border: 2px solid var(--line); border-radius: 9px; padding: 8px; text-align: center; background: #fff; }
+    .tbox.locked { opacity: .45; }
+    .tbox .ttype { width: 40px; height: 50px; margin: 0 auto 6px; display: block; }
+    .tbox .prog { display: flex; gap: 4px; justify-content: center; }
+    .tbox .dot { width: 11px; height: 11px; border-radius: 50%; background: #e0e6ea; border: 1px solid var(--line); }
+    .tbox .dot.on { background: var(--accent); border-color: var(--accent); }
+    .slotbar { border: 1px dashed var(--line); border-radius: 9px; padding: 8px; min-height: 56px; background: #fff;
+      display: flex; gap: 5px; align-items: center; }
+    .slotbar img { width: 30px; height: 38px; }
+    .slotbar .slotcap { margin-left: auto; font-size: 12px; color: var(--muted); }
+    .meter { height: 9px; border-radius: 999px; background: #e8edf0; overflow: hidden; }
+    .meter > div { height: 100%; background: linear-gradient(90deg, var(--easy), var(--hard), var(--very-hard)); transition: width .2s; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    .controls button { flex: 1; min-width: 64px; min-height: 36px; border: 1px solid var(--line); border-radius: 8px;
+      background: #fff; cursor: pointer; font: inherit; font-weight: 700; }
+    .controls button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13px; margin-top: 6px; }
+    .kv b { color: var(--muted); font-weight: 600; }
+    .variant-tabs { display: flex; gap: 6px; margin: 4px 0 14px; }
+    .variant-tabs button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; font: inherit; }
+    .variant-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .variant-tabs button:disabled { opacity: .4; cursor: not-allowed; }
+    .section-title { font-size: 13px; font-weight: 700; color: var(--muted); margin: 18px 0 8px; }
+    .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .demo-status { font-size: 13px; font-weight: 700; }
+    @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } aside { position: static; } .demo { grid-template-columns: 1fr; } }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>麻将关卡图鉴 · 校准难度</h1>
+    <div class="summary" id="summary"></div>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <label for="q">关卡号搜索</label>
+      <input id="q" type="search" placeholder="如 45">
+      <label for="variant">配置档</label>
+      <select id="variant">
+        <option value="default">默认 (level_json)</option>
+        <option value="retry">重开档 (level_json2)</option>
+        <option value="ad">广告档 (level_json3)</option>
+      </select>
+      <label for="band">难度档</label>
+      <select id="band">
+        <option value="">全部</option>
+        <option value="easy">简单</option>
+        <option value="normal">普通</option>
+        <option value="hard">困难</option>
+        <option value="very-hard">极难</option>
+      </select>
+      <label for="special">机关</label>
+      <select id="special">
+        <option value="">全部</option>
+        <option value="none">无机关</option>
+        <option value="chain">含链</option>
+        <option value="iron">含铁锁</option>
+      </select>
+      <label for="sort">排序</label>
+      <select id="sort">
+        <option value="no">按关号</option>
+        <option value="score-desc">校准难度高→低</option>
+        <option value="score-asc">校准难度低→高</option>
+        <option value="tiles-desc">牌数多→少</option>
+        <option value="peak-desc">槽位压力高→低</option>
+      </select>
+      <div class="legend" id="legend"></div>
+    </aside>
+
+    <main>
+      <div class="resultbar">
+        <div id="resultCount"></div>
+        <div class="page-controls">
+          <button id="prev">上一页</button>
+          <span id="pageInfo"></span>
+          <button id="next">下一页</button>
+        </div>
+      </div>
+      <div class="grid" id="cards"></div>
+    </main>
+  </div>
+
+  <dialog id="detail">
+    <div class="modal-head">
+      <h2 id="detailTitle"></h2>
+      <button class="close" id="closeBtn" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="detailBody"></div>
+  </dialog>
+
+  <script src="engine.js"></script>
+  <script src="data/levels.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var ATLAS = globalThis.MAHJONG_ATLAS;
+    if (!ATLAS) { document.body.innerHTML = '<p style="padding:40px">未找到 data/levels.js，请先运行 <code>node generate.cjs</code></p>'; return; }
+
+    var HALF_X = ATLAS.tileStep.x / 2;   // 40
+    var HALF_Y = ATLAS.tileStep.y / 2;   // 49
+    var TILE_W = HALF_X * 2.12;          // ≈85，还原游戏重叠比例
+    var TILE_H = TILE_W / ATLAS.tileAspect; // ≈106
+    var PAGE_SIZE = 24;
+
+    // ---------- 牌图预加载 ----------
+    var imgCache = {};
+    function tileImg(name) {
+      if (imgCache[name]) return imgCache[name];
+      var im = new Image();
+      im.src = 'tiles/' + name + '.png';
+      imgCache[name] = im;
+      return im;
+    }
+    function preloadImages(done) {
+      var types = {};
+      ATLAS.levels.forEach(function (lv) {
+        ['default', 'retry', 'ad'].forEach(function (k) {
+          if (!lv[k]) return;
+          lv[k].positions.forEach(function (p) { types[p[3]] = true; });
+        });
+      });
+      var names = Object.keys(types).concat(['chain', 'iron1', 'iron2', 'yinying', 'flip']);
+      var pending = names.length;
+      if (!pending) return done();
+      names.forEach(function (n) {
+        var im = tileImg(n);
+        if (im.complete) { if (--pending === 0) done(); return; }
+        im.onload = im.onerror = function () { if (--pending === 0) done(); };
+      });
+      // 兜底：最多等 4s
+      setTimeout(done, 4000);
+    }
+
+    // ---------- 棋盘几何 ----------
+    function boardGeometry(positions) {
+      var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (var i = 0; i < positions.length; i++) {
+        var p = positions[i];
+        var cx = p[2] * HALF_X, cy = -p[1] * HALF_Y;
+        if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+        if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+      }
+      if (!isFinite(minX)) { minX = maxX = minY = maxY = 0; }
+      var w = (maxX - minX) + TILE_W, h = (maxY - minY) + TILE_H;
+      return { minX: minX, minY: minY, w: w, h: h };
+    }
+
+    // 按 z 升序、同层 (row+col) 升序的绘制顺序
+    function drawOrder(positions) {
+      var idx = positions.map(function (_, i) { return i; });
+      idx.sort(function (a, b) {
+        var pa = positions[a], pb = positions[b];
+        if (pa[0] !== pb[0]) return pa[0] - pb[0];
+        var ka = pa[1] + pa[2], kb = pb[1] + pb[2];
+        if (ka !== kb) return ka - kb;
+        return pa[1] - pb[1];
+      });
+      return idx;
+    }
+
+    // 把棋盘画进 canvas。alive: 可选 Uint8/array，仅画在场的牌 (用于演示)。
+    // chain/iron: 可选机关坐标数组，用于叠加。aliveOf: 给定 positions 下标判断是否在场
+    function renderBoard(canvas, positions, opts) {
+      opts = opts || {};
+      var geo = boardGeometry(positions);
+      var pad = 8;
+      var targetW = opts.targetW || 210;
+      var scale = Math.min(1, targetW / (geo.w + pad * 2));
+      var W = Math.round((geo.w + pad * 2) * scale);
+      var H = Math.round((geo.h + pad * 2) * scale);
+      var dpr = window.devicePixelRatio || 1;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+      var ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+
+      var order = drawOrder(positions);
+      var alive = opts.alive;
+      var coordToIndex = opts.coordToIndex; // for chain/iron lookup
+      function tilePx(p) {
+        return {
+          x: (p[2] * HALF_X - geo.minX) * scale + pad,
+          y: (-p[1] * HALF_Y - geo.minY) * scale + pad,
+        };
+      }
+      var tw = TILE_W * scale, th = TILE_H * scale;
+      var shadow = imgCache['yinying'];
+      for (var oi = 0; oi < order.length; oi++) {
+        var i = order[oi];
+        if (alive && !alive[i]) continue;
+        var p = positions[i];
+        var pt = tilePx(p);
+        // 阴影
+        if (shadow && shadow.complete && shadow.naturalWidth) {
+          ctx.globalAlpha = .5;
+          try { ctx.drawImage(shadow, pt.x + tw * 0.06, pt.y + th * 0.08, tw, th); } catch (e) {}
+          ctx.globalAlpha = 1;
+        }
+        var im = imgCache[p[3]];
+        if (im && im.complete && im.naturalWidth) {
+          try { ctx.drawImage(im, pt.x, pt.y, tw, th); } catch (e) { fallbackTile(ctx, pt.x, pt.y, tw, th, p[3]); }
+        } else {
+          fallbackTile(ctx, pt.x, pt.y, tw, th, p[3]);
+        }
+      }
+      // 链
+      if (opts.chain) {
+        ctx.strokeStyle = 'rgba(184,50,50,.85)'; ctx.lineWidth = Math.max(2, 5 * scale); ctx.lineCap = 'round';
+        for (var c = 0; c < opts.chain.length; c++) {
+          var ch = opts.chain[c];
+          var ia = opts.coordToIndex[ch[0] + '|' + ch[1] + '|' + ch[2]];
+          var ib = opts.coordToIndex[ch[3] + '|' + ch[4] + '|' + ch[5]];
+          if (ia == null || ib == null) continue;
+          if (alive && (!alive[ia] || !alive[ib])) continue;
+          var a = tilePx(positions[ia]), b = tilePx(positions[ib]);
+          ctx.beginPath(); ctx.moveTo(a.x + tw / 2, a.y + th / 2); ctx.lineTo(b.x + tw / 2, b.y + th / 2); ctx.stroke();
+        }
+      }
+      // 铁锁
+      if (opts.iron) {
+        var lock = imgCache['iron1'];
+        for (var k = 0; k < opts.iron.length; k++) {
+          var ir = opts.iron[k];
+          var li = opts.coordToIndex[ir[0] + '|' + ir[1] + '|' + ir[2]];
+          if (li == null) continue;
+          if (alive && !alive[li]) continue;
+          // 演示中已解锁则不画 (opts.lockedSet 提供仍锁集合)
+          if (opts.lockedSet && !opts.lockedSet[li]) continue;
+          var lp = tilePx(positions[li]);
+          if (lock && lock.complete && lock.naturalWidth) {
+            try { ctx.drawImage(lock, lp.x + tw * 0.1, lp.y + th * 0.05, tw * 0.8, th * 0.8); } catch (e) {}
+          } else {
+            ctx.fillStyle = 'rgba(40,40,50,.55)'; ctx.fillRect(lp.x, lp.y, tw, th);
+          }
+        }
+      }
+      return { W: W, H: H, scale: scale };
+    }
+
+    function fallbackTile(ctx, x, y, w, h, type) {
+      ctx.fillStyle = '#e9eef0'; ctx.strokeStyle = '#c4ccd2'; ctx.lineWidth = 1;
+      roundRect(ctx, x, y, w, h, 4); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#5a6570'; ctx.font = Math.round(h * 0.28) + 'px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(type).slice(-3), x + w / 2, y + h / 2);
+    }
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+    }
+
+    function coordIndex(positions) {
+      var m = {};
+      for (var i = 0; i < positions.length; i++) m[positions[i][0] + '|' + positions[i][1] + '|' + positions[i][2]] = i;
+      return m;
+    }
+
+    // ---------- 卡片 / 列表 ----------
+    var controls = {
+      q: document.getElementById('q'), variant: document.getElementById('variant'),
+      band: document.getElementById('band'), special: document.getElementById('special'),
+      sort: document.getElementById('sort'),
+    };
+    var cardsEl = document.getElementById('cards');
+    var resultCount = document.getElementById('resultCount');
+    var pageInfo = document.getElementById('pageInfo');
+    var page = 1;
+
+    function variantOf(lv) {
+      var v = controls.variant.value;
+      return lv[v] || null;
+    }
+    function specialMatch(d, sp) {
+      if (!sp) return true;
+      if (sp === 'none') return d.metrics.chainCount === 0 && d.metrics.ironCount === 0;
+      if (sp === 'chain') return d.metrics.chainCount > 0;
+      if (sp === 'iron') return d.metrics.ironCount > 0;
+      return true;
+    }
+
+    function currentList() {
+      var qv = controls.q.value.trim();
+      var band = controls.band.value;
+      var sp = controls.special.value;
+      var out = [];
+      ATLAS.levels.forEach(function (lv) {
+        var d = variantOf(lv);
+        if (!d) return;
+        if (qv && String(lv.no).indexOf(qv) < 0) return;
+        if (band && d.difficulty.band !== band) return;
+        if (!specialMatch(d, sp)) return;
+        out.push({ lv: lv, d: d });
+      });
+      var s = controls.sort.value;
+      out.sort(function (A, B) {
+        if (s === 'score-desc') return B.d.difficulty.score - A.d.difficulty.score || A.lv.no - B.lv.no;
+        if (s === 'score-asc') return A.d.difficulty.score - B.d.difficulty.score || A.lv.no - B.lv.no;
+        if (s === 'tiles-desc') return B.d.metrics.tiles - A.d.metrics.tiles || A.lv.no - B.lv.no;
+        if (s === 'peak-desc') return B.d.metrics.peak - A.d.metrics.peak || B.d.metrics.avgSlot - A.d.metrics.avgSlot || A.lv.no - B.lv.no;
+        return A.lv.no - B.lv.no;
+      });
+      return out;
+    }
+
+    function flagsHtml(d) {
+      var f = [];
+      if (d.metrics.chainCount) f.push('链 ' + d.metrics.chainCount);
+      if (d.metrics.ironCount) f.push('铁锁 ' + d.metrics.ironCount);
+      if (!d.metrics.solvable) f.push('2槽不可解·需解锁');
+      if (!f.length) f.push('无机关');
+      return f.map(function (x) { return '<span class="flag">' + x + '</span>'; }).join('');
+    }
+
+    function render() {
+      var list = currentList();
+      var totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+      page = Math.min(Math.max(1, page), totalPages);
+      var start = (page - 1) * PAGE_SIZE;
+      var slice = list.slice(start, start + PAGE_SIZE);
+      resultCount.textContent = list.length + ' 个关卡 · 当前 ' + (list.length ? (start + 1) + '-' + (start + slice.length) : 0);
+      pageInfo.textContent = page + ' / ' + totalPages;
+      document.getElementById('prev').disabled = page <= 1;
+      document.getElementById('next').disabled = page >= totalPages;
+
+      cardsEl.innerHTML = '';
+      if (!slice.length) { cardsEl.innerHTML = '<div class="empty">没有匹配的关卡</div>'; return; }
+      slice.forEach(function (item) {
+        var lv = item.lv, d = item.d;
+        var card = document.createElement('article');
+        card.className = 'card';
+        card.innerHTML =
+          '<div class="card-head"><div class="title"><strong>第 ' + lv.no + ' 关</strong>' +
+          '<small>' + controls.variant.value + ' · ' + d.metrics.tiles + ' 牌 / ' + d.metrics.layers + ' 层</small></div>' +
+          '<span class="difficulty ' + d.difficulty.band + '">校准 ' + d.difficulty.label + ' ' + d.difficulty.score + '</span></div>' +
+          '<div class="board-wrap"><canvas></canvas></div>' +
+          '<div class="metrics">' +
+          '<div class="metric"><b>' + d.metrics.peak + '</b><span>峰值槽位</span></div>' +
+          '<div class="metric"><b>' + d.metrics.avgSlot + '</b><span>平均槽位</span></div>' +
+          '<div class="metric"><b>' + d.metrics.forced + '</b><span>入槽次数</span></div>' +
+          '</div><div class="flags">' + flagsHtml(d) + '</div>';
+        card.addEventListener('click', function () { openDetail(lv.no); });
+        cardsEl.appendChild(card);
+        var canvas = card.querySelector('canvas');
+        renderBoard(canvas, d.positions, {
+          targetW: 210, chain: d.chain, iron: d.iron, coordToIndex: coordIndex(d.positions),
+          lockedSet: ironLockedSet(d),
+        });
+      });
+    }
+
+    // 静态预览里所有铁锁都画成"锁着"
+    function ironLockedSet(d) {
+      if (!d.iron || !d.iron.length) return null;
+      var ci = coordIndex(d.positions); var set = {};
+      d.iron.forEach(function (ir) { var i = ci[ir[0] + '|' + ir[1] + '|' + ir[2]]; if (i != null) set[i] = true; });
+      return set;
+    }
+
+    // ---------- 详情 + 自动演示 ----------
+    var dialog = document.getElementById('detail');
+    var demoTimer = null;
+    var demo = null; // {runner, actions, idx, positions, coordToIndex, canvas, ...}
+
+    function stopDemo() { if (demoTimer) { clearInterval(demoTimer); demoTimer = null; } }
+
+    function openDetail(no) {
+      stopDemo();
+      var lv = ATLAS.levels.find(function (x) { return x.no === no; });
+      if (!lv) return;
+      var vkey = controls.variant.value;
+      var d = lv[vkey] || lv.default || lv.retry || lv.ad;
+      var usingKey = lv[vkey] ? vkey : (lv.default ? 'default' : (lv.retry ? 'retry' : 'ad'));
+      document.getElementById('detailTitle').textContent = '第 ' + no + ' 关';
+      var body = document.getElementById('detailBody');
+
+      var variantBtns = ['default', 'retry', 'ad'].map(function (k) {
+        var names = { default: '默认', retry: '重开档', ad: '广告档' };
+        var dis = lv[k] ? '' : 'disabled';
+        var act = k === usingKey ? 'active' : '';
+        var sc = lv[k] ? (' ' + lv[k].difficulty.score) : '';
+        return '<button class="' + act + '" data-vk="' + k + '" ' + dis + '>' + names[k] + sc + '</button>';
+      }).join('');
+
+      body.innerHTML =
+        '<div class="variant-tabs">' + variantBtns + '</div>' +
+        '<div class="demo">' +
+        '  <div class="demo-board"><canvas id="demoCanvas"></canvas></div>' +
+        '  <div class="demo-side">' +
+        '    <div class="demo-status" id="demoStatus"></div>' +
+        '    <div class="section-title" style="margin:2px 0 0">目标槽 (默认解锁 ' + ATLAS.unlockedBoxes + ')</div>' +
+        '    <div class="boxes" id="boxes"></div>' +
+        '    <div class="section-title" style="margin:6px 0 0">底部存牌槽 (满 ' + ATLAS.slotFailThreshold + ' 判负)</div>' +
+        '    <div class="slotbar" id="slotbar"></div>' +
+        '    <div class="meter"><div id="meterFill"></div></div>' +
+        '    <div class="controls">' +
+        '      <button class="primary" id="playBtn">▶ 自动演示</button>' +
+        '      <button id="stepBtn">步进</button>' +
+        '      <button id="resetBtn">重置</button>' +
+        '    </div>' +
+        '  </div>' +
+        '</div>' +
+        '<div class="section-title">校准难度分解</div>' +
+        '<div id="breakdown"></div>';
+
+      body.querySelectorAll('.variant-tabs button[data-vk]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          if (b.disabled) return;
+          setupDemo(lv, b.dataset.vk);
+          body.querySelectorAll('.variant-tabs button').forEach(function (x) { x.classList.remove('active'); });
+          b.classList.add('active');
+        });
+      });
+
+      setupDemo(lv, usingKey);
+      if (!dialog.open) dialog.showModal();
+    }
+
+    function setupDemo(lv, vkey) {
+      stopDemo();
+      var d = lv[vkey];
+      if (!d) return;
+      var runner = MahjongEngine.createRunner({ positions: d.positions, task: d.task, chain: d.chain, iron: d.iron });
+      demo = {
+        runner: runner, actions: d.actions || [], idx: 0,
+        positions: d.positions, coordToIndex: coordIndex(d.positions),
+        canvas: document.getElementById('demoCanvas'), d: d,
+        chain: d.chain, iron: d.iron,
+      };
+      renderDemo();
+      renderBreakdown(lv, vkey, d);
+      var playBtn = document.getElementById('playBtn');
+      var stepBtn = document.getElementById('stepBtn');
+      var resetBtn = document.getElementById('resetBtn');
+      playBtn.onclick = function () {
+        if (demoTimer) { stopDemo(); playBtn.textContent = '▶ 自动演示'; return; }
+        playBtn.textContent = '⏸ 暂停';
+        demoTimer = setInterval(function () { if (!stepDemo()) { stopDemo(); playBtn.textContent = '▶ 重新演示'; } }, 380);
+      };
+      stepBtn.onclick = function () { stopDemo(); document.getElementById('playBtn').textContent = '▶ 自动演示'; stepDemo(); };
+      resetBtn.onclick = function () {
+        stopDemo(); document.getElementById('playBtn').textContent = '▶ 自动演示';
+        demo.runner.reset(); demo.idx = 0; renderDemo();
+      };
+    }
+
+    function stepDemo() {
+      if (!demo) return false;
+      if (demo.idx >= demo.actions.length) { renderDemo(); return false; }
+      var act = demo.actions[demo.idx++];
+      demo.runner.step(act);
+      renderDemo();
+      return demo.idx < demo.actions.length;
+    }
+
+    function renderDemo() {
+      if (!demo) return;
+      var snap = demo.runner.snapshot();
+      // 仍锁的铁锁集合
+      var lockedSet = null;
+      if (demo.iron && demo.iron.length) {
+        lockedSet = {};
+        for (var i = 0; i < demo.positions.length; i++) {
+          if (snap.alive[i] && demo.runner.ironLocked(i)) lockedSet[i] = true;
+        }
+      }
+      renderBoard(demo.canvas, demo.positions, {
+        targetW: 560, alive: snap.alive, chain: demo.chain, iron: demo.iron,
+        coordToIndex: demo.coordToIndex, lockedSet: lockedSet,
+      });
+
+      // 目标槽
+      var boxesEl = document.getElementById('boxes');
+      boxesEl.innerHTML = snap.boxes.map(function (b) {
+        var dots = '';
+        for (var i = 0; i < (ATLAS.requiredPerBox || 3); i++) dots += '<span class="dot' + (i < b.progress ? ' on' : '') + '"></span>';
+        var icon = b.type ? '<img class="ttype" src="tiles/' + b.type + '.png" alt="">' : '<div class="ttype"></div>';
+        return '<div class="tbox">' + icon + '<div class="prog">' + dots + '</div></div>';
+      }).join('');
+
+      // 底部 slot
+      var slotEl = document.getElementById('slotbar');
+      var imgs = snap.slots.map(function (uid) {
+        var t = demo.runner.board.tiles[uid].type;
+        return '<img src="tiles/' + t + '.png" alt="">';
+      }).join('');
+      slotEl.innerHTML = imgs + '<span class="slotcap">' + snap.slots.length + ' / ' + ATLAS.slotFailThreshold + ' · 峰值 ' + snap.peak + '</span>';
+
+      var meter = document.getElementById('meterFill');
+      meter.style.width = Math.min(100, snap.slots.length / ATLAS.slotFailThreshold * 100) + '%';
+
+      var total = demo.runner.board.N;
+      var st = document.getElementById('demoStatus');
+      if (snap.won) st.textContent = '✓ 通关 (峰值槽位 ' + snap.peak + ')';
+      else st.textContent = '进度 ' + snap.removedCount + ' / ' + total + ' · 步 ' + demo.idx + '/' + demo.actions.length;
+    }
+
+    function formatPct(v) {
+      return v == null ? '—' : (Math.round(v * 10) / 10) + '%';
+    }
+
+    function renderBreakdown(lv, vkey, d) {
+      var m = d.metrics;
+      var stats = lv.userStats || null;
+      var sim = d.simDifficulty || d.difficulty;
+      var cal = d.calibration || {};
+      var calibrationSource = cal.source === 'observed-blend'
+        ? '真实通关率校准（观测 ' + cal.observedScore + ' + 模型 ' + cal.predictedScore + '）'
+        : '模型预测（该关暂无 CSV 观测）';
+      var statsRows = stats
+        ? '<b>用户通关数据</b><span>进入 ' + stats.entries + ' · 通关 ' + formatPct(stats.passRate) + ' · 平滑失败 ' + formatPct(stats.smoothedFailRate) + ' · 置信度 ' + Math.round(stats.confidence * 100) + '%</span>' +
+          '<b>视频 / 耗时</b><span>视频提示 ' + stats.videoCount + ' 次 · IPU ' + stats.ipu + ' · 人均视频 ' + stats.videoRate + ' · 均时 ' + stats.timeSec + 's</span>'
+        : '<b>用户通关数据</b><span>无 CSV 观测，使用前 ' + ((ATLAS.calibration && ATLAS.calibration.observedLevels) || 0) + ' 关校准模型预测</span>';
+      var solv = m.solvable ? '可解' : '<b style="color:var(--very-hard)">2 槽 cap' + (ATLAS.slotFailThreshold - 1) + ' 内不可解 (需解锁/广告)</b>';
+      document.getElementById('breakdown').innerHTML =
+        '<div class="kv">' +
+        '<b>校准难度</b><span><span class="difficulty ' + d.difficulty.band + '">' + d.difficulty.label + ' ' + d.difficulty.score + '</span> / 100</span>' +
+        '<b>校准来源</b><span>' + calibrationSource + '</span>' +
+        '<b>模拟结构分</b><span><span class="difficulty ' + sim.band + '">' + sim.label + ' ' + sim.score + '</span> / 100</span>' +
+        statsRows +
+        '<b>可解性</b><span>' + solv + '</span>' +
+        '<b>峰值槽位</b><span>' + m.peak + ' (越接近 ' + ATLAS.slotFailThreshold + ' 越危险)</span>' +
+        '<b>平均槽位占用</b><span>' + m.avgSlot + '</span>' +
+        '<b>被迫入槽次数</b><span>' + m.forced + ' (共 ' + m.queueLen + ' 个三元组)</span>' +
+        '<b>牌数 / 层数</b><span>' + m.tiles + ' / ' + m.layers + '</span>' +
+        '<b>遮挡覆盖率</b><span>' + Math.round(m.coveredRatio * 100) + '%</span>' +
+        '<b>牌型数</b><span>' + m.types + '</span>' +
+        '<b>机关</b><span>链 ' + m.chainCount + ' · 铁锁 ' + m.ironCount + '</span>' +
+        '<b>配置自带值</b><span>base_diff ' + (d.baseDiff != null ? d.baseDiff : '—') + ' · hard ' + (d.hard != null ? d.hard : '—') + ' (固定占位，非真实)</span>' +
+        '</div>' +
+        '<p class="note">校准难度以真实用户通关率为目标：CSV 覆盖的关卡用观测通关压力 + 模型平滑，未覆盖关卡用同一模型预测。模拟结构分仍按真实玩法求解，保留用于解释槽位压力、遮挡和机关负载。点上方"自动演示"可观看模拟求解线。</p>';
+    }
+
+    document.getElementById('closeBtn').addEventListener('click', function () { stopDemo(); dialog.close(); });
+    dialog.addEventListener('click', function (e) { if (e.target === dialog) { stopDemo(); dialog.close(); } });
+    dialog.addEventListener('close', stopDemo);
+
+    // ---------- 顶栏 + 图例 ----------
+    function buildSummary() {
+      var counts = { easy: 0, normal: 0, hard: 0, 'very-hard': 0 };
+      var withRetry = 0, withAd = 0;
+      ATLAS.levels.forEach(function (lv) {
+        if (lv.default) counts[lv.default.difficulty.band]++;
+        if (lv.retry) withRetry++; if (lv.ad) withAd++;
+      });
+      document.getElementById('summary').innerHTML =
+        '<span>共 ' + ATLAS.levels.length + ' 关</span>' +
+        '<span>校准难度 = 用户数据 + 模拟结构</span>' +
+        '<span>观测 ' + ((ATLAS.calibration && ATLAS.calibration.observedLevels) || 0) + ' 关</span>' +
+        '<span>简单 ' + counts.easy + '</span><span>普通 ' + counts.normal + '</span>' +
+        '<span>困难 ' + counts.hard + '</span><span>极难 ' + counts['very-hard'] + '</span>' +
+        '<span>重开档 ' + withRetry + '</span><span>广告档 ' + withAd + '</span>' +
+        '<span>引擎 v' + ATLAS.engineVersion + '</span>';
+      var t = ATLAS.bandThresholds || {};
+      document.getElementById('legend').innerHTML =
+        '<div><span>简单</span><span>≤ ' + t.easy + '</span></div>' +
+        '<div><span>普通</span><span>≤ ' + t.normal + '</span></div>' +
+        '<div><span>困难</span><span>≤ ' + t.hard + '</span></div>' +
+        '<div><span>极难</span><span>&gt; ' + t.hard + '</span></div>';
+    }
+
+    Object.keys(controls).forEach(function (k) {
+      controls[k].addEventListener('input', function () { page = 1; render(); });
+    });
+    document.getElementById('prev').addEventListener('click', function () { page--; render(); });
+    document.getElementById('next').addEventListener('click', function () { page++; render(); });
+
+    buildSummary();
+    cardsEl.innerHTML = '<div class="empty">正在加载牌图…</div>';
+    preloadImages(function () { render(); checkHash(); });
+
+    function checkHash() {
+      var h = location.hash || '';
+      var mt = h.match(/(\d+)/);
+      if (!mt) return;
+      var no = Number(mt[1]);
+      if (!ATLAS.levels.some(function (l) { return l.no === no; })) return;
+      openDetail(no);
+      // 可选 #L5/12 → 打开后步进 12 步 (便于分享某个演示进度)
+      var sm = h.match(/[\/:](\d+)/);
+      if (sm) { var n = Number(sm[1]); for (var i = 0; i < n; i++) { if (!stepDemo()) break; } }
+    }
+    window.addEventListener('hashchange', checkHash);
+  })();
+  </script>
+</body>
+</html>

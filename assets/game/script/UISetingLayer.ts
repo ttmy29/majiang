@@ -20,7 +20,7 @@ export class UISetingLayer extends Component {
     }
 
     init(opentype: number) {
-        console.log('UISetingLayer.init', opentype);
+        //console.log('UISetingLayer.init', opentype);
         this.opentype = opentype;
 
         // opentype === 1 时才显示 viewNode 下的 button 节点

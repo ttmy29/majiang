@@ -15,6 +15,7 @@ const Constants = {
         EventShowToast: 'ShowToast',
         // 连击 label
         EventComboUpdate: 'ComboUpdate',
+        EventClearComboBoxEffects: 'ClearComboBoxEffects',
         // 渲染单个目标槽（预览图、锁/提示子节点）
         EventRenderSlot: 'RenderSlot',
         // 清理单个目标槽（销毁预览 + 已收集到槽里的牌）
@@ -23,6 +24,8 @@ const Constants = {
         EventResetSlots: 'ResetSlots',
         // 清理槽位容器内的脏子节点(上一局残留的 slotTile_* 等),并把 slot3/slot4 的 box_2/lock 重新点亮
         EventCleanSlotContainers: 'CleanSlotContainers',
+        // UI 隐藏时清理所有麻将牌节点和运行态引用
+        EventClearAllMahjongTiles: 'ClearAllMahjongTiles',
         // 撤回按钮置灰状态:true=灰(无可撤回),false=彩(有可撤回)
         EventSetUndoButtonStatus: 'SetUndoButtonStatus',
         // 道具剩余次数:GameCtrl -> UI,payload {undo, switch},>0 显示 di+countLabel,==0 显示 ad1
@@ -78,14 +81,26 @@ const Constants = {
     GameBundleName: 'game',
     AudioBundleName: 'audio',
     BgmBundleName: 'bgm',
-    LevelConfigSegmentSize: 50,
-    LevelConfigBundlePrefix: 'config_levels_',
-    // 关卡难度自适应阈值（可调）
-    LevelDifficulty: {
-        // 同一关「重开」次数 > 此值，且 level_json2 里有这关 → 用 level_json2
-        RetryThreshold: 5,
-        // 全局累计看广告 >= 此值，且 level_json3 里有这关 → 用 level_json3（优先级高于重拾档）
-        AdThreshold: 10,
+    // —— 连胜值难度分档 + 难度池（可调）——
+    // 玩家从 StartLevel 关起按连胜值分档，每档按概率分配 简单/普通/困难 盘面。
+    // 失败清零、每天清零、干净通关 +1。详见 StreakManager。
+    WinStreak: {
+        // 从该关号起启用分档；之前的关恒定用基础盘面（base）
+        StartLevel: 12,
+        // 难度池：开启后按已摇到的 easy/normal/hard 档，从 config_levels_advanced 对应目录中
+        // 随机抽「没玩过」的盘面；关号仅作进度计数，全玩过再循环。
+        UseDifficultyPool: true,
+        // 难度池盘面号上限（含）。加完新关卡后改大此值即可纳入新盘面。
+        PoolMaxLevel: 1390,
+        // 档位边界：streak < Tier2Min → 一档；[Tier2Min, Tier3Min) → 二档；>= Tier3Min → 三档
+        Tier2Min: 1,
+        Tier3Min: 3,
+        // 各档 简单/普通/困难 概率（每行三者之和应为 1）
+        Distribution: {
+            tier1: { easy: 0.8, normal: 0.2, hard: 0.0 }, // 连胜 0
+            tier2: { easy: 0.2, normal: 0.6, hard: 0.2 }, // 连胜 1-2
+            tier3: { easy: 0.0, normal: 0.2, hard: 0.8 }, // 连胜 >=3
+        },
     },
     sharData:{
         string :'上头小游戏（15个好友在玩）',
@@ -135,7 +150,7 @@ const Constants = {
             [0, 0],
         ] as Array<readonly [number, number]>,
         // 槽位麻将牌实例的统一缩放比例 36。
-        SlotScale: 0.32,
+        SlotScale: 0.40,
         // 底部存牌槽里牌的缩放(比目标槽 SlotScale 略小 0.05),视觉上比目标槽小一圈
         SlotTileScale: 0.27,
         // 牌在底部 slot 内的 siblingIndex 基数: BottomSlotSiblingBase + slotIndex
@@ -160,6 +175,15 @@ const Constants = {
         // 小棋盘放大上限,避免少牌关被放得过满或飞牌手感跳变太大
         MaxBoardFitRatio: 1.18,
     },
+    celebrityNames:[
+        "牛顿","霍金","爱因斯坦","比尔·盖茨","乔布斯",
+        "居里夫人","特斯拉","达芬奇","爱迪生","图灵",
+        "扎克伯格","马斯克","贝佐斯",
+        "柏拉图","亚里士多德","苏格拉底",
+        "伽利略","哥白尼","开普勒","法拉第","门捷列夫",
+        "达尔文","弗洛伊德","诺伊曼","香农","沃兹尼亚克",
+        "拉里·佩奇","谢尔盖·布林","杰克·多西"
+    ]
 };
 
 export { Constants };

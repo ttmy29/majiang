@@ -1,0 +1,53 @@
+{
+  "target": "HomeUI normal portrait main UI Spine",
+  "sourceAtlasGroup": "D:\\Downloads\\apk_config\\Vita_Mahjong_3.24.1_all_spine_cocos42\\HomeUI__atlas6437",
+  "outputDir": "D:\\Downloads\\apk_config\\Vita_Mahjong_3.24.1_home_ui_home_spine_cocos42_json",
+  "atlas": "HomeUI.atlas",
+  "textures": [
+    "HomeUI.png"
+  ],
+  "skeletons": [
+    {
+      "sourceSkel": "Home.skel",
+      "outputJson": "HomeUI__Home__pid3773.json",
+      "unityPath": "HomeUI / Home",
+      "pathId": 3773,
+      "role": "HomeUI normal portrait main UI layer using HomeUI.png",
+      "originalRuntimeVersion": "4.2.24",
+      "patchedVersion": "4.2.24",
+      "bezierCurvesOmitted": 403,
+      "spineRuntimeValidation": {
+        "ok": true,
+        "version": "4.2.24",
+        "bones": 80,
+        "slots": 22,
+        "pathConstraints": 0,
+        "animations": [
+          {
+            "name": "Appear",
+            "duration": 1
+          },
+          {
+            "name": "Appear2",
+            "duration": 1
+          },
+          {
+            "name": "Disappear",
+            "duration": 2
+          },
+          {
+            "name": "Idle",
+            "duration": 0
+          },
+          {
+            "name": "Loop",
+            "duration": 5
+          }
+        ]
+      },
+      "cocosWasmValidation": {
+        "ok": true
+      }
+    }
+  ]
+}
