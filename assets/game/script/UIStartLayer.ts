@@ -251,7 +251,7 @@ export class UIStartLayer extends Component {
 
     private isActivityUnlocked(): boolean {
 
-        return true;
+        //return true;
         return ProgressManager.loadLevel() >= ACTIVITY_UNLOCK_MAIN_LEVEL;
     }
 
