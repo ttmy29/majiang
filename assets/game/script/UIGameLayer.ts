@@ -1,5 +1,6 @@
 import { _decorator, Animation, AnimationClip, assetManager, builtinResMgr, Button, Color, Component, director, Graphics, instantiate, Label, Material, Node, Prefab, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, v3, Vec3, view, Widget } from 'cc';
 import { Constants } from './config/Constants';
+import { GameMode } from './config/GameMode';
 import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
@@ -25,6 +26,14 @@ interface ToastPayload {
 interface GameUiInitPayload {
     mahjongItem: Prefab;
     iconFrames: Map<string, SpriteFrame>;
+}
+
+interface LevelStartPayload {
+    level: number;
+    difficultyLevel?: number;
+    mode?: GameMode;
+    boardId?: number;
+    displayName?: string;
 }
 
 interface RenderSlotPayload {
@@ -308,9 +317,16 @@ export class UIGameLayer extends Component {
         this.iconFrames = payload.iconFrames;
     }
 
-    onEventLevelStart(level: number,difficultyLevel = 0) {
+    onEventLevelStart(payloadOrLevel: LevelStartPayload | number, difficultyLevel = 0) {
+        const payload: LevelStartPayload = typeof payloadOrLevel === 'number'
+            ? { level: payloadOrLevel, difficultyLevel, mode: 'main' }
+            : payloadOrLevel;
+        const level = payload.level;
+        const mode = payload.mode || 'main';
+        difficultyLevel = payload.difficultyLevel ?? difficultyLevel;
+
         this.hasLevelUiMode = true;
-        this.isGuideLevel = level === 0;
+        this.isGuideLevel = mode === 'main' && level === 0;
         this.clearComboBoxEffects();
         this.resetComboNode();
         this.applyLevelUiMode();

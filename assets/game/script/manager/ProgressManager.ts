@@ -36,6 +36,8 @@ export interface ProgressSnapshot {
 }
 
 const SNAPSHOT_VERSION = 1;
+const ACTIVITY_FIRST_BOARD = 1;
+const ACTIVITY_FALLBACK_BOARD = 150;
 
 export class ProgressManager {
     static loadLevel(): number {
@@ -47,6 +49,43 @@ export class ProgressManager {
 
     static saveLevel(level: number): void {
         StorageManager.instance.setItem(StorageKey.CurrentLevel, level);
+    }
+
+    static loadActivityLevel(): number {
+        const raw = StorageManager.instance.getItem(StorageKey.ActivityLevel);
+        if (raw === null) return 0;
+        const value = parseInt(raw, 10);
+        return Number.isFinite(value) && value >= 0 ? value : 0;
+    }
+
+    static saveActivityLevel(level: number): void {
+        StorageManager.instance.setItem(StorageKey.ActivityLevel, Math.max(0, Math.floor(level)));
+    }
+
+    static loadActivityBoardId(level: number): number {
+        const normalizedLevel = Math.max(0, Math.floor(level));
+        const boardId = Math.min(ACTIVITY_FALLBACK_BOARD, ACTIVITY_FIRST_BOARD + normalizedLevel);
+        const raw = StorageManager.instance.getItem(StorageKey.ActivityBoardId);
+        if (raw) {
+            try {
+                const obj = JSON.parse(raw) as { level?: number; boardId?: number };
+                if (obj && obj.level === normalizedLevel && obj.boardId !== boardId) {
+                    this.clearActivitySnapshot();
+                }
+            } catch (e) {
+                console.warn('ProgressManager: activity board parse failed', e);
+            }
+        }
+
+        this.saveActivityBoardId(normalizedLevel, boardId);
+        return boardId;
+    }
+
+    static saveActivityBoardId(level: number, boardId: number): void {
+        StorageManager.instance.setItem(StorageKey.ActivityBoardId, JSON.stringify({
+            level: Math.max(0, Math.floor(level)),
+            boardId: Math.max(0, Math.floor(boardId)),
+        }));
     }
 
     // —— 道具(撤回/换牌)剩余次数,永久保存,首次默认 1 ——
@@ -110,6 +149,26 @@ export class ProgressManager {
     static addLevelRetryCount(level: number, delta = 1): number {
         const next = this.loadLevelRetryCount(level) + Math.max(0, Math.floor(delta));
         StorageManager.instance.setItem(StorageKey.LevelRetryCount, JSON.stringify({ level, count: next }));
+        return next;
+    }
+
+    static loadActivityRetryCount(level: number): number {
+        const raw = StorageManager.instance.getItem(StorageKey.ActivityRetryCount);
+        if (!raw) return 0;
+        try {
+            const obj = JSON.parse(raw) as { level?: number; count?: number };
+            if (!obj || obj.level !== level) return 0;
+            const v = obj.count;
+            return (typeof v === 'number' && Number.isFinite(v) && v >= 0) ? v : 0;
+        } catch (e) {
+            console.warn('ProgressManager: activity retry count parse failed', e);
+            return 0;
+        }
+    }
+
+    static addActivityRetryCount(level: number, delta = 1): number {
+        const next = this.loadActivityRetryCount(level) + Math.max(0, Math.floor(delta));
+        StorageManager.instance.setItem(StorageKey.ActivityRetryCount, JSON.stringify({ level, count: next }));
         return next;
     }
 
@@ -906,5 +965,31 @@ export class ProgressManager {
 
     static clearSnapshot(): void {
         StorageManager.instance.removeItem(StorageKey.LevelSnapshot);
+    }
+
+    static loadActivitySnapshot(): ProgressSnapshot | null {
+        const raw = StorageManager.instance.getItem(StorageKey.ActivitySnapshot);
+        if (!raw) return null;
+        try {
+            const data = JSON.parse(raw) as ProgressSnapshot;
+            if (!data || data.version !== SNAPSHOT_VERSION) return null;
+            if (!Array.isArray(data.tiles) || !Array.isArray(data.boxes)) return null;
+            return data;
+        } catch (e) {
+            console.warn('ProgressManager: activity snapshot parse failed', e);
+            return null;
+        }
+    }
+
+    static saveActivitySnapshot(snap: ProgressSnapshot): void {
+        try {
+            StorageManager.instance.setItem(StorageKey.ActivitySnapshot, JSON.stringify(snap));
+        } catch (e) {
+            console.warn('ProgressManager: activity snapshot save failed', e);
+        }
+    }
+
+    static clearActivitySnapshot(): void {
+        StorageManager.instance.removeItem(StorageKey.ActivitySnapshot);
     }
 }

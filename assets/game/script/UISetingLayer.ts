@@ -4,6 +4,7 @@ import { AudioManager } from './manager/AudioManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
 import { ProgressManager } from './manager/ProgressManager';
 import { Utils } from './util/Utils';
+import { getCurrentGameMode } from './config/GameMode';
 const { ccclass, property } = _decorator;
 
 @ccclass('UISetingLayer')
@@ -142,7 +143,11 @@ export class UISetingLayer extends Component {
         AudioManager.instance.playClick();
         this.onButonCloseClick();
         // 设置面板里的"退出游戏" = 主动放弃本局 → 清掉中途快照
-        ProgressManager.clearSnapshot();
+        if (getCurrentGameMode() === 'activity') {
+            ProgressManager.clearActivitySnapshot();
+        } else {
+            ProgressManager.clearSnapshot();
+        }
         LayerManager.instance.showStartLayer();
     }
 
