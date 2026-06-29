@@ -28,7 +28,7 @@ export class loading extends Component {
     // 提示名言列表:tispLabel1 显示正文,tispLabel2 显示作者。
     // 首次进入游戏固定显示第 0 条,其余每次从剩下的里随机取一条。
     private static readonly TIPS: ReadonlyArray<{ text: string; author: string }> = [
-        { text: '每天游玩三十分钟,放松身心,助于睡眠。', author: '' },
+        { text: '每天玩30分钟,你会睡得更好、更香。', author: '' },
         { text: '不攀比,不依附,不焦虑。你若盛开,清风自来。', author: '' },
         { text: '身体健康就是最大的福气,心里没事就是最大的财气。', author: '' },
         { text: '放下执念,才能拿起幸福;心宽一寸,路宽一丈。', author: '' },

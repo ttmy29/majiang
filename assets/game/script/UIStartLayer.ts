@@ -1,5 +1,6 @@
-import { _decorator, Component, Node, sp, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
-import { ensureLevelJson, warmupForwardWindow } from './config/LevelJsonLoader';
+import { _decorator, Component, EventTouch, Node, sp, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
+import { GameMode, setCurrentGameMode } from './config/GameMode';
+import { ensureActivityLevelJson, ensureLevelJson, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
@@ -26,6 +27,7 @@ const HOME_RETURN_APPEAR_ANIMATION = 'Appear2';
 const HOME_DISAPPEAR_ANIMATION = 'Disappear';
 const HOME_IDLE_ANIMATION = 'Idle';
 const LEAF_LOOP_ANIMATION = 'Loop';
+const ACTIVITY_UNLOCK_MAIN_LEVEL = 5;
 
 @ccclass('UIStartLayer')
 export class UIStartLayer extends Component {
@@ -46,6 +48,8 @@ export class UIStartLayer extends Component {
     homeSkeleton: sp.Skeleton = null!;
     @property(sp.Skeleton)
     leafSkeleton: sp.Skeleton = null!;
+    @property(Node)
+    activityBtn: Node = null!;
 
     private enteringGame = false;
     private hasStarted = false;
@@ -67,6 +71,7 @@ export class UIStartLayer extends Component {
     protected onEnable(): void {
         this.enteringGame = false;
         this.refreshWarmupWindow();
+        this.refreshActivityButtonVisible();
 
         if (this.hasStarted) {
             this.playStartLayerEnterAnimation(HOME_RETURN_APPEAR_ANIMATION, true);
@@ -95,6 +100,7 @@ export class UIStartLayer extends Component {
     start() {
         this.hasStarted = true;
         this.refreshWarmupWindow();
+        this.refreshActivityButtonVisible();
         this.playStartLayerEnterAnimation(HOME_INITIAL_APPEAR_ANIMATION);
 
         this.scheduleOnce(() => {
@@ -169,20 +175,37 @@ export class UIStartLayer extends Component {
         return null;
     }
 
-    async onClickStartButton() {
+    async onClickStartButton(event: EventTouch, data: any) {
         if (this.enteringGame) return;
+        await this.enterGame('main');
+    }
+
+    async onClickActivityButton(event: EventTouch, data: any) {
+        if (this.enteringGame) return;
+        if (!this.isActivityUnlocked()) return;
+        await this.enterGame('activity');
+    }
+
+    private async enterGame(mode: GameMode) {
         AudioManager.instance.playClick();
         this.enteringGame = true;
+        setCurrentGameMode(mode);
+
         try {
             const exitAnimation = this.playExitAnimation();
-            const level = ProgressManager.loadLevel();
-            // 与 GameCtrl 一致地解出开局方案（resolveLevelPlanForStart 会持久化盘面与难度，GameCtrl 随后复用同一方案，资源只加载一次）
-            const plan = await StreakManager.resolveLevelPlanForStart(level);
             let json = null;
             let loadError: unknown = null;
 
             try {
-                json = await ensureLevelJson(plan.boardId, plan.tier);
+                if (mode === 'activity') {
+                    const level = ProgressManager.loadActivityLevel();
+                    const boardId = ProgressManager.loadActivityBoardId(level);
+                    json = await ensureActivityLevelJson(boardId);
+                } else {
+                    const level = ProgressManager.loadLevel();
+                    const plan = await StreakManager.resolveLevelPlanForStart(level);
+                    json = await ensureLevelJson(plan.boardId, plan.tier);
+                }
             } catch (error) {
                 loadError = error;
             }
@@ -195,7 +218,7 @@ export class UIStartLayer extends Component {
             }
 
             if (!json) {
-                console.warn(`UIStartLayer: no level JSON ready for level ${level}`);
+                console.warn(`UIStartLayer: no ${mode} level JSON ready`);
                 this.playStartLayerEnterAnimation(HOME_RETURN_APPEAR_ANIMATION, true);
                 return;
             }
@@ -221,6 +244,20 @@ export class UIStartLayer extends Component {
     private refreshWarmupWindow() {
         const level = ProgressManager.loadLevel();
         void warmupForwardWindow(level, 10);
+        const activityLevel = ProgressManager.loadActivityLevel();
+        const activityBoardId = ProgressManager.loadActivityBoardId(activityLevel);
+        void warmupActivityForwardWindow(activityBoardId, 10);
+    }
+
+    private isActivityUnlocked(): boolean {
+
+        return true;
+        return ProgressManager.loadLevel() >= ACTIVITY_UNLOCK_MAIN_LEVEL;
+    }
+
+    private refreshActivityButtonVisible() {
+        if (!this.activityBtn?.isValid) return;
+        this.activityBtn.active = this.isActivityUnlocked();
     }
 
     private fitBackgroundToView() {
@@ -283,6 +320,7 @@ export class UIStartLayer extends Component {
             node.active = true;
         }
 
+        this.refreshActivityButtonVisible();
         this.playStartAnimation(fastRestore);
     };
 
@@ -413,6 +451,10 @@ export class UIStartLayer extends Component {
 
         for (const node of this.UINodeArray) {
             if (!node?.isValid) continue;
+            if (node === this.activityBtn && !this.isActivityUnlocked()) {
+                node.active = false;
+                continue;
+            }
 
             node.active = true;
             const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);

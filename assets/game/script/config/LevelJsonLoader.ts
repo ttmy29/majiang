@@ -25,6 +25,7 @@ export interface LevelJson {
 }
 
 export type LevelTier = 'base' | 'easy' | 'normal' | 'hard';
+export type LevelVariant = LevelTier | 'activity';
 
 interface VariantIndex {
     bundleName: string;
@@ -43,27 +44,31 @@ interface VariantBucket {
 
 interface LevelAssetInfo {
     bundleName: string;
-    variant: LevelTier;
+    variant: LevelVariant;
     level: number;
     path: string;
 }
 
 const BASE_BUNDLE = 'config_levels_base';
 const ADVANCED_BUNDLE = 'config_levels_advanced';
+const ACTIVITY_BUNDLE = 'config_levels_activity';
 const BASE_MAX_LEVEL = 11;
+const ACTIVITY_MAX_LEVEL = 129;
 
-const variantIndexes: Record<LevelTier, VariantIndex> = {
+const variantIndexes: Record<LevelVariant, VariantIndex> = {
     base: createVariantIndex(BASE_BUNDLE, ''),
     easy: createVariantIndex(ADVANCED_BUNDLE, 'level_easy'),
     normal: createVariantIndex(ADVANCED_BUNDLE, 'level_hard'),
     hard: createVariantIndex(ADVANCED_BUNDLE, 'level_normal'),
+    activity: createVariantIndex(ACTIVITY_BUNDLE, ''),
 };
 
-const variantBuckets: Record<LevelTier, VariantBucket> = {
+const variantBuckets: Record<LevelVariant, VariantBucket> = {
     base: createVariantBucket(),
     easy: createVariantBucket(),
     normal: createVariantBucket(),
     hard: createVariantBucket(),
+    activity: createVariantBucket(),
 };
 
 const bundleLoadingPromises = new Map<string, Promise<AssetManager.Bundle | null>>();
@@ -102,7 +107,7 @@ function extractLevel(path: string): number | null {
     return Number.isFinite(level) ? level : null;
 }
 
-function getBucket(variant: LevelTier): VariantBucket {
+function getBucket(variant: LevelVariant): VariantBucket {
     return variantBuckets[variant];
 }
 
@@ -147,7 +152,7 @@ function readVariantIndex(bundle: AssetManager.Bundle, state: VariantIndex) {
     }
 }
 
-async function ensureVariantIndex(variant: LevelTier): Promise<VariantIndex> {
+async function ensureVariantIndex(variant: LevelVariant): Promise<VariantIndex> {
     const state = variantIndexes[variant];
     if (state.scanned) return state;
     if (state.readyPromise) {
@@ -170,11 +175,11 @@ async function ensureVariantIndex(variant: LevelTier): Promise<VariantIndex> {
     return state;
 }
 
-async function resolveVariantLevelInfo(level: number, variant: LevelTier): Promise<LevelAssetInfo | null> {
+async function resolveVariantLevelInfo(level: number, variant: LevelVariant): Promise<LevelAssetInfo | null> {
     const normalizedLevel = normalizeLevel(level);
-    if (variant === 'base') {
+    if (variant === 'base' || variant === 'activity') {
         return {
-            bundleName: variantIndexes.base.bundleName,
+            bundleName: variantIndexes[variant].bundleName,
             variant,
             level: normalizedLevel,
             path: `pure_level${normalizedLevel}_config`,
@@ -256,13 +261,13 @@ function tryReleaseBundle(bundleName: string) {
     }
 }
 
-function releaseVariantLevel(variant: LevelTier, bundleName: string, level: number) {
+function releaseVariantLevel(variant: LevelVariant, bundleName: string, level: number) {
     const bucket = getBucket(variant);
     const cacheKey = getCacheKey(bundleName, level);
     if (!bucket.assets.has(cacheKey)) return;
 
     const bundle = assetManager.getBundle(bundleName);
-    const path = variant === 'base'
+    const path = variant === 'base' || variant === 'activity'
         ? `pure_level${level}_config`
         : variantIndexes[variant].pathByLevel.get(level);
     if (bundle && path) {
@@ -328,11 +333,39 @@ export async function warmupForwardWindow(level: number, aheadCount = 10): Promi
     await Promise.all(Array.from(targets.values(), (info) => ensureVariantAsset(info)));
 }
 
+export async function warmupActivityForwardWindow(level: number, aheadCount = 10): Promise<void> {
+    const normalizedLevel = normalizeLevel(level);
+    const targets = new Map<string, LevelAssetInfo>();
+
+    for (let offset = 0; offset <= aheadCount; offset++) {
+        const targetLevel = normalizedLevel + offset;
+        if (targetLevel > ACTIVITY_MAX_LEVEL) break;
+
+        const info = await resolveVariantLevelInfo(targetLevel, 'activity');
+        if (!info) continue;
+        targets.set(getCacheKey(info.bundleName, info.level), info);
+    }
+
+    await Promise.all(Array.from(targets.values(), (info) => ensureVariantAsset(info)));
+}
+
 export async function ensureLevelJson(level: number, tier: LevelTier = 'base'): Promise<LevelJson | null> {
     const normalizedLevel = normalizeLevel(level);
     const info = await resolveVariantLevelInfo(normalizedLevel, tier);
     if (!info) {
         console.warn(`LevelJsonLoader: missing ${tier} level ${normalizedLevel}`);
+        return null;
+    }
+
+    const asset = await ensureVariantAsset(info);
+    return asset?.json ? asset.json as LevelJson : null;
+}
+
+export async function ensureActivityLevelJson(level: number): Promise<LevelJson | null> {
+    const normalizedLevel = normalizeLevel(level);
+    const info = await resolveVariantLevelInfo(normalizedLevel, 'activity');
+    if (!info) {
+        console.warn(`LevelJsonLoader: missing activity level ${normalizedLevel}`);
         return null;
     }
 
@@ -356,5 +389,23 @@ export function releaseOutsideWindow(level: number, aheadCount = 10): void {
                 releaseVariantLevel(variant, parsed.bundleName, parsed.level);
             }
         });
+    })();
+}
+
+export function releaseActivityOutsideWindow(level: number, aheadCount = 10): void {
+    void (async () => {
+        const normalizedLevel = normalizeLevel(level);
+        const minLevel = normalizedLevel;
+        const maxLevel = normalizedLevel + aheadCount;
+        const variant: LevelVariant = 'activity';
+        const bundleName = variantIndexes[variant].bundleName;
+
+        for (const cacheKey of Array.from(getBucket(variant).assets.keys())) {
+            const parsed = parseCacheKey(cacheKey);
+            if (!parsed) continue;
+            if (parsed.bundleName !== bundleName) continue;
+            if (parsed.level >= minLevel && parsed.level <= maxLevel) continue;
+            releaseVariantLevel(variant, parsed.bundleName, parsed.level);
+        }
     })();
 }

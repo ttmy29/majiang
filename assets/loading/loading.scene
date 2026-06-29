@@ -990,7 +990,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 340,
-      "y": -120,
+      "y": -83.7,
       "z": 0
     },
     "_lrot": {
@@ -1143,7 +1143,7 @@
     "_contentSize": {
       "__type__": "cc.Size",
       "width": 680,
-      "height": 63
+      "height": 135.6
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -1175,10 +1175,10 @@
     "_string": "失眠了吗？来试试麻将疗法，无需处方",
     "_horizontalAlign": 0,
     "_verticalAlign": 1,
-    "_actualFontSize": 40,
-    "_fontSize": 40,
+    "_actualFontSize": 46,
+    "_fontSize": 46,
     "_fontFamily": "Arial",
-    "_lineHeight": 50,
+    "_lineHeight": 60,
     "_overflow": 3,
     "_enableWrapText": true,
     "_font": null,

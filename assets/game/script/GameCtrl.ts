@@ -1,7 +1,8 @@
 import { _decorator, assetManager, AssetManager, Component, director, find, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, sys, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
-import { ensureLevelJson, LevelJson, LevelJsonPosition, releaseOutsideWindow, warmupForwardWindow } from './config/LevelJsonLoader';
+import { GameMode, getCurrentGameMode } from './config/GameMode';
+import { ensureActivityLevelJson, ensureLevelJson, LevelJson, LevelJsonPosition, releaseActivityOutsideWindow, releaseOutsideWindow, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { ironItem } from './ironItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
@@ -93,6 +94,9 @@ export class GameCtrl extends Component {
     levelLabel: Label = null!;
 
     nowLevel = 0;
+    private gameMode: GameMode = 'main';
+    private currentBoardId = 0;
+    private levelDisplayName = '';
 
     // 玩法状态与核心数据
     private gameState: GameState = 'ready';
@@ -160,9 +164,13 @@ export class GameCtrl extends Component {
     // 资源数据
     private iconIds: string[] = [];
     private iconFrames: Map<string, SpriteFrame> = new Map();
+    private baseIconFrames: Map<string, SpriteFrame> = new Map();
+    private activityIconFrames: Map<string, SpriteFrame> = new Map();
     private chainItemPrefab: Prefab | null = null;
     private ironItemPrefab: Prefab | null = null;
     private levelRequestSeq = 0;
+    private static readonly ACTIVITY_MAHJONG_DIR = 'resources/mahjong1';
+    private static readonly ACTIVITY_MAHJONG_IDS = new Set(['4001', '4004', '5001', '5004', '6001']);
 
     start() {
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
@@ -187,6 +195,7 @@ export class GameCtrl extends Component {
                         iconFrames: this.iconFrames,
                     });
                     this.scheduleOnce(() => {
+                        this.gameMode = getCurrentGameMode();
                         const { level, snapshot } = this.loadSavedProgress();
                         void this.requestStartLevel(level, snapshot);
                     }, 0);
@@ -223,6 +232,7 @@ export class GameCtrl extends Component {
     }
 
     private restartFromEnable = () => {
+        this.gameMode = getCurrentGameMode();
         // 必须每次重读 — 胜利后玩家回主页再进入,内存里的 nowLevel 还是旧值
         const { level, snapshot } = this.loadSavedProgress();
         void this.requestStartLevel(level, snapshot);
@@ -243,6 +253,12 @@ export class GameCtrl extends Component {
 
     // 读关卡号 + 中途快照。引导关永远忽略快照(也清掉防御性 dump)
     private loadSavedProgress(): { level: number; snapshot: ProgressSnapshot | null } {
+        if (this.gameMode === 'activity') {
+            const level = ProgressManager.loadActivityLevel();
+            const snapshot = ProgressManager.loadActivitySnapshot();
+            return { level, snapshot };
+        }
+
         const level = ProgressManager.loadLevel();
         if (level === 0) {
             ProgressManager.clearSnapshot();
@@ -254,6 +270,25 @@ export class GameCtrl extends Component {
 
     private async requestStartLevel(level: number, snapshot: ProgressSnapshot | null = null, forceReroll = false) {
         const requestSeq = ++this.levelRequestSeq;
+        if (this.gameMode === 'activity') {
+            const boardId = ProgressManager.loadActivityBoardId(level);
+            const json = await ensureActivityLevelJson(boardId);
+            if (requestSeq !== this.levelRequestSeq) return;
+            if (!json) {
+                console.warn(`GameCtrl: no activity level JSON for level ${level}, board ${boardId}`);
+                return;
+            }
+
+            this.currentBoardId = boardId;
+            this.levelJson = json;
+            this.startLevel(level, snapshot, 0);
+            if (requestSeq !== this.levelRequestSeq) return;
+
+            this.hasStarted = true;
+            void warmupActivityForwardWindow(boardId, 10);
+            releaseActivityOutsideWindow(boardId, 10);
+            return;
+        }
         // 连胜分档 + 难度池：≤10 用基础盘面；11+ 按连胜摇难度档并抽没玩过的盘面。
         // 内部已含每日清零、同关盘面复用(快照命中)、失败重开重摇难度。
         const plan = await StreakManager.resolveLevelPlanForStart(level, { forceReroll });
@@ -265,6 +300,7 @@ export class GameCtrl extends Component {
         }
 
         this.levelJson = json;
+        this.currentBoardId = plan.boardId;
         const difficultyLevel = plan.tier === 'hard' ? 1 : plan.tier === 'normal' ? 3 : plan.tier === 'easy' ? 1 : 0;
         this.startLevel(level, snapshot, difficultyLevel);
         if (requestSeq !== this.levelRequestSeq) return;
@@ -311,12 +347,20 @@ export class GameCtrl extends Component {
     }
 
     private startLevel(level: number, snapshot: ProgressSnapshot | null = null, difficultyLevel = 0) {
+        this.applyMahjongFramesForMode();
         this.gameState = 'playing';
         this.nowLevel = level;
         this._guideTapCount = 0;
-        director.emit(Constants.eventNames.EventLevelStart, this.nowLevel, difficultyLevel);
+        this.levelDisplayName = this.gameMode === 'activity' ? `活动关卡${this.nowLevel + 1}` : `关卡${this.nowLevel}`;
+        director.emit(Constants.eventNames.EventLevelStart, {
+            level: this.nowLevel,
+            difficultyLevel,
+            mode: this.gameMode,
+            boardId: this.currentBoardId,
+            displayName: this.levelDisplayName,
+        });
+        director.emit(Constants.eventNames.EventSetRandomPropButton, this.gameMode === 'main' && Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0);
         // 随机道具(额外免费道具)按钮:仅在配置关卡显示。失败重开/重新进入会再走一遍 startLevel,按钮按关卡重新出现
-        director.emit(Constants.eventNames.EventSetRandomPropButton, Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0);
         // 上报关卡进入事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
         //
@@ -378,8 +422,14 @@ export class GameCtrl extends Component {
             AudioManager.instance.playOneShotPauseBgm(AudioClipNames.game_start);
         } else {
             // 全新开局:写入关卡号 + 清掉旧快照,然后正常发牌
-            ProgressManager.saveLevel(level);
-            ProgressManager.clearSnapshot();
+            if (this.gameMode === 'activity') {
+                ProgressManager.saveActivityLevel(level);
+                ProgressManager.saveActivityBoardId(level, this.currentBoardId);
+                ProgressManager.clearActivitySnapshot();
+            } else {
+                ProgressManager.saveLevel(level);
+                ProgressManager.clearSnapshot();
+            }
             this.playDealAnimation();
         }
         this.updatePlayableStates();
@@ -1046,7 +1096,7 @@ export class GameCtrl extends Component {
     };
 
     private isGuideLevel(): boolean {
-        return this.nowLevel === GameCtrl.GUIDE_LEVEL;
+        return this.gameMode === 'main' && this.nowLevel === GameCtrl.GUIDE_LEVEL;
     }
 
     private shouldUseCombo(): boolean {
@@ -1882,6 +1932,13 @@ export class GameCtrl extends Component {
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
         window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
+        if (this.gameMode === 'activity') {
+            ProgressManager.saveActivityLevel(this.nowLevel + 1);
+            ProgressManager.clearActivitySnapshot();
+            ArchiveManager.instance.scheduleUpload();
+            LayerManager.instance.showUI('win', this.elapsedTime);
+            return;
+        }
         // 通关结算：记该盘面为已玩(去重) + 干净通关(本关未失败)则连胜 +1（须在 saveLevel 推进关号前结算本关）
         StreakManager.commitClear(this.nowLevel);
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
@@ -1902,7 +1959,7 @@ export class GameCtrl extends Component {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
         // 进入失败状态即清零连胜并标记本关 failed（含"槽位满"弹窗；之后复活/重开通关也不 +1）
-        StreakManager.markFailed(this.nowLevel);
+        if (this.gameMode === 'main') StreakManager.markFailed(this.nowLevel);
         director.emit(Constants.eventNames.EventClearComboBoxEffects);
         this.clearIdleTips();
         this.autoFinishing = false;
@@ -1925,24 +1982,29 @@ export class GameCtrl extends Component {
         }
 
         this.showToast(`${reason}，重开本关`);
-        // 死局/时间到自动重开，同样算一次本关重拾
-        ProgressManager.addLevelRetryCount(this.nowLevel, 1);
-        ArchiveManager.instance.scheduleUpload();
-        ProgressManager.clearSnapshot();
+        this.recordRetryAndClearSnapshot();
         this.scheduleOnce(() => void this.requestStartLevel(this.nowLevel, null, true), 1.5);
     }
 
     private onEventFailureRestart() {
-        // 真正重开本关：累加该关重拾次数（仅埋点/统计；难度已改由连胜分档，不再依赖它）
-        ProgressManager.addLevelRetryCount(this.nowLevel, 1);
-        ArchiveManager.instance.scheduleUpload();
-        ProgressManager.clearSnapshot();
+        this.recordRetryAndClearSnapshot();
         // 失败后重开：强制重摇难度档（此时连胜已清零，多半落到一档=更简单；failed 保留 → 通关不 +1）
         void this.requestStartLevel(this.nowLevel, null, true);
     }
 
     private onEventWinNextLevel() {
         void this.requestStartLevel(this.nowLevel + 1);
+    }
+
+    private recordRetryAndClearSnapshot() {
+        if (this.gameMode === 'activity') {
+            ProgressManager.addActivityRetryCount(this.nowLevel, 1);
+            ProgressManager.clearActivitySnapshot();
+        } else {
+            ProgressManager.addLevelRetryCount(this.nowLevel, 1);
+            ProgressManager.clearSnapshot();
+        }
+        ArchiveManager.instance.scheduleUpload();
     }
 
     private onEventFailureContinue(opentype: string | null) {
@@ -2483,7 +2545,7 @@ export class GameCtrl extends Component {
 
     private updateHud() {
         if (!this.config) return;
-        if (this.levelLabel) this.levelLabel.string = `关卡${this.nowLevel}`;
+        if (this.levelLabel) this.levelLabel.string = this.levelDisplayName || `关卡${this.nowLevel}`;
 
         const remain = this.tiles.filter((t) => !t.removed).length;
         const failThreshold = Math.max(1, this.slotCapacity - 1);
@@ -2537,6 +2599,8 @@ export class GameCtrl extends Component {
     private preloadMahjongFrames(done: () => void) {
         const bundle = assetManager.getBundle('game');
         this.iconFrames.clear();
+        this.baseIconFrames.clear();
+        this.activityIconFrames.clear();
         this.iconIds = [];
 
         if (!bundle) {
@@ -2553,11 +2617,42 @@ export class GameCtrl extends Component {
             }
             for (const frame of frames) {
                 const id = this.normalizeMahjongFrameName(frame.name);
-                if (id) this.iconFrames.set(id, frame);
+                if (id) this.baseIconFrames.set(id, frame);
             }
-            this.iconIds = Array.from(this.iconFrames.keys()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+            this.applyMahjongFramesForMode();
+            this.preloadActivityMahjongFrames(bundle, done);
+        });
+    }
+
+    private preloadActivityMahjongFrames(bundle: AssetManager.Bundle, done: () => void) {
+        bundle.loadDir(GameCtrl.ACTIVITY_MAHJONG_DIR, SpriteFrame, (err, frames) => {
+            if (err) {
+                console.warn('GameCtrl: load activity mahjong frames failed', err);
+            } else {
+                for (const frame of frames || []) {
+                    const id = this.normalizeMahjongFrameName(frame.name);
+                    if (id && GameCtrl.ACTIVITY_MAHJONG_IDS.has(id)) {
+                        this.activityIconFrames.set(id, frame);
+                    }
+                }
+                this.applyMahjongFramesForMode();
+            }
             done();
         });
+    }
+
+    private applyMahjongFramesForMode() {
+        this.iconFrames.clear();
+        for (const [id, frame] of this.baseIconFrames) {
+            this.iconFrames.set(id, frame);
+        }
+        if (this.gameMode === 'activity') {
+            for (const id of GameCtrl.ACTIVITY_MAHJONG_IDS) {
+                const frame = this.activityIconFrames.get(id);
+                if (frame) this.iconFrames.set(id, frame);
+            }
+        }
+        this.iconIds = Array.from(this.iconFrames.keys()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     }
 
     private preloadChainItem(bundle: AssetManager.Bundle | null, done: () => void) {
@@ -3224,7 +3319,11 @@ export class GameCtrl extends Component {
         if (this.hasUnlockingIron()) return;
         if (this.targetBoxes.some((b) => b.pending > 0 || b.refreshing || b.movingIn || b.movedOut)) return;
         if (this.flyLayer?.isValid && this.tiles.some((t) => t.node?.parent === this.flyLayer)) return;
-        ProgressManager.saveSnapshot(this.buildSnapshot());
+        if (this.gameMode === 'activity') {
+            ProgressManager.saveActivitySnapshot(this.buildSnapshot());
+        } else {
+            ProgressManager.saveSnapshot(this.buildSnapshot());
+        }
         this.snapshotDirty = false;
         ArchiveManager.instance.scheduleUploadForSnapshot();
     }
@@ -3255,8 +3354,8 @@ export class GameCtrl extends Component {
         this.isFreePropState = data;
         if (sys.platform === sys.Platform.WECHAT_GAME) {
             wx.shareAppMessage({
-                title: Constants.sharData.string,
-                imageUrl: Constants.sharData.url
+                title: SDKManager.sharData.string,
+                imageUrl: SDKManager.sharData.getRandomImageUrl()
             });
         } else {
             this.onEventGameBack(true);

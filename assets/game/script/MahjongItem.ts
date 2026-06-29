@@ -22,6 +22,7 @@ export class MahjongItem extends Component {
 
     private touchTween: Tween<Node> | null = null;
     private shakeOriginPos: Vec3 | null = null;
+    private blockedFeedbackStreakActive: boolean | null = null;
     // 记录常态下，阴影是否应该显示
     private _originalShadowActive: boolean = false;
     // start() 跑过一次后置 true。用于区分"首次激活（由 start 接管阴影挂载）"
@@ -460,6 +461,7 @@ export class MahjongItem extends Component {
 
     private playBlockedFeedback() {
         this.stopTouchTween();
+        this.setBlockedFeedbackStreakHidden(true);
         const originPos = this.shakeOriginPos?.clone() || this.node.position.clone();
         this.shakeOriginPos = originPos.clone();
 
@@ -495,6 +497,7 @@ export class MahjongItem extends Component {
                 this.node.eulerAngles = new Vec3(0, 0, 0); // 确保角度回正
                 this.shakeOriginPos = null;
                 this.touchTween = null;
+                this.setBlockedFeedbackStreakHidden(false);
             })
             .start();
     }
@@ -584,6 +587,7 @@ export class MahjongItem extends Component {
             this.node.setPosition(this.shakeOriginPos);
             this.node.eulerAngles = new Vec3(0, 0, 0);
             this.shakeOriginPos = null;
+            this.setBlockedFeedbackStreakHidden(false);
         }
     }
 
@@ -612,6 +616,26 @@ export class MahjongItem extends Component {
         if (!streak) return;
         streak.reset();
         streak.enabled = enabled;
+    }
+
+    private setBlockedFeedbackStreakHidden(hidden: boolean) {
+        const streak = this.getMotionStreak();
+        const streakNode = streak?.node;
+        if (!streak || !streakNode?.isValid) return;
+
+        if (hidden) {
+            if (this.blockedFeedbackStreakActive === null) {
+                this.blockedFeedbackStreakActive = streakNode.active;
+            }
+            streak.reset();
+            streakNode.active = false;
+            return;
+        }
+
+        if (this.blockedFeedbackStreakActive === null) return;
+        streakNode.active = this.blockedFeedbackStreakActive;
+        this.blockedFeedbackStreakActive = null;
+        streak.reset();
     }
 
     // 禁用触摸方法

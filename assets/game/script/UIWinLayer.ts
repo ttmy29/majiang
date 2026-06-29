@@ -2,6 +2,7 @@ import { _decorator, Color, Component, director, Label, Node, sp, sys, tween, UI
 import { LayerManager } from './manager/LayerManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
+import { SDKManager } from '../../loading/SDKManager';
 const { ccclass, property } = _decorator;
 
 @ccclass('UIWinLayer')
@@ -156,8 +157,8 @@ export class UIWinLayer extends Component {
         if (sys.platform === sys.Platform.WECHAT_GAME) {
             //window.dnSDK?.track?.('SHARE', {target: 'APP_MESSAGE'});
             wx.shareAppMessage({
-                title: Constants.sharData.string,
-                imageUrl: Constants.sharData.url
+                title: SDKManager.sharData.string,
+                imageUrl: SDKManager.sharData.getRandomImageUrl()
             });
         }
     }

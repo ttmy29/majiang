@@ -1,6 +1,7 @@
 import { _decorator, Component, director, find, Label, Node, tween, UIOpacity, Vec3 } from 'cc';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
+import { getCurrentGameMode } from './config/GameMode';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
 import { SDKManager } from '../../loading/SDKManager';
@@ -143,7 +144,8 @@ export class UIFailureLayer extends Component {
         AudioManager.instance.playClick();
         this.playCloseAnimation();
         // 关失败弹窗回主菜单 = 放弃本局 → 清掉中途快照,下次从这关 fresh 开始
-        ProgressManager.clearSnapshot();
+        if (getCurrentGameMode() === 'activity') ProgressManager.clearActivitySnapshot();
+        else ProgressManager.clearSnapshot();
         LayerManager.instance.showStartLayer();
     }
 

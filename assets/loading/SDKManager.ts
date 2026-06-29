@@ -62,6 +62,37 @@ export class SDKManager {
 
     public static rewardedVideoAd: any = null
     public static adsVideoId: string = ""
+    public static sharData = {
+        string: '上头小游戏（15个好友在玩）',
+        url: 'https://sziaa-cdn.jinkezhexin.top/mahjong_share/',
+        imageNames: [
+            "1.jpg",
+            "10.jpg",
+            "111.png",
+            "2.jpg",
+            "222.png",
+            "3.jpg",
+            "33.png",
+            "333.png",
+            "4.jpg",
+            "44.png",
+            "5.jpg",
+            "6.png",
+            "7.jpg",
+            "77.png",
+            "8.jpg",
+            "88 (1).png",
+            "9.jpg",
+        ],
+        getRandomImageUrl() {
+            const imageNames = this.imageNames || [];
+            if (imageNames.length <= 0) {
+                return this.url;
+            }
+            const imageName = imageNames[Math.floor(Math.random() * imageNames.length)];
+            return this.url + encodeURIComponent(imageName);
+        },
+    }
     public callBack: Function = null
     public fcallBack: Function = null
     private currentVideoKey: string = "default"  // 当前播放的视频广告标识
@@ -129,18 +160,16 @@ export class SDKManager {
             wx.onShareAppMessage(() => {
                 window.dnSDK?.track?.('SHARE', { target: 'APP_MESSAGE' })
                 return {
-                    // 转发标题, 没有则默认使用小游戏的昵称
-                    title: "上头小游戏（15个好友在玩）",
-                    // 图片链接，
-                    imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"     
+                    title: SDKManager.sharData.string,
+                    imageUrl: SDKManager.sharData.getRandomImageUrl()
                 };
             });
             // 朋友圈点击回调
             wx.onShareTimeline(() => {
                 window.dnSDK?.track?.('SHARE', { target: 'TIME_LINE' })
                 return {
-                    title: '上头小游戏（15个好友在玩）',
-                    imageUrl: "https://sziaa-cdn.jinkezhexin.top/6dc992aeb0427213a3720f55584a9d92.png"
+                    title: SDKManager.sharData.string,
+                    imageUrl: SDKManager.sharData.getRandomImageUrl()
                 };
             });
             wx.onAddToFavorites(() => {
