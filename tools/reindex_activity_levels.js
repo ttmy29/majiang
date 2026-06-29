@@ -22,7 +22,7 @@ for (let f of files) {
 levels.sort((a, b) => a.oldId - b.oldId);
 
 // 2. Remove 6, 8, 13
-const toRemove = [6, 8, 13];
+const toRemove = [2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 23, 25, 28, 29, 31, 35, 48, 49, 50, 56, 59];
 for (let id of toRemove) {
     let f1 = path.join(dir, `pure_level${id}_config.json`);
     let f2 = path.join(dir, `pure_level${id}_config.json.meta`);
