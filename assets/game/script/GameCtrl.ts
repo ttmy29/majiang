@@ -351,7 +351,7 @@ export class GameCtrl extends Component {
         this.gameState = 'playing';
         this.nowLevel = level;
         this._guideTapCount = 0;
-        this.levelDisplayName = this.gameMode === 'activity' ? `活动关卡${this.nowLevel + 1}` : `关卡${this.nowLevel}`;
+        this.levelDisplayName = this.gameMode === 'activity' ? `世界杯之旅 ${this.nowLevel + 1}` : `关卡${this.nowLevel}`;
         director.emit(Constants.eventNames.EventLevelStart, {
             level: this.nowLevel,
             difficultyLevel,
@@ -362,7 +362,7 @@ export class GameCtrl extends Component {
         director.emit(Constants.eventNames.EventSetRandomPropButton, this.gameMode === 'main' && Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0);
         // 随机道具(额外免费道具)按钮:仅在配置关卡显示。失败重开/重新进入会再走一遍 startLevel,按钮按关卡重新出现
         // 上报关卡进入事件
-        SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.nowLevel });
+        SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
         //
         if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_ENTER', { enter_level_name: `关卡${this.nowLevel}`, level_id: this.nowLevel });
         this.uidSeed = 1;
@@ -1271,10 +1271,8 @@ export class GameCtrl extends Component {
         tile.node.name = `targetTile_${tile.uid}`;
         if (wasBoardTile) this.unlockAdjacentIronLocks(tile);
 
-        const worldPosition = tile.node.worldPosition.clone();
         const flyLayer = this.ensureFlyLayer();
-        tile.node.setParent(flyLayer);
-        tile.node.setWorldPosition(worldPosition);
+        this.moveTileNodeToFlyLayer(tile, flyLayer, wasBoardTile);
         tile.item.setPlayable(true);
 
         const targetIndex = Utils.clamp(box.progress + box.pending, 1, Math.max(1, box.required));
@@ -1340,10 +1338,8 @@ export class GameCtrl extends Component {
 
         const isSlotFull = this.slots.length >= Math.max(1, this.slotCapacity - 1);
 
-        const worldPosition = tile.node.worldPosition.clone();
         const flyLayer = this.ensureFlyLayer();
-        tile.node.setParent(flyLayer);
-        tile.node.setWorldPosition(worldPosition);
+        this.moveTileNodeToFlyLayer(tile, flyLayer, wasBoardTile);
         tile.item.setPlayable(true);
 
         this.arrangeSlotTiles(0.16 + 0.1, tile);
@@ -1373,9 +1369,7 @@ export class GameCtrl extends Component {
             const lastSame = this.slots.reduce((last, st, i) => st.type === tile.type ? i : last, -1);
             this.slots.splice(lastSame >= 0 ? lastSame + 1 : this.slots.length, 0, tile);
 
-            const worldPosition = tile.node.worldPosition.clone();
-            tile.node.setParent(flyLayer);
-            tile.node.setWorldPosition(worldPosition);
+            this.moveTileNodeToFlyLayer(tile, flyLayer, wasBoardTile);
             tile.item.setPlayable(true);
         }
 
@@ -1400,6 +1394,8 @@ export class GameCtrl extends Component {
         const slotTileScale = Constants.MahjongBoard.SlotTileScale;
         for (let i = 0; i < this.slots.length; i++) {
             const tile = this.slots[i];
+            Tween.stopAllByTarget(tile.node);
+
             const target = this.getSlotTargetPosition(i);
             if (tile === flyingTile || tile.node.parent !== this.slotNode) {
                 const targetWorldPosition = Utils.localToWorldPosition(this.slotNode, target);
@@ -1928,7 +1924,7 @@ export class GameCtrl extends Component {
         this.autoFinishing = false;
         this.unschedule(this.autoFinishStep);
         // 上报关卡成功事件
-        SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.nowLevel, time: Math.ceil(this.elapsedTime) });
+        SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel, time: Math.ceil(this.elapsedTime) });
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
         window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
@@ -1965,7 +1961,7 @@ export class GameCtrl extends Component {
         this.autoFinishing = false;
         this.unschedule(this.autoFinishStep);
         // 上报关卡失败事件
-        SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.nowLevel, reason });
+        SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel, reason });
         window.dnSDK?.track?.('LEVEL_LOSE', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
@@ -2045,6 +2041,17 @@ export class GameCtrl extends Component {
         box.unlocked = true;
         box.refreshing = true;
         director.emit(Constants.eventNames.EventShowSlotUnlock, this.getTargetBoxSlotID(box));
+        if (this.gameMode === 'activity' && this.slots.length >= this.getSlotFailThreshold()) {
+            for (const tile of this.slots) {
+                const typeIndex = this.taskQueue.indexOf(tile.type);
+                if (typeIndex >= 0) {
+                    const type = this.taskQueue.splice(typeIndex, 1)[0];
+                    this.taskQueue.unshift(type);
+                    break;
+                }
+            }
+        }
+
         this.scheduleOnce(() => {
             box.refreshing = false;
             if (this.gameState !== 'playing' || !box.unlocked) return;
@@ -2060,6 +2067,7 @@ export class GameCtrl extends Component {
     private clearBottomSlot() {
         const discardedSet = new Set(this.slots);
         for (const tile of this.slots) {
+            Tween.stopAllByTarget(tile.node);
             // 重新让这张牌可被目标槽接收(moveTileToTarget 会再把 collected/removed 置 true)
             tile.collected = false;
             if (tile.node?.isValid) tile.node.active = false;
@@ -2476,6 +2484,17 @@ export class GameCtrl extends Component {
         return node;
     }
 
+    private moveTileNodeToFlyLayer(tile: TileRecord, flyLayer: Node, wasBoardTile: boolean) {
+        Tween.stopAllByTarget(tile.node);
+
+        const startWorldPosition = wasBoardTile && tile.node.parent
+            ? Utils.localToWorldPosition(tile.node.parent, tile.boardPos)
+            : tile.node.worldPosition.clone();
+
+        tile.node.setParent(flyLayer);
+        tile.node.setWorldPosition(startWorldPosition);
+    }
+
     private captureSlotPositions() {
         this.slotPositions = [];
         if (!this.slotNode) return;
@@ -2813,7 +2832,7 @@ export class GameCtrl extends Component {
                 this.setUndoCount(this.undoCount + 3);
                 this.bumpAdCount();
                 window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
-                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
+                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
             }, 'undo');
@@ -2849,6 +2868,7 @@ export class GameCtrl extends Component {
     }
 
     private executeUndo(tile: TileRecord, index: number) {
+        Tween.stopAllByTarget(tile.node);
         this.slots.splice(index, 1);
         // 注意:collected 此处先保留 true,等飞回 tween 跑完再置 false。
         // 否则飞行 0.16s 期间用户点击会触发 GameCtrl 的 TOUCH_END → onTileTap → moveTileToSlot,
@@ -2934,7 +2954,7 @@ export class GameCtrl extends Component {
         SDKManager.instance.showVideoAd(() => {
             this.executeUnlock(box);
             this.bumpAdCount();
-            SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.nowLevel });
+            SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
         }, () => {
             LayerManager.instance.showToast("视频播放未完成！")
         }, 'unlock');
@@ -2989,7 +3009,7 @@ export class GameCtrl extends Component {
                 this.bumpAdCount();
                 this.setSwitchCount(this.switchCount + 3);
                 window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
-                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.nowLevel });
+                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
             }, 'shuffle');
@@ -3341,7 +3361,7 @@ export class GameCtrl extends Component {
         SDKManager.instance.showVideoAd(() => {
             this.bumpAdCount();
             this.executeUnlock(box);
-            SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.nowLevel });
+            SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
         }, () => {
             LayerManager.instance.showToast("视频播放未完成！")
         }, 'unlock');

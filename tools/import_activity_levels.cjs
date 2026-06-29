@@ -212,7 +212,7 @@ function assignTileIds(positions, levelNo, tileIds) {
   const random = createRandom(`activity-level:${levelNo}:tiles:${positions.length}`);
   const groupTileIds = buildTaskIds(levelNo, groupCount, tileIds, random);
   const removalOrder = buildRemovalOrder(positions);
-  const chunkSize = Math.min(3, groupCount);
+  const chunkSize = Math.min(10, groupCount);
 
   for (let start = 0; start < groupCount; start += chunkSize) {
     const count = Math.min(chunkSize, groupCount - start);
