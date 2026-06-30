@@ -182,12 +182,16 @@ export class UIStartLayer extends Component {
 
     async onClickActivityButton(event: EventTouch, data: any) {
         if (this.enteringGame) return;
-        if (!this.isActivityUnlocked()) return;
+        //if (!this.isActivityUnlocked()) return;
         await this.enterGame('activity');
     }
 
     private async enterGame(mode: GameMode) {
         AudioManager.instance.playClick();
+        if (!this.isActivityUnlocked() && mode === 'activity') {
+            LayerManager.instance.showToast('通过第五关后解锁!');
+            return;
+        }
         this.enteringGame = true;
         setCurrentGameMode(mode);
 
@@ -257,7 +261,7 @@ export class UIStartLayer extends Component {
 
     private refreshActivityButtonVisible() {
         if (!this.activityBtn?.isValid) return;
-        this.activityBtn.active = this.isActivityUnlocked();
+        this.activityBtn.active = true;
     }
 
     private fitBackgroundToView() {
@@ -451,7 +455,7 @@ export class UIStartLayer extends Component {
 
         for (const node of this.UINodeArray) {
             if (!node?.isValid) continue;
-            if (node === this.activityBtn && !this.isActivityUnlocked()) {
+            if (node === this.activityBtn) {
                 node.active = false;
                 continue;
             }
