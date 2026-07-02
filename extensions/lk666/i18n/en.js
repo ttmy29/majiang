@@ -1,0 +1,26 @@
+module.exports = {
+    title: 'Code Obfuscation',
+    panel_title: 'Code Obfuscation',
+    description: 'Automatically obfuscate build output scripts after build.',
+    menu: {
+        open: 'Code Obfuscation',
+    },
+    options: {
+        enabled: 'Enable Obfuscation',
+        enabled_desc: 'Process matched JavaScript files after the build finishes.',
+        preset: 'Preset',
+        preset_desc: 'Select the javascript-obfuscator preset strength.',
+        preset_lower: 'Lower',
+        preset_low: 'Low',
+        preset_mid: 'Medium',
+        preset_high: 'High',
+        preset_default: 'Default',
+        preset_off: 'Off',
+        include: 'Include',
+        include_desc: 'Comma-separated globs relative to the build output directory.',
+        exclude: 'Exclude',
+        exclude_desc: 'Comma-separated globs relative to the build output directory.',
+        verbose: 'Verbose Logs',
+        verbose_desc: 'Print every obfuscated file in the build log.',
+    },
+};
