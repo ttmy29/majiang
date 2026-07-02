@@ -188,7 +188,7 @@ export class UIStartLayer extends Component {
 
     private async enterGame(mode: GameMode) {
         AudioManager.instance.playClick();
-        if(!this.isActivityUnlocked() && mode === 'activity'){
+        if (!this.isActivityUnlocked() && mode === 'activity') {
             LayerManager.instance.showToast('通过第五关后解锁!');
             return;
         }
@@ -455,7 +455,7 @@ export class UIStartLayer extends Component {
 
         for (const node of this.UINodeArray) {
             if (!node?.isValid) continue;
-            if (node === this.activityBtn ) {
+            if (node === this.activityBtn) {
                 node.active = false;
                 continue;
             }

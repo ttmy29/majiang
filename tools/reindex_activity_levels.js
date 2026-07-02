@@ -67,14 +67,14 @@ for (let i = 0; i < levels.length; i++) {
         content.level_no = expectedId;
         content.level_json = `activity_level_${expectedId}`;
         content.index_config.level_json = `activity_level_${expectedId}`;
-        
+
         fs.writeFileSync(newJsonPath, JSON.stringify(content, null, 2) + '\n', 'utf8');
-        
+
         // Move meta
         if (fs.existsSync(oldMetaPath)) {
             fs.renameSync(oldMetaPath, newMetaPath);
         }
-        
+
         // Delete old JSON
         fs.unlinkSync(oldJsonPath);
         console.log(`Moved ${l.oldId} to ${expectedId}`);

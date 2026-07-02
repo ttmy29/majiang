@@ -127,7 +127,7 @@ function assignTileIds(positions, levelNo, tileIds) {
   const random = createRandom(`activity-level-harder:${levelNo}:tiles:${positions.length}`);
   const groupTileIds = buildTaskIds(levelNo, groupCount, tileIds, random);
   const removalOrder = buildRemovalOrder(positions);
-  
+
   // To increase difficulty, we use maximum variety (chunkSize = 1) instead of Math.min(3, groupCount)
   const chunkSize = Math.min(10, groupCount);
 
@@ -192,24 +192,24 @@ function main() {
 
   const files = fs.readdirSync(ACTIVITY_DIR);
   let processed = 0;
-  
+
   for (const file of files) {
     if (!file.endsWith('.json')) continue;
-    
+
     const filePath = path.join(ACTIVITY_DIR, file);
     const data = readJson(filePath);
     if (!data.positions || data.positions.length % 3 !== 0) continue;
 
     const levelNo = data.level_no || parseInt(file.replace(/[^0-9]/g, '')) || 1;
-    
+
     // Re-assign tiles
     const task = assignTileIds(data.positions, levelNo, tileIds);
-    
+
     // Update data array
     data.decoded_config.data = buildDataArray(data.positions);
     data.decoded_config.task = [task];
     data.decoded_config.taskNum = [task.map(() => 3)];
-    
+
     // Update summary tile counts
     const tile_counts = {};
     for (const [id, count] of Array.from(getTileCounts(data.positions).entries()).sort((a, b) => a[0] - b[0])) {
@@ -217,11 +217,11 @@ function main() {
     }
     data.summary.tile_counts = tile_counts;
     data.summary.task_count = task.length;
-    
+
     writeJson(filePath, data);
     processed++;
   }
-  
+
   console.log(`Processed and increased difficulty for ${processed} level configurations.`);
 }
 
