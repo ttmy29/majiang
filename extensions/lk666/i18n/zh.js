@@ -1,0 +1,26 @@
+module.exports = {
+    title: '代码混淆',
+    panel_title: '代码混淆',
+    description: '构建完成后自动混淆输出的业务脚本。',
+    menu: {
+        open: '代码混淆',
+    },
+    options: {
+        enabled: '启用混淆',
+        enabled_desc: '构建完成后处理匹配的 JavaScript 文件。',
+        preset: '混淆预设',
+        preset_desc: '选择 javascript-obfuscator 的预设强度。',
+        preset_lower: '极低',
+        preset_low: '低',
+        preset_mid: '中',
+        preset_high: '高',
+        preset_default: '默认',
+        preset_off: '关闭效果',
+        include: '包含路径',
+        include_desc: '相对构建输出目录的逗号分隔 glob。',
+        exclude: '排除路径',
+        exclude_desc: '相对构建输出目录的逗号分隔 glob。',
+        verbose: '输出文件日志',
+        verbose_desc: '在构建日志中打印每个被混淆的文件。',
+    },
+};
