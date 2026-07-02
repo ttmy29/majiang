@@ -261,7 +261,7 @@ export class UIStartLayer extends Component {
 
     private refreshActivityButtonVisible() {
         if (!this.activityBtn?.isValid) return;
-        this.activityBtn.active = true;
+        this.activityBtn.active = false;
     }
 
     private fitBackgroundToView() {
@@ -479,6 +479,10 @@ export class UIStartLayer extends Component {
         for (let i = 0; i < this.UINodeArray.length; i++) {
             const node = this.UINodeArray[i];
             if (!node?.isValid) continue;
+            if (node === this.activityBtn) {
+                node.active = false;
+                continue;
+            }
 
             const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
             const targetOpacity = this.uiNodeTargetOpacity.get(node) ?? 255;
