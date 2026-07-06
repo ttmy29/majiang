@@ -1,3 +1,6 @@
+import { director } from 'cc';
+import { Constants } from '../config/Constants';
+import { ArchiveManager } from './ArchiveManager';
 import { StorageKey, StorageManager } from './StorageManager';
 
 export interface TileKey {
@@ -10,6 +13,7 @@ export interface TileSnap extends TileKey {
     type: string;
     collected: boolean;
     removed: boolean;
+    covered?: boolean;
     location: 'board' | 'slot' | 'target' | 'discarded';
 }
 
@@ -24,6 +28,8 @@ export interface BoxSnap {
 export interface ProgressSnapshot {
     version: 1;
     level: number;
+    iqValue?: number;
+    iqClearCount?: number;
     taskQueue: string[];
     tiles: TileSnap[];
     slotKeys: TileKey[];
@@ -33,6 +39,16 @@ export interface ProgressSnapshot {
     boxes: BoxSnap[];
     remainTime: number;
     elapsedTime: number;
+}
+
+interface SignMonthRecord {
+    month: string;
+    days: number[];
+}
+
+interface SignRewardRecord {
+    month: string;
+    claimed: number[];
 }
 
 const SNAPSHOT_VERSION = 1;
@@ -88,7 +104,7 @@ export class ProgressManager {
         }));
     }
 
-    // —— 道具(撤回/换牌)剩余次数,永久保存,首次默认 1 ——
+    // —— 道具(撤回/换牌/解锁)剩余次数,永久保存,首次默认 1 ——
     static loadUndoCount(): number {
         return this.loadCount(StorageKey.UndoCount);
     }
@@ -103,6 +119,332 @@ export class ProgressManager {
 
     static saveSwitchCount(count: number): void {
         this.saveCount(StorageKey.SwitchCount, count);
+    }
+
+    static loadUnlockCount(): number {
+        return this.loadCount(StorageKey.UnlockCount);
+    }
+
+    static saveUnlockCount(count: number): void {
+        this.saveCount(StorageKey.UnlockCount, count);
+    }
+
+    static loadLeafConut(defaultValue = 0): number {
+        const raw = StorageManager.instance.getItem(StorageKey.LeafConut);
+        if (raw === null) return this.normalizeLeafConut(defaultValue);
+        const value = parseInt(raw, 10);
+        return Number.isFinite(value) && value >= 0 ? value : this.normalizeLeafConut(defaultValue);
+    }
+
+    static saveLeafConut(count: number): void {
+        const normalized = this.normalizeLeafConut(count);
+        const raw = StorageManager.instance.getItem(StorageKey.LeafConut);
+        if (raw === `${normalized}`) return;
+
+        StorageManager.instance.setItem(StorageKey.LeafConut, normalized);
+        ArchiveManager.instance.scheduleUpload();
+        director.emit(Constants.eventNames.EventLeafConutUpdate, normalized);
+    }
+
+    static addLeafConut(delta = 1): number {
+        const next = this.loadLeafConut() + this.normalizeLeafConut(delta);
+        this.saveLeafConut(next);
+        return next;
+    }
+
+    static initSignUserState(now = new Date()): void {
+        if (StorageManager.instance.getItem(StorageKey.SignFirstSeenDate)) return;
+
+        const firstSeenDate = this.hasSignUserHistory()
+            ? this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
+            : this.formatSignDate(now);
+        StorageManager.instance.setItem(StorageKey.SignFirstSeenDate, firstSeenDate);
+        ArchiveManager.instance.scheduleUpload();
+    }
+
+    static isFirstSeenToday(now = new Date()): boolean {
+        this.initSignUserState(now);
+        return StorageManager.instance.getItem(StorageKey.SignFirstSeenDate) === this.formatSignDate(now);
+    }
+
+    static isReturningSignUser(now = new Date()): boolean {
+        this.initSignUserState(now);
+        const firstSeenDate = StorageManager.instance.getItem(StorageKey.SignFirstSeenDate);
+        return !!firstSeenDate && firstSeenDate !== this.formatSignDate(now);
+    }
+
+    static shouldShowWinSignToday(now = new Date()): boolean {
+        if (!this.isReturningSignUser(now)) return false;
+        return StorageManager.instance.getItem(StorageKey.WinSignShownDate) !== this.formatSignDate(now);
+    }
+
+    static markWinSignShownToday(now = new Date()): void {
+        const today = this.formatSignDate(now);
+        if (StorageManager.instance.getItem(StorageKey.WinSignShownDate) === today) return;
+
+        StorageManager.instance.setItem(StorageKey.WinSignShownDate, today);
+        ArchiveManager.instance.scheduleUpload();
+    }
+
+    static signToday(now = new Date()): boolean {
+        const today = this.formatSignDate(now);
+        const lastDate = StorageManager.instance.getItem(StorageKey.SignLastDate);
+        const { changed: monthChanged, days } = this.addSignMonthDay(now);
+
+        if (lastDate === today) {
+            if (monthChanged) {
+                ArchiveManager.instance.scheduleUpload();
+                director.emit(Constants.eventNames.EventSignInUpdate, {
+                    date: today,
+                    streak: this.loadSignStreak(now),
+                    days,
+                });
+            }
+            return false;
+        }
+
+        const yesterday = this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        const nextStreak = lastDate === yesterday ? this.loadStoredSignStreak() + 1 : 1;
+
+        StorageManager.instance.setItem(StorageKey.SignLastDate, today);
+        StorageManager.instance.setItem(StorageKey.SignStreak, nextStreak);
+        ArchiveManager.instance.scheduleUpload();
+        director.emit(Constants.eventNames.EventSignInUpdate, {
+            date: today,
+            streak: nextStreak,
+            days,
+        });
+        return true;
+    }
+
+    static loadSignStreak(now = new Date()): number {
+        const lastDate = StorageManager.instance.getItem(StorageKey.SignLastDate);
+        if (!lastDate) return 0;
+
+        const today = this.formatSignDate(now);
+        const yesterday = this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        if (lastDate !== today && lastDate !== yesterday) return 0;
+
+        return this.loadStoredSignStreak();
+    }
+
+    static loadSignMonthDays(now = new Date()): number[] {
+        const month = this.formatSignMonth(now);
+        const record = this.loadSignMonthRecord();
+        if (!record || record.month !== month) return [];
+
+        return this.normalizeSignDays(record.days, this.getDaysInMonth(now));
+    }
+
+    static loadSignMonthCount(now = new Date()): number {
+        return this.loadSignMonthDays(now).length;
+    }
+
+    static getSignRewardRequiredDays(index: number, now = new Date()): number {
+        const normalizedIndex = this.normalizeSignRewardIndex(index);
+        if (normalizedIndex === 5) return this.getDaysInMonth(now);
+
+        const fixedRequiredDays = [3, 7, 10, 20];
+        return fixedRequiredDays[normalizedIndex - 1] || normalizedIndex;
+    }
+
+    static isSignRewardClaimable(index: number, now = new Date()): boolean {
+        const requiredDays = this.getSignRewardRequiredDays(index, now);
+        if (requiredDays <= 0) return false;
+
+        return this.loadSignMonthCount(now) >= requiredDays
+            && !this.hasClaimedSignReward(index, now);
+    }
+
+    static hasClaimableSignReward(now = new Date()): boolean {
+        for (let i = 1; i <= 5; i++) {
+            if (this.isSignRewardClaimable(i, now)) return true;
+        }
+
+        return false;
+    }
+
+    static claimSignReward(index: number, now = new Date()): boolean {
+        if (!this.isSignRewardClaimable(index, now)) return false;
+
+        const changed = this.claimSignRewardInternal(index, now);
+        if (!changed) return false;
+
+        ArchiveManager.instance.scheduleUpload();
+        director.emit(Constants.eventNames.EventSignInUpdate, {
+            date: this.formatSignDate(now),
+            streak: this.loadSignStreak(now),
+            days: this.loadSignMonthDays(now),
+        });
+        return true;
+    }
+
+    static hasClaimedSignReward(index: number, now = new Date()): boolean {
+        const normalizedIndex = this.normalizeSignRewardIndex(index);
+        if (normalizedIndex <= 0) return false;
+
+        const record = this.loadSignRewardRecord();
+        if (!record || record.month !== this.formatSignMonth(now)) return false;
+
+        return this.normalizeSignRewardClaims(record.claimed).indexOf(normalizedIndex) >= 0;
+    }
+
+    private static normalizeLeafConut(count: number): number {
+        return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+    }
+
+    private static hasSignUserHistory(): boolean {
+        return this.hasPositiveStoredNumber(StorageKey.CurrentLevel)
+            || this.hasStoredValue(StorageKey.LevelSnapshot)
+            || this.hasPositiveStoredNumber(StorageKey.ActivityLevel)
+            || this.hasStoredValue(StorageKey.ActivityBoardId)
+            || this.hasStoredValue(StorageKey.ActivitySnapshot)
+            || this.hasStoredValue(StorageKey.ActivityRetryCount)
+            || this.hasStoredValue(StorageKey.IronTipsShown)
+            || this.hasStoredValue(StorageKey.UndoCount)
+            || this.hasStoredValue(StorageKey.SwitchCount)
+            || this.hasStoredValue(StorageKey.UnlockCount)
+            || this.hasStoredValue(StorageKey.FavoriteRewardDate)
+            || this.hasPositiveStoredNumber(StorageKey.GlobalAdCount)
+            || this.hasStoredValue(StorageKey.LevelRetryCount)
+            || this.hasStoredValue(StorageKey.LeafConut)
+            || this.hasStoredValue(StorageKey.SignLastDate)
+            || this.hasStoredValue(StorageKey.SignStreak)
+            || this.hasStoredValue(StorageKey.SignMonthDays)
+            || this.hasStoredValue(StorageKey.SignRewardClaims)
+            || this.hasStoredValue(StorageKey.WinStreak)
+            || this.hasStoredValue(StorageKey.WinStreakDate)
+            || this.hasStoredValue(StorageKey.LevelDiffState)
+            || this.hasStoredValue(StorageKey.PlayedLevels);
+    }
+
+    private static hasStoredValue(key: StorageKey): boolean {
+        return StorageManager.instance.getItem(key) !== null;
+    }
+
+    private static hasPositiveStoredNumber(key: StorageKey): boolean {
+        const raw = StorageManager.instance.getItem(key);
+        if (raw === null) return false;
+
+        const value = parseInt(raw, 10);
+        return Number.isFinite(value) && value > 0;
+    }
+
+    private static addSignMonthDay(now: Date): { changed: boolean; days: number[] } {
+        const month = this.formatSignMonth(now);
+        const day = now.getDate();
+        const daysInMonth = this.getDaysInMonth(now);
+        const record = this.loadSignMonthRecord();
+        const days = record && record.month === month
+            ? this.normalizeSignDays(record.days, daysInMonth)
+            : [];
+
+        if (days.indexOf(day) >= 0) return { changed: false, days };
+
+        days.push(day);
+        days.sort((a, b) => a - b);
+        StorageManager.instance.setItem(StorageKey.SignMonthDays, JSON.stringify({ month, days }));
+        return { changed: true, days };
+    }
+
+    private static loadSignMonthRecord(): SignMonthRecord | null {
+        const raw = StorageManager.instance.getItem(StorageKey.SignMonthDays);
+        if (!raw) return null;
+
+        try {
+            const obj = JSON.parse(raw) as Partial<SignMonthRecord>;
+            if (!obj || typeof obj.month !== 'string' || !Array.isArray(obj.days)) return null;
+            return {
+                month: obj.month,
+                days: obj.days,
+            };
+        } catch (e) {
+            console.warn('ProgressManager: sign month days parse failed', e);
+            return null;
+        }
+    }
+
+    private static claimSignRewardInternal(index: number, now: Date): boolean {
+        const normalizedIndex = this.normalizeSignRewardIndex(index);
+        if (normalizedIndex <= 0) return false;
+
+        const month = this.formatSignMonth(now);
+        const record = this.loadSignRewardRecord();
+        const claimed = record && record.month === month
+            ? this.normalizeSignRewardClaims(record.claimed)
+            : [];
+
+        if (claimed.indexOf(normalizedIndex) >= 0) return false;
+
+        claimed.push(normalizedIndex);
+        claimed.sort((a, b) => a - b);
+        StorageManager.instance.setItem(StorageKey.SignRewardClaims, JSON.stringify({ month, claimed }));
+        return true;
+    }
+
+    private static loadSignRewardRecord(): SignRewardRecord | null {
+        const raw = StorageManager.instance.getItem(StorageKey.SignRewardClaims);
+        if (!raw) return null;
+
+        try {
+            const obj = JSON.parse(raw) as Partial<SignRewardRecord>;
+            if (!obj || typeof obj.month !== 'string' || !Array.isArray(obj.claimed)) return null;
+            return {
+                month: obj.month,
+                claimed: obj.claimed,
+            };
+        } catch (e) {
+            console.warn('ProgressManager: sign reward claims parse failed', e);
+            return null;
+        }
+    }
+
+    private static normalizeSignRewardIndex(index: number): number {
+        const value = Math.floor(Number(index));
+        return Number.isFinite(value) && value > 0 ? value : 0;
+    }
+
+    private static normalizeSignRewardClaims(claimed: number[]): number[] {
+        const set = new Set<number>();
+        for (const index of claimed) {
+            const value = this.normalizeSignRewardIndex(index);
+            if (value > 0) set.add(value);
+        }
+        return Array.from(set).sort((a, b) => a - b);
+    }
+
+    private static loadStoredSignStreak(): number {
+        const raw = StorageManager.instance.getItem(StorageKey.SignStreak);
+        if (!raw) return 0;
+        const value = parseInt(raw, 10);
+        return Number.isFinite(value) && value >= 0 ? value : 0;
+    }
+
+    private static normalizeSignDays(days: number[], daysInMonth: number): number[] {
+        const set = new Set<number>();
+        for (const day of days) {
+            const value = Math.floor(Number(day));
+            if (Number.isFinite(value) && value >= 1 && value <= daysInMonth) {
+                set.add(value);
+            }
+        }
+        return Array.from(set).sort((a, b) => a - b);
+    }
+
+    private static formatSignDate(date: Date): string {
+        return `${date.getFullYear()}-${this.padDatePart(date.getMonth() + 1)}-${this.padDatePart(date.getDate())}`;
+    }
+
+    private static formatSignMonth(date: Date): string {
+        return `${date.getFullYear()}-${this.padDatePart(date.getMonth() + 1)}`;
+    }
+
+    private static padDatePart(value: number): string {
+        return value < 10 ? `0${value}` : `${value}`;
+    }
+
+    private static getDaysInMonth(date: Date): number {
+        return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
     }
 
     private static loadCount(key: StorageKey): number {

@@ -11,6 +11,8 @@ const Constants = {
         EventLevelStart: 'LevelStart',
         // HUD（关卡 / 剩余 / 槽位 / 倒计时）
         EventHudUpdate: 'HudUpdate',
+        EventIQUpdate: 'IQUpdate',
+        EventSetIQLabelVisible: 'SetIQLabelVisible',
         // Toast 文案
         EventShowToast: 'ShowToast',
         // 连击 label
@@ -28,7 +30,7 @@ const Constants = {
         EventClearAllMahjongTiles: 'ClearAllMahjongTiles',
         // 撤回按钮置灰状态:true=灰(无可撤回),false=彩(有可撤回)
         EventSetUndoButtonStatus: 'SetUndoButtonStatus',
-        // 道具剩余次数:GameCtrl -> UI,payload {undo, switch},>0 显示 di+countLabel,==0 显示 ad1
+        // 道具剩余次数:GameCtrl -> UI,payload {undo, switch, unlock},>0 显示 di+countLabel,==0 显示 ad1
         EventSetPropCount: 'SetPropCount',
         // 随机道具(额外免费道具)按钮显隐:GameCtrl -> UI,payload boolean(true=显示,false=隐藏)
         EventSetRandomPropButton: 'SetRandomPropButton',
@@ -48,6 +50,9 @@ const Constants = {
         EventFailureRestart: 'FailureRestart',
         // 胜利弹窗"下一关":UIWinLayer -> GameCtrl,进入下一关
         EventWinNextLevel: 'WinNextLevel',
+        EventFavoriteRewardClaimed: 'FavoriteRewardClaimed',
+        EventLeafConutUpdate: 'LeafConutUpdate',
+        EventSignInUpdate: 'SignInUpdate',
     },
     // UIGameLayer.slotNodeArr 中节点的固定索引约定：
     // [0] = 底部存牌槽 (slot)，[1..4] = 顶部 4 个目标槽 (slot1~slot4)
@@ -76,7 +81,12 @@ const Constants = {
         failure: 'prefab/failure',
         win: 'prefab/win',
         guide: 'prefab/guide',
-        tips: 'prefab/tips'
+        tips: 'prefab/tips',
+        addDesktop: 'prefab/addDesktop',
+        favoriteReward:'prefab/favoriteReward',
+        rank: 'prefab/rank',
+        sign: 'prefab/sign',
+        winSign: 'prefab/winSign',
     },
     GameBundleName: 'game',
     AudioBundleName: 'audio',
@@ -171,14 +181,37 @@ const Constants = {
         // 小棋盘放大上限,避免少牌关被放得过满或飞牌手感跳变太大
         MaxBoardFitRatio: 1.18,
     },
-    celebrityNames: [
-        "牛顿", "霍金", "爱因斯坦", "比尔·盖茨", "乔布斯",
-        "居里夫人", "特斯拉", "达芬奇", "爱迪生", "图灵",
-        "扎克伯格", "马斯克", "贝佐斯",
-        "柏拉图", "亚里士多德", "苏格拉底",
-        "伽利略", "哥白尼", "开普勒", "法拉第", "门捷列夫",
-        "达尔文", "弗洛伊德", "诺伊曼", "香农", "沃兹尼亚克",
-        "拉里·佩奇", "谢尔盖·布林", "杰克·多西"
+    // 开场文案
+    openingCopyTexts: [
+        "为您的一天开个聪明的头",
+        "点亮早晨！方块相连，提升你的智商！",
+        "警告：前方烧脑 ⚠️",
+        "这是门萨级别的题",
+        "连牛顿也会停下沉思",
+        "爱因斯坦级的挑战",
+        "需福尔摩斯级推理",
+        "此谜，唯智商240的人能解",
+        "升级！真正的智商测试",
+        "一场轻松的谜题游戏温暖你",
+        "锻炼你的大脑，放松身心",
+        "配对开始！",
+        "观察，聪明出招！",
+        "既能考验眼力更能放松心情",
+        "来搓几圈?"
+    ],
+    // 结算文案
+    settlementCopyTexts: [
+        "困难关卡？小菜一碟",
+        "根本不是你的对手",
+        "对你来说根本不是问题",
+        "你让它看起来如此轻松",
+        "高手一样轻松搞定",
+        "高手一样拿下了",
+        "这个关卡很难...但对你不在话下",
+        "优雅又干净！只用了极少步骤",
+        "毫不费力地达成！",
+        "你势不可挡！对你来说轻而易举",
+        "巅峰难度也无法阻挡你无双的技巧"
     ]
 };
 

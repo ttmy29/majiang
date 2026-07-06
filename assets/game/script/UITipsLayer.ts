@@ -2,6 +2,8 @@ import { _decorator, Button, Component, Node, tween, Tween, UIOpacity, Vec3 } fr
 import { AudioManager } from './manager/AudioManager';
 const { ccclass, property } = _decorator;
 
+type TipsLayerParam = number | string | { type?: number | string; tipsType?: number | string };
+
 @ccclass('UITipsLayer')
 export class UITipsLayer extends Component {
     @property(Node)
@@ -9,6 +11,8 @@ export class UITipsLayer extends Component {
     @property(Node)
     maskNode: Node = null!;
 
+    private readonly defaultTipsType = 1;
+    private currentTipsType = this.defaultTipsType;
     private openedByInit = false;
     private isClosing = false;
     private closeButtonNode: Node | null = null;
@@ -17,6 +21,7 @@ export class UITipsLayer extends Component {
         this.viewNode = this.viewNode || this.node.getChildByName('view');
         this.maskNode = this.maskNode || this.node.getChildByName('bg');
         this.bindCloseButton();
+        this.showTipsType(this.currentTipsType);
     }
 
     start() {
@@ -29,8 +34,10 @@ export class UITipsLayer extends Component {
 
     }
 
-    init() {
+    init(type?: TipsLayerParam) {
         this.openedByInit = true;
+        this.currentTipsType = this.normalizeTipsType(type);
+        this.showTipsType(this.currentTipsType);
         this.playOpenAnimation();
     }
 
@@ -123,6 +130,37 @@ export class UITipsLayer extends Component {
         const mask = this.maskNode || this.node.getChildByName('bg');
         if (!mask) return null;
         return mask.getComponent(UIOpacity) || (createIfMissing ? mask.addComponent(UIOpacity) : null);
+    }
+
+    private normalizeTipsType(type?: TipsLayerParam): number {
+        if (type === undefined || type === null || type === '') {
+            return this.defaultTipsType;
+        }
+
+        const rawType = typeof type === 'object' ? type.type ?? type.tipsType : type;
+        const tipsType = Number(rawType);
+        if (!Number.isFinite(tipsType)) {
+            return this.defaultTipsType;
+        }
+
+        return Math.trunc(tipsType);
+    }
+
+    private showTipsType(type: number) {
+        const view = this.getViewNode();
+        const targetName = `type${type}`;
+        let hasTarget = false;
+
+        for (const child of view.children) {
+            if (!/^type\d+$/.test(child.name)) continue;
+            const shouldShow = child.name === targetName;
+            child.active = shouldShow;
+            hasTarget = hasTarget || shouldShow;
+        }
+
+        if (!hasTarget && type !== this.defaultTipsType) {
+            this.showTipsType(this.defaultTipsType);
+        }
     }
 
     private findChildByName(parent: Node | null, name: string): Node | null {

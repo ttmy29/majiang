@@ -131,7 +131,9 @@ export class LayerManager {
         this._layers.get(LayerType.Game)!.active = true;
     }
 
-    public showToast(message: string): void {
+    public showToast(message: string): boolean {
+        if (!this._toastPrefab) return false;
+
         // ==========================================
         // 需求 2：有新的显示时，之前的立即移动消失
         // ==========================================
@@ -198,6 +200,8 @@ export class LayerManager {
             .delay(1.5) // 透明度同步等待 1.5 秒
             .to(0.5, { opacity: 0 })
             .start();
+
+        return true;
     }
 
 }

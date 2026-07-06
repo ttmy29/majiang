@@ -13,8 +13,17 @@ export enum StorageKey {
     IronTipsShown = 'mahjong_match_iron_tips_shown',
     UndoCount = 'mahjong_match_undo_count',
     SwitchCount = 'mahjong_match_switch_count',
+    UnlockCount = 'mahjong_match_unlock_count',
+    FavoriteRewardDate = 'mahjong_match_favorite_reward_date',
     GlobalAdCount = 'mahjong_match_global_ad_count',
     LevelRetryCount = 'mahjong_match_level_retry_count',
+    LeafConut = 'mahjong_match_leafConut',
+    SignFirstSeenDate = 'mahjong_match_sign_first_seen_date',
+    SignLastDate = 'mahjong_match_sign_last_date',
+    SignStreak = 'mahjong_match_sign_streak',
+    SignMonthDays = 'mahjong_match_sign_month_days',
+    SignRewardClaims = 'mahjong_match_sign_reward_claims',
+    WinSignShownDate = 'mahjong_match_win_sign_shown_date',
     // —— 连胜值难度分档 ——
     // 当前连胜值（int，>=0）。失败清零、每天清零、干净通关 +1
     WinStreak = 'mahjong_match_win_streak',

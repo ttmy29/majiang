@@ -177,6 +177,11 @@ export class SDKManager {
                     //  普通收藏（default）
                     type: 'default',
                 });
+                return {
+                    title: SDKManager.sharData.string,
+                    imageUrl: SDKManager.sharData.getRandomImageUrl(),
+                    query: 'favoriteReward=1'
+                };
             });
             wx.onShow(() => {
                director.emit("gameBack") 
@@ -207,6 +212,31 @@ export class SDKManager {
      */
     public getOpenid(): string {
         return SDKManager.openid;
+    }
+
+    public uploadWechatRankScores(levelScore: number, winStreakScore: number): void {
+        this.setWechatCloudScore('level', levelScore);
+        this.setWechatCloudScore('winsk', winStreakScore);
+    }
+
+    public setWechatCloudScore(key: string, score: number): void {
+        if (sys.platform !== sys.Platform.WECHAT_GAME) return;
+        if (typeof wx === 'undefined' || typeof wx.setUserCloudStorage !== 'function') return;
+
+        const normalizedScore = Math.max(0, Math.floor(Number(score) || 0));
+        const value = JSON.stringify({
+            wxgame: {
+                score: normalizedScore,
+                update_time: Math.floor(Date.now() / 1000),
+            },
+        });
+
+        wx.setUserCloudStorage({
+            KVDataList: [{ key, value }],
+            fail: (err: any) => {
+                this.log('setUserCloudStorage failed:', key, err);
+            },
+        });
     }
 
     /**

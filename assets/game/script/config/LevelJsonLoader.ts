@@ -18,6 +18,7 @@ export interface LevelJson {
         taskNum: number[][];
         chain?: number[][];
         ironData?: number[][];
+        flipData?: number[][];
         [k: string]: any;
     };
     summary?: any;

@@ -23,6 +23,9 @@ export class MahjongItem extends Component {
     private touchTween: Tween<Node> | null = null;
     private shakeOriginPos: Vec3 | null = null;
     private blockedFeedbackStreakActive: boolean | null = null;
+    private faceFrame: SpriteFrame | null = null;
+    private coverFrame: SpriteFrame | null = null;
+    private covered = false;
     // 记录常态下，阴影是否应该显示
     private _originalShadowActive: boolean = false;
     // start() 跑过一次后置 true。用于区分"首次激活（由 start 接管阴影挂载）"
@@ -287,16 +290,61 @@ export class MahjongItem extends Component {
         this.row = row;
         this.col = col;
         this.layer = layer;
+        this.faceFrame = frame;
 
         const sprite = this.iconNode.getComponent(Sprite);
         if (!sprite) return;
-        if (frame) {
-            sprite.spriteFrame = frame;
+        const visibleFrame = this.covered && this.coverFrame ? this.coverFrame : frame;
+        if (visibleFrame) {
+            sprite.spriteFrame = visibleFrame;
         } else {
             console.log('MahjongItem: no frame for item', item_id);
         }
 
-        this.setPlayable(true);
+        this.setPlayable(!this.covered);
+    }
+
+    public setCovered(covered: boolean, coverFrame: SpriteFrame | null = null) {
+        this.covered = covered;
+        if (coverFrame) this.coverFrame = coverFrame;
+
+        const sprite = this.iconNode?.getComponent(Sprite);
+        if (sprite) {
+            const visibleFrame = covered && this.coverFrame ? this.coverFrame : this.faceFrame;
+            if (visibleFrame) sprite.spriteFrame = visibleFrame;
+        }
+        this.setPlayable(!covered);
+    }
+
+    public revealCovered(faceFrame: SpriteFrame | null = null, animated = true) {
+        if (faceFrame) this.faceFrame = faceFrame;
+        if (!this.covered) {
+            this.setCovered(false);
+            return;
+        }
+
+        this.covered = false;
+        const sprite = this.iconNode?.getComponent(Sprite);
+        const applyFace = () => {
+            if (sprite && this.faceFrame) sprite.spriteFrame = this.faceFrame;
+        };
+
+        if (!animated || !this.iconNode?.isValid) {
+            applyFace();
+            this.setPlayable(true);
+            return;
+        }
+
+        const originScale = this.iconNode.scale.clone();
+        Tween.stopAllByTarget(this.iconNode);
+        tween(this.iconNode)
+            .to(0.08, { scale: new Vec3(0, originScale.y, originScale.z) }, { easing: 'sineIn' })
+            .call(applyFace)
+            .to(0.12, { scale: originScale }, { easing: 'backOut' })
+            .call(() => {
+                this.setPlayable(true);
+            })
+            .start();
     }
 
     setBoardScale(scale: number) {

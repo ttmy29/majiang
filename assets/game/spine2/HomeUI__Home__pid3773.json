@@ -41,7 +41,7 @@
       "name": "chuanlian",
       "parent": "zong",
       "x": 0.000121,
-      "y": 1379.29126,
+      "y": 1319.29126,
       "color": "ff0000ff"
     },
     {
@@ -56,7 +56,7 @@
       "name": "zui_1",
       "parent": "diaozhui",
       "x": -494.239655,
-      "y": 1381.323853
+      "y": 1321.323853
     },
     {
       "name": "men_2",
@@ -305,7 +305,7 @@
       "name": "zui_2",
       "parent": "diaozhui",
       "x": 489.894165,
-      "y": 1381.323853
+      "y": 1321.323853
     },
     {
       "name": "HomeUI/guazhui14",
@@ -968,9 +968,9 @@
         },
         "HomeUI/chuanglian": {
           "HomeUI/chuanglian": {
-            "x": 5.698729,
+            "x": 0,
             "y": -294.453552,
-            "scaleX": 2,
+            "scaleX": 2.552083,
             "scaleY": 2,
             "width": 576,
             "height": 300

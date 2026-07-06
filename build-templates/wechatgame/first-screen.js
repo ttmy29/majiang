@@ -233,11 +233,11 @@ function updateBgVertexBuffer() {
         heightRatio = canvas.height;
     } else if(fitWidth && fitHeight) {
         if ((bg.width / bg.height) > (canvas.width / canvas.height)) {
-            widthRatio = canvas.width;
-            heightRatio = (canvas.width / bg.width) * bg.height;
-        } else {
             widthRatio = (canvas.height / bg.height) * bg.width;
             heightRatio = canvas.height;
+        } else {
+            widthRatio = canvas.width;
+            heightRatio = (canvas.width / bg.width) * bg.height;
         }
     } else if(!fitWidth && !fitHeight) {
         if ((bg.width / bg.height) > (canvas.width / canvas.height)) {
