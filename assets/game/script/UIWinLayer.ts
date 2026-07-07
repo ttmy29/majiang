@@ -1,9 +1,16 @@
-import { _decorator, Color, Component, director, Label, Node, sp, sys, tween, UIOpacity, UITransform, v3, Vec3, view } from 'cc';
+import { _decorator, Component, director, Label, Node, sys, tween, UIOpacity, v3, Vec3 } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { SDKManager } from '../../loading/SDKManager';
 const { ccclass, property } = _decorator;
+
+interface WinLayerData {
+    time?: number;
+    iq?: number;
+    nextLevel?: number;
+    comboTimes?: number;
+}
 
 @ccclass('UIWinLayer')
 export class UIWinLayer extends Component {
@@ -11,73 +18,66 @@ export class UIWinLayer extends Component {
     viewNode: Node = null!;
     @property(Node)
     maskNode: Node = null!;
-    @property(sp.Skeleton)
-    skeleton: sp.Skeleton = null!;
     @property(Label)
     rankLabel: Label = null!;
-    @property(Node)
-    bgNode: Node = null!;
+    @property(Label)
+    iqLabel: Label = null!;
+    @property(Label)
+    levleNexLabel: Label = null!;
+    @property(Label)
+    gridLabel1: Label = null!;
+    @property(Label)
+    gridLabel2: Label = null!;
+    @property(Label)
+    gridLabel3: Label = null!;
     @property(Node)
     effectNode1: Node = null!;
     @property(Node)
     effectNode2: Node = null!;
     @property(Node)
     effectNode3: Node = null!;
-
     start() {
         AudioManager.instance.playOneShot(AudioClipNames.game_win);
     }
 
-    init(time: number = 0) {
+    init(dataOrTime: WinLayerData | number = 0) {
+        const data = typeof dataOrTime === 'number' ? { time: dataOrTime } : (dataOrTime || {});
+        const time = data.time ?? 0;
+        const iqText = this.formatNumber(data.iq ?? 0);
+        const nextLevel = Math.max(0, Math.floor(data.nextLevel ?? 0));
+        const comboTimes = Math.max(0, Math.floor(data.comboTimes ?? 0));
+
+        director.emit(Constants.eventNames.EventSetIQLabelVisible, false);
         this.playOpenAnimation();
-        this.rankLabel.string = "";
-        const rank = 80 + Math.random() * (98.88 - 80);
-        this.showRankLabel(rank, time);
-        //this.playLightBurst();
+        this.setLabelString(this.rankLabel, this.getSettlementCopyText());
+        this.setLabelString(this.iqLabel, iqText);
+        this.setLabelString(this.levleNexLabel, `关卡 ${nextLevel}`);
+        this.setLabelString(this.gridLabel1, this.formatTime(time));
+        this.setLabelString(this.gridLabel2, iqText);
+        this.setLabelString(this.gridLabel3, `${comboTimes}`);
+        this.playLightBurst();
     }
 
-    public playSingleAnimation() {
-        // // 1. 注册动画完成监听器
-        // this.skeleton.setCompleteListener((trackEntry: sp.spine.TrackEntry) => {
-        //     // 获取当前播放完成的动画名称
-        //     const animationName = trackEntry.animation ? trackEntry.animation.name : "";
-
-        //     // 判断是否是你想要监听的那个动画
-        //     if (animationName === 'open') {
-        //         console.log('attack 动画播放了一次并完成了！');
-
-        //         this.skeleton.animation = 'idle';
-        //         this.skeleton.loop = true;
-        //         this.skeleton.setCompleteListener(null);
-
-
-        //     }
-        // });
-
-        // this.scheduleOnce(() => {
-        //         this.skeleton.animation = 'idle';
-        //         this.skeleton.loop = true;
-        // }, 3.5);
-
-
-        // 2. 播放动画
-        // 参数依次为：trackIndex(轨道索引), animationName(动画名), loop(是否循环)
-        // 注意：要监听“一次播放完成”，这里的 loop 必须设置为 false
-        //this.skeleton.setAnimation(0, 'attack', false);
-    }
-
-
-    showRankLabel(rank: number, time: number) {
+    private formatTime(time: number): string {
         const totalSec = Math.max(0, Math.floor(time));
         const minutes = Math.floor(totalSec / 60);
         const seconds = totalSec % 60;
-        this.rankLabel.string = `用时${minutes}分${seconds}秒，已超过${rank.toFixed(2)}%的玩家`;
-        const uiOpacity = this.rankLabel.getComponent(UIOpacity);
-        uiOpacity.opacity = 0;
-        tween(uiOpacity)
-            .delay(0.5)
-            .to(1, { opacity: 255 }, { easing: 'sineOut' })
-            .start();
+        return `${minutes}分${seconds}秒`;
+    }
+
+    private formatNumber(value: number): string {
+        const fixed = (Math.round(value * 10) / 10).toFixed(1);
+        return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed;
+    }
+
+    private setLabelString(label: Label | null | undefined, value: string) {
+        if (label?.isValid) label.string = value;
+    }
+
+    private getSettlementCopyText(): string {
+        const texts = Constants.settlementCopyTexts;
+        if (!Array.isArray(texts) || texts.length === 0) return "";
+        return texts[Math.floor(Math.random() * texts.length)] || "";
     }
 
     private playOpenAnimation() {
@@ -124,29 +124,6 @@ export class UIWinLayer extends Component {
         }
     }
 
-    update(deltaTime: number) {
-
-    }
-
-    protected onLoad(): void {
-        this.playSingleAnimation();
-        //界面适配
-        const visibleSize = view.getVisibleSize();
-        const designSize = this.bgNode.getComponent(UITransform).contentSize;
-        const scaleX = visibleSize.width / designSize.width;
-        const scaleY = visibleSize.height / designSize.height;
-        const maxScale = Math.min(scaleX, scaleY);
-        this.bgNode.setScale(new Vec3(maxScale, maxScale, 1));
-    }
-
-    protected onDestroy(): void {
-
-    }
-
-    protected onEnable(): void {
-
-    }
-
     onButonCloseClick() {
         AudioManager.instance.playClick();
         this.playCloseAnimation();
@@ -176,22 +153,26 @@ export class UIWinLayer extends Component {
         LayerManager.instance.showStartLayer();
     }
 
-
     public playLightBurst() {
+        if (!this.effectNode1?.isValid || !this.effectNode2?.isValid || !this.effectNode3?.isValid) return;
+
         this.effectNode1.scale = v3(1, 1, 0);
         tween(this.effectNode1)
-            .to(0.5, { scale:  v3(0.9, 0.6, 0) }, { easing: 'sineInOut' })
-            .to(0.5, { scale:  v3(1, 1, 0) }, { easing: 'sineInOut' })
+            .to(0.5, { scale: v3(0.9, 0.6, 0) }, { easing: 'sineInOut' })
+            .to(0.5, { scale: v3(1, 1, 0) }, { easing: 'sineInOut' })
             .union()
             .repeatForever()
             .start();
+
         this.effectNode2.scale = v3(0.5, 0.5, 0);
         tween(this.effectNode2)
             .delay(0.1)
-            .to(0.5, { scale:  v3(1, 1, 0) }, { easing: 'sineInOut' })
+            .to(0.5, { scale: v3(1, 1, 0) }, { easing: 'sineInOut' })
             .start();
-        this.effectNode3.getComponent(UIOpacity).opacity = 0;
-        tween(this.effectNode3.getComponent(UIOpacity))
+
+        const effectOpacity = this.effectNode3.getComponent(UIOpacity) ?? this.effectNode3.addComponent(UIOpacity);
+        effectOpacity.opacity = 0;
+        tween(effectOpacity)
             .delay(0.2)
             .to(0.5, { opacity: 255 }, { easing: 'sineInOut' })
             .start();

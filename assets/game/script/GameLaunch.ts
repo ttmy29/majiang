@@ -8,8 +8,6 @@ const { ccclass, property } = _decorator;
 
 @ccclass('GameLaunch')
 export class GameLaunch extends Component {
-
-
     
     start() {
         LayerManager.instance.init();
@@ -18,7 +16,6 @@ export class GameLaunch extends Component {
         this.initPrefabResources();
         this.initAudioResources();
     }
-
 
     private initAudioManager() {
         // assetManager.loadBundle(Constants.BgmBundleName, (err, bundle) => {

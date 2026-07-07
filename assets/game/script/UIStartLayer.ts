@@ -1,9 +1,12 @@
-import { _decorator, Component, EventTouch, Node, sp, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
+import { _decorator, Component, director, EventTouch, Label, Node, sp, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
+import { Constants } from './config/Constants';
 import { GameMode, setCurrentGameMode } from './config/GameMode';
 import { ensureActivityLevelJson, ensureLevelJson, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
+import { ArchiveManager } from './manager/ArchiveManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
+import { StorageKey, StorageManager } from './manager/StorageManager';
 import { StreakManager } from './manager/StreakManager';
 
 declare const wx: any;
@@ -28,6 +31,9 @@ const HOME_DISAPPEAR_ANIMATION = 'Disappear';
 const HOME_IDLE_ANIMATION = 'Idle';
 const LEAF_LOOP_ANIMATION = 'Loop';
 const ACTIVITY_UNLOCK_MAIN_LEVEL = 5;
+const FAVORITE_REWARD_QUERY_KEY = 'favoriteReward';
+const FAVORITE_REWARD_SCENES = new Set([1103, 1104]);
+const FAVORITE_REWARD_TOAST_RETRY_LIMIT = 10;
 
 @ccclass('UIStartLayer')
 export class UIStartLayer extends Component {
@@ -50,16 +56,22 @@ export class UIStartLayer extends Component {
     leafSkeleton: sp.Skeleton = null!;
     @property(Node)
     activityBtn: Node = null!;
-
+    @property(Node)
+    signNode: Node = null!;
+    @property(Node)
+    startNode: Node = null!;
     private enteringGame = false;
     private hasStarted = false;
     private logoOriginScale: Vec3 | null = null;
     private logoTargetOpacity = 255;
     private uiNodeTargetOpacity: Map<Node, number> = new Map();
     private wxGameClubBtn: any = null;
-    private wxFeedbackBtn: any = null;
+    private favoriteRewardToastRetryCount = 0;
 
     protected onLoad(): void {
+        ProgressManager.initSignUserState();
+        this.refreshSignNodeAnimationMembership();
+        this.refreshSignNodeVisible();
         this.fitBackgroundToView();
         this.captureStartAnimationState();
         this.hideStartAnimationNodes();
@@ -69,38 +81,70 @@ export class UIStartLayer extends Component {
     }
 
     protected onEnable(): void {
+        director.off("gameBack", this.onGameBack, this);
+        director.on("gameBack", this.onGameBack, this);
+        director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
+        director.on(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
+        director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
+        director.on(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
         this.enteringGame = false;
+        this.refreshSignNodeVisible();
+        this.refreshStartNodeState();
         this.refreshWarmupWindow();
         this.refreshActivityButtonVisible();
+        this.refreshLeafConutLabel();
 
         if (this.hasStarted) {
             this.playStartLayerEnterAnimation(HOME_RETURN_APPEAR_ANIMATION, true);
         }
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.show();
-        if (this.wxFeedbackBtn) this.wxFeedbackBtn.show();
+        if (this.hasStarted) this.scheduleFavoriteRewardCheck();
     }
 
     protected onDisable(): void {
         this.stopStartAnimation();
         this.clearHomeSkeletonListener();
+        this.unschedule(this.tryGrantFavoriteRewardFromFavoriteEnter);
+        this.unschedule(this.showFavoriteRewardToast);
+        director.off("gameBack", this.onGameBack, this);
+        director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
+        director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.hide();
-        if (this.wxFeedbackBtn) this.wxFeedbackBtn.hide();
     }
 
     protected onDestroy(): void {
         this.stopStartAnimation();
         this.clearHomeSkeletonListener();
+        this.unschedule(this.tryGrantFavoriteRewardFromFavoriteEnter);
+        this.unschedule(this.showFavoriteRewardToast);
+        director.off("gameBack", this.onGameBack, this);
+        director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
+        director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.destroy();
-        if (this.wxFeedbackBtn) this.wxFeedbackBtn.destroy();
     }
+
+    private onGameBack = () => {
+        this.scheduleFavoriteRewardCheck(0);
+    };
+
+    private onLeafConutUpdate = () => {
+        this.refreshLeafConutLabel();
+    };
+
+    private onSignInUpdate = () => {
+        this.refreshSignNodeVisible();
+    };
 
     start() {
         this.hasStarted = true;
+        this.refreshSignNodeVisible();
+        this.refreshStartNodeState();
         this.refreshWarmupWindow();
         this.refreshActivityButtonVisible();
+        this.refreshLeafConutLabel();
         this.playStartLayerEnterAnimation(HOME_INITIAL_APPEAR_ANIMATION);
 
         this.scheduleOnce(() => {
@@ -110,6 +154,8 @@ export class UIStartLayer extends Component {
         if (sys.platform === sys.Platform.WECHAT_GAME && typeof wx !== 'undefined') {
             this.initWeChatButtons();
         }
+
+        this.scheduleFavoriteRewardCheck();
     }
 
     update(deltaTime: number) {
@@ -120,12 +166,91 @@ export class UIStartLayer extends Component {
         if (this.gameClubButton) {
             this.wxGameClubBtn = this.createTransparentWeChatBtn(this.gameClubButton, 'gameClub');
         }
-        if (this.customerServiceButton) {
-            this.wxFeedbackBtn = this.createTransparentWeChatBtn(this.customerServiceButton, 'feedback');
+    }
+
+    private scheduleFavoriteRewardCheck(delay = 0.2) {
+        if (!this.isWeChatGame()) return;
+        this.unschedule(this.tryGrantFavoriteRewardFromFavoriteEnter);
+        this.scheduleOnce(this.tryGrantFavoriteRewardFromFavoriteEnter, delay);
+    }
+
+    private tryGrantFavoriteRewardFromFavoriteEnter = () => {
+        if (!this.node.activeInHierarchy || !this.isFavoriteEnter()) return;
+
+        const today = this.getTodayString();
+        if (StorageManager.instance.getItem(StorageKey.FavoriteRewardDate) === today) return;
+
+        ProgressManager.saveUnlockCount(ProgressManager.loadUnlockCount() + 1);
+        StorageManager.instance.setItem(StorageKey.FavoriteRewardDate, today);
+        ArchiveManager.instance.scheduleUpload();
+
+        window.dnSDK?.track?.('GET_ITEM', { item_source: 3 });
+        director.emit(Constants.eventNames.EventFavoriteRewardClaimed, {
+            unlock: 1,
+        });
+
+        this.favoriteRewardToastRetryCount = 0;
+        this.showFavoriteRewardToast();
+    };
+
+    private showFavoriteRewardToast = () => {
+        if (!this.node.activeInHierarchy) return;
+        if (LayerManager.instance.showToast('获得了收藏奖励 解锁 * 1')) return;
+        if (this.favoriteRewardToastRetryCount >= FAVORITE_REWARD_TOAST_RETRY_LIMIT) return;
+
+        this.favoriteRewardToastRetryCount++;
+        this.scheduleOnce(this.showFavoriteRewardToast, 0.2);
+    };
+
+    private isFavoriteEnter(): boolean {
+        const options = this.getWeChatEnterOptions();
+        if (!options) return false;
+
+        const scene = Number(options.scene);
+        if (FAVORITE_REWARD_SCENES.has(scene)) return true;
+
+        return this.hasFavoriteRewardQuery(options.query);
+    }
+
+    private getWeChatEnterOptions(): any {
+        if (!this.isWeChatGame()) return null;
+
+        try {
+            const enterOptions = wx.getEnterOptionsSync?.();
+            if (enterOptions && (enterOptions.scene || enterOptions.query)) return enterOptions;
+            return wx.getLaunchOptionsSync?.() || enterOptions || null;
+        } catch (error) {
+            console.warn('UIStartLayer: get enter options failed', error);
+            return null;
         }
     }
 
-    private createTransparentWeChatBtn(targetNode: Node, type: 'gameClub' | 'feedback') {
+    private hasFavoriteRewardQuery(query: any): boolean {
+        if (!query || typeof query !== 'object') return false;
+
+        const marker = query[FAVORITE_REWARD_QUERY_KEY] ?? query.favorite_reward;
+        if (marker === true || marker === 1 || marker === '1' || marker === 'true') return true;
+
+        return query.from === 'favorite';
+    }
+
+    private getTodayString(): string {
+        const date = new Date();
+        const year = date.getFullYear();
+        const month = this.padDatePart(date.getMonth() + 1);
+        const day = this.padDatePart(date.getDate());
+        return `${year}-${month}-${day}`;
+    }
+
+    private padDatePart(value: number): string {
+        return value < 10 ? `0${value}` : `${value}`;
+    }
+
+    private isWeChatGame(): boolean {
+        return sys.platform === sys.Platform.WECHAT_GAME && typeof wx !== 'undefined';
+    }
+
+    private createTransparentWeChatBtn(targetNode: Node, type: 'gameClub') {
         const uiTrans = targetNode.getComponent(UITransform);
         if (!uiTrans) {
             console.warn(`UIStartLayer: targetNode ${targetNode.name} is missing UITransform`);
@@ -160,12 +285,6 @@ export class UIStartLayer extends Component {
 
         if (type === 'gameClub') {
             return wx.createGameClubButton({
-                type: 'text',
-                text: '',
-                style: style
-            });
-        } else if (type === 'feedback') {
-            return wx.createFeedbackButton({
                 type: 'text',
                 text: '',
                 style: style
@@ -231,10 +350,24 @@ export class UIStartLayer extends Component {
             this.enteringGame = false;
         }
     }
+    onClickRankButton() {
+        AudioManager.instance.playClick();
+        LayerManager.instance.showUI("rank");
+    }
 
     onClickSetButton() {
         AudioManager.instance.playClick();
         LayerManager.instance.showUI("setting");
+    }
+
+    onClickAddDesktopButton() {
+        AudioManager.instance.playClick();
+        LayerManager.instance.showUI("addDesktop");
+    }
+
+    onClickFavoriteRewardButton() {
+        AudioManager.instance.playClick();
+        LayerManager.instance.showUI("favoriteReward");
     }
 
     onClickGameClubButton() {
@@ -243,14 +376,114 @@ export class UIStartLayer extends Component {
 
     onClickFeedbackButton() {
         AudioManager.instance.playClick();
-    }
+        if (sys.platform !== sys.Platform.WECHAT_GAME || typeof wx === 'undefined') return;
 
+        wx.openCustomerServiceConversation({
+            fail: (error: unknown) => {
+                console.warn('UIStartLayer: openCustomerServiceConversation failed', error);
+            }
+        });
+    }
+    onClickSignButton() {
+        AudioManager.instance.playClick();
+        LayerManager.instance.showUI("sign");
+    }
     private refreshWarmupWindow() {
         const level = ProgressManager.loadLevel();
         void warmupForwardWindow(level, 10);
         const activityLevel = ProgressManager.loadActivityLevel();
         const activityBoardId = ProgressManager.loadActivityBoardId(activityLevel);
         void warmupActivityForwardWindow(activityBoardId, 10);
+    }
+
+    private refreshStartNodeState() {
+        if (!this.startNode?.isValid) return;
+
+        const levelRecord = ProgressManager.loadLevel();
+        const hasLevelRecord = levelRecord > 0;
+
+        const sprite1 = this.startNode.getChildByName('sprite1');
+        const sprite2 = this.startNode.getChildByName('sprite2');
+        const label1 = this.startNode.getChildByName('label1');
+        const label2 = this.startNode.getChildByName('label2');
+
+        if (sprite1?.isValid) sprite1.active = !hasLevelRecord;
+        if (sprite2?.isValid) sprite2.active = hasLevelRecord;
+
+        const levelText = hasLevelRecord ? `关卡 ${levelRecord}` : '';
+        this.setStartLevelLabel(label1, levelText, hasLevelRecord);
+        this.setStartLevelLabel(label2, levelText, hasLevelRecord);
+    }
+
+    private refreshLeafConutLabel() {
+        const label = this.findChildByName(this.signNode, 'label')?.getComponent(Label);
+        if (!label) return;
+
+        const raw = StorageManager.instance.getItem(StorageKey.LeafConut);
+        if (raw === null) {
+            const defaultCount = ProgressManager.loadLeafConut();
+            ProgressManager.saveLeafConut(defaultCount);
+            label.string = this.formatLeafConut(defaultCount);
+            return;
+        }
+
+        const count = ProgressManager.loadLeafConut();
+        if (raw !== `${count}`) {
+            ProgressManager.saveLeafConut(count);
+        }
+        label.string = this.formatLeafConut(count);
+    }
+
+    private refreshSignNodeVisible() {
+        if (!this.signNode?.isValid) return;
+
+        this.signNode.active = !ProgressManager.isFirstSeenToday();
+        this.refreshSignIconState();
+        this.refreshSignRedPoint();
+    }
+
+    private refreshSignNodeAnimationMembership() {
+        if (!this.signNode?.isValid || !ProgressManager.isFirstSeenToday()) return;
+        this.UINodeArray = this.UINodeArray.filter((node) => node !== this.signNode);
+    }
+
+    private refreshSignRedPoint() {
+        const redNode = this.signNode?.getChildByName('red') || this.findChildByName(this.signNode, 'red');
+        if (redNode?.isValid) redNode.active = this.signNode.active && ProgressManager.hasClaimableSignReward();
+    }
+
+    private refreshSignIconState() {
+        const signIcon1 = this.signNode?.getChildByName('signIcon1') || this.findChildByName(this.signNode, 'signIcon1');
+        const signIcon2 = this.signNode?.getChildByName('signIcon2') || this.findChildByName(this.signNode, 'signIcon2');
+        const hasSignedToday = ProgressManager.hasSignedToday();
+
+        if (signIcon1?.isValid) signIcon1.active = hasSignedToday;
+        if (signIcon2?.isValid) signIcon2.active = !hasSignedToday;
+    }
+
+    private formatLeafConut(count: number): string {
+        const value = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+        return `x${value}`;
+    }
+
+    private findChildByName(parent: Node | null, name: string): Node | null {
+        if (!parent) return null;
+        if (parent.name === name) return parent;
+
+        for (const child of parent.children) {
+            const result = this.findChildByName(child, name);
+            if (result) return result;
+        }
+
+        return null;
+    }
+
+    private setStartLevelLabel(node: Node | null | undefined, value: string, visible: boolean) {
+        if (!node?.isValid) return;
+
+        node.active = visible;
+        const label = node.getComponent(Label);
+        if (label) label.string = value;
     }
 
     private isActivityUnlocked(): boolean {

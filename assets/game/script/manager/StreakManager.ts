@@ -17,6 +17,8 @@ interface LevelDiffState {
     failed: boolean;
 }
 
+const fixedBaseLevelIds = new Set<number>([15]);
+
 function isLevelTier(value: unknown): value is LevelTier {
     return value === 'base' || value === 'easy' || value === 'normal' || value === 'hard';
 }
@@ -124,15 +126,16 @@ export class StreakManager {
     static async resolveLevelPlanForStart(level: number, opts?: { forceReroll?: boolean }): Promise<LevelStartPlan> {
         this.applyDailyResetIfNeeded();
 
-        if (level < Constants.WinStreak.StartLevel) {
-            const plan: LevelStartPlan = { tier: 'base', boardId: level };
-            this.saveDiffState({ level, tier: plan.tier, boardId: plan.boardId, failed: false });
-            return plan;
-        }
-
         const forceReroll = !!opts?.forceReroll;
         const saved = this.loadDiffState();
         const sameLevel = !!saved && saved.level === level;
+
+        if (level < Constants.WinStreak.StartLevel || fixedBaseLevelIds.has(level)) {
+            const plan: LevelStartPlan = { tier: 'base', boardId: level };
+            const failed = sameLevel ? saved!.failed : false;
+            this.saveDiffState({ level, tier: plan.tier, boardId: plan.boardId, failed });
+            return plan;
+        }
 
         // 同一关重进、非强制重摇：已保存方案仍可用时原样复用（盘面一致，快照命中）
         if (sameLevel && !forceReroll && saved!.tier !== 'base') {

@@ -34,6 +34,7 @@ interface LevelStartPayload {
     mode?: GameMode;
     boardId?: number;
     displayName?: string;
+    openingToastText?: string;
 }
 
 interface RenderSlotPayload {
@@ -57,6 +58,13 @@ interface ShuffleTileEffectPayload {
     worldPosition: Vec3;
     scale?: number;
     duration?: number;
+}
+
+interface IQUpdatePayload {
+    value: number;
+    addValue?: number;
+    animate?: boolean;
+    slotID?: number;
 }
 
 @ccclass('UIGameLayer')
@@ -141,6 +149,10 @@ export class UIGameLayer extends Component {
     private shuffleEffectOpacity: UIOpacity | null = null;
     private shuffleEffectClip: AnimationClip | null = null;
     private shuffleEffectSeq = 0;
+    private iqLabel: Label | null = null;
+    private addIQCountPrefab: Prefab | null = null;
+    private addIQCountLoading = false;
+    private pendingIQAnimations: { addValue: number; position: Vec3 | null }[] = [];
     private isGuideLevel = false;
     private hasLevelUiMode = false;
     private slotRootTop = 0;
@@ -287,6 +299,8 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
             director.on(Constants.eventNames.EventStopTipsAnimator, this.onStopTipsAnimator, this);
             director.on(Constants.eventNames.EventClearComboBoxEffects, this.clearComboBoxEffects, this);
+            director.on(Constants.eventNames.EventIQUpdate, this.onEventIQUpdate, this);
+            director.on(Constants.eventNames.EventSetIQLabelVisible, this.onEventSetIQLabelVisible, this);
         } else {
             director.off(Constants.eventNames.EventShowSlotShake, this.onEventShowSlotShake, this);
             director.off(Constants.eventNames.EventShowSlotUnlock, this.onEventShowSlotUnlock, this);
@@ -309,6 +323,8 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventHideGuide, this.onEventHideGuide, this);
             director.off(Constants.eventNames.EventStopTipsAnimator, this.onStopTipsAnimator, this);
             director.off(Constants.eventNames.EventClearComboBoxEffects, this.clearComboBoxEffects, this);
+            director.off(Constants.eventNames.EventIQUpdate, this.onEventIQUpdate, this);
+            director.off(Constants.eventNames.EventSetIQLabelVisible, this.onEventSetIQLabelVisible, this);
         }
     }
 
@@ -323,27 +339,167 @@ export class UIGameLayer extends Component {
             : payloadOrLevel;
         const level = payload.level;
         const mode = payload.mode || 'main';
-        difficultyLevel = payload.difficultyLevel ?? difficultyLevel;
 
         this.hasLevelUiMode = true;
         this.isGuideLevel = mode === 'main' && level === 0;
+        this.pendingIQAnimations.length = 0;
         this.clearComboBoxEffects();
         this.resetComboNode();
         this.applyLevelUiMode();
+        this.setIQLabelVisible(!this.isGuideLevel);
+        this.onEventIQUpdate({ value: 40, animate: false });
         this.setGuideVisible(this.isGuideLevel, level);
 
 
 
-        if(difficultyLevel >= 3 || level === 6) {
-            const names = Constants.celebrityNames;
-            const name = names[Math.floor(Math.random() * names.length)];
-            LayerManager.instance.showToast(`这关需要${name}的智商！`);
-        }
+        if (payload.openingToastText) LayerManager.instance.showToast(payload.openingToastText);
 
     }
 
     private onEventHideGuide() {
         this.setGuideVisible(false, 0);
+    }
+
+    private onEventIQUpdate(payload: IQUpdatePayload) {
+        if (!payload || typeof payload.value !== 'number') return;
+        const label = this.ensureIQLabel();
+        if (label) label.string = this.formatIQNumber(payload.value);
+        if (!payload.animate || !payload.addValue || payload.addValue <= 0) return;
+        if (this.isGuideLevel) return;
+        this.playAddIQAnimation(payload.addValue, this.getIQAnimationPosition(payload.slotID));
+    }
+
+    private onEventSetIQLabelVisible(visible: boolean) {
+        this.setIQLabelVisible(visible);
+    }
+
+    private setIQLabelVisible(visible: boolean) {
+        const label = this.ensureIQLabel();
+        if (label?.node?.isValid) label.node.active = visible;
+    }
+
+    private ensureIQLabel(): Label | null {
+        if (this.iqLabel?.isValid) return this.iqLabel;
+        const node = this.findChildByName(this.node, 'iqLabel');
+        const label = node?.getComponent(Label) || null;
+        this.iqLabel = label;
+        return label;
+    }
+
+    private formatIQNumber(value: number): string {
+        const fixed = (Math.round(value * 10) / 10).toFixed(1);
+        return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed;
+    }
+
+    private playAddIQAnimation(addValue: number, position: Vec3 | null) {
+        if (!this.addIQCountPrefab) {
+            this.pendingIQAnimations.push({ addValue, position });
+            this.loadAddIQCountPrefab();
+            return;
+        }
+        this.spawnAddIQAnimation(addValue, position);
+    }
+
+    private loadAddIQCountPrefab() {
+        if (this.addIQCountLoading || this.addIQCountPrefab) return;
+        const bundle = assetManager.getBundle(Constants.GameBundleName);
+        if (!bundle) {
+            console.warn('[UIGameLayer] game bundle not found for addIQCount');
+            this.pendingIQAnimations.length = 0;
+            return;
+        }
+
+        this.addIQCountLoading = true;
+        bundle.load<Prefab>('prefab/addIQCount', Prefab, (err, prefab) => {
+            this.addIQCountLoading = false;
+            if (!this.node?.isValid) return;
+            if (err || !prefab) {
+                console.warn('[UIGameLayer] load addIQCount prefab failed', err);
+                this.pendingIQAnimations.length = 0;
+                return;
+            }
+
+            this.addIQCountPrefab = prefab;
+            const pending = this.pendingIQAnimations.splice(0);
+            for (const item of pending) this.spawnAddIQAnimation(item.addValue, item.position);
+        });
+    }
+
+    private spawnAddIQAnimation(addValue: number, position: Vec3 | null) {
+        if (!this.node?.isValid) return;
+        if (!this.addIQCountPrefab) return;
+        const startPosition = position || this.getIQLabelPosition();
+        if (!startPosition) return;
+
+        const node = instantiate(this.addIQCountPrefab);
+        node.layer = this.node.layer;
+        this.node.addChild(node);
+        node.setPosition(startPosition);
+        node.setScale(new Vec3(0.35, 0.35, 1));
+        node.setSiblingIndex(this.node.children.length - 1);
+
+        const addLabel = node.getChildByName('label')?.getComponent(Label) || this.findLabelInNode(node);
+        if (addLabel) addLabel.string = `+${this.formatIQNumber(addValue)}`;
+
+        const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+        opacity.opacity = 255;
+        Tween.stopAllByTarget(node);
+        Tween.stopAllByTarget(opacity);
+
+        const startPos = node.position.clone();
+        const endPos = new Vec3(startPos.x, startPos.y + 70, startPos.z);
+        tween(node)
+            .to(0.16, { scale: new Vec3(1.15, 1.15, 1) }, { easing: 'backOut' })
+            .to(0.08, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' })
+            .to(0.55, { position: endPos }, { easing: 'sineOut' })
+            .call(() => {
+                if (node?.isValid) node.destroy();
+            })
+            .start();
+        tween(opacity)
+            .delay(0.24)
+            .to(0.55, { opacity: 0 }, { easing: 'sineOut' })
+            .start();
+    }
+
+    private findLabelInNode(node: Node): Label | null {
+        const label = node.getComponent(Label);
+        if (label) return label;
+        for (const child of node.children) {
+            const childLabel = this.findLabelInNode(child);
+            if (childLabel) return childLabel;
+        }
+        return null;
+    }
+
+    private getIQAnimationPosition(slotID?: number): Vec3 | null {
+        if (typeof slotID === 'number' && slotID >= 0) {
+            const slotNode = this.slotNodeArr[slotID];
+            if (slotNode?.isValid) return this.getLocalPositionInLayer(slotNode);
+        }
+        return this.getIQLabelPosition();
+    }
+
+    private getIQLabelPosition(): Vec3 | null {
+        const label = this.ensureIQLabel();
+        if (!label?.node?.isValid) return null;
+        return this.getLocalPositionInLayer(label.node);
+    }
+
+    private getLocalPositionInLayer(source: Node): Vec3 {
+        if (source.parent === this.node) return source.position.clone();
+        const transform = this.node.getComponent(UITransform) || this.node.addComponent(UITransform);
+        return transform.convertToNodeSpaceAR(source.worldPosition);
+    }
+
+    private findChildByName(parent: Node, name: string): Node | null {
+        const direct = parent.getChildByName(name);
+        if (direct) return direct;
+        for (const child of parent.children) {
+            const found = this.findChildByName(child, name);
+            if (found) return found;
+        }
+        return null;
     }
 
     private getSlotRootWidget(): Widget | null {
@@ -1125,10 +1281,11 @@ export class UIGameLayer extends Component {
         }
     }
 
-    // 刷新道具(撤回/换牌)剩余次数显示:>0 显示 di+countLabel(次数),==0 显示 ad1(看广告)
-    onSetPropCount(payload: { undo: number; switch: number }) {
+    // 刷新道具(撤回/换牌/解锁)剩余次数显示:>0 显示 di+countLabel(次数),==0 显示 ad1(看广告)
+    onSetPropCount(payload: { undo: number; switch: number; unlock?: number }) {
         this.applyPropCount(this.undoButton, payload.undo);
         this.applyPropCount(this.switchButton, payload.switch);
+        this.applyPropCount(this.unlockButton, payload.unlock ?? 0);
     }
 
     // 随机道具按钮当前是否显示。去重用:目标状态与当前一致时不再跑 onSetRandomPropButtonShow 的 tween,
@@ -1219,6 +1376,7 @@ export class UIGameLayer extends Component {
     onClickSetButton() {
         AudioManager.instance.playClick();
         LayerManager.instance.showUI("setting", 1);
+        //LayerManager.instance.showUI("win");
     }
 
     private preloadShuffleEffectClip() {

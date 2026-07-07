@@ -1,0 +1,15 @@
+info face="daily_victory_digits" size=182 bold=0 italic=0 charset="" unicode=0 stretchH=100 smooth=1 aa=1 padding=0,0,0,0 spacing=0,0 outline=0
+common lineHeight=182 base=182 scaleW=1240 scaleH=186 pages=1 packed=0 alphaChnl=1 redChnl=0 greenChnl=0 blueChnl=0
+page id=0 file="daily_victory_digits.png"
+chars count=10
+char id=48 x=2 y=2 width=132 height=181 xoffset=0 yoffset=1 xadvance=132 page=0 chnl=15
+char id=49 x=136 y=2 width=76 height=177 xoffset=0 yoffset=5 xadvance=76 page=0 chnl=15
+char id=50 x=214 y=2 width=122 height=180 xoffset=0 yoffset=2 xadvance=122 page=0 chnl=15
+char id=51 x=338 y=2 width=124 height=181 xoffset=0 yoffset=1 xadvance=124 page=0 chnl=15
+char id=52 x=464 y=2 width=135 height=181 xoffset=0 yoffset=1 xadvance=135 page=0 chnl=15
+char id=53 x=601 y=2 width=122 height=179 xoffset=0 yoffset=3 xadvance=122 page=0 chnl=15
+char id=54 x=725 y=2 width=127 height=181 xoffset=0 yoffset=1 xadvance=127 page=0 chnl=15
+char id=55 x=854 y=2 width=128 height=178 xoffset=0 yoffset=4 xadvance=128 page=0 chnl=15
+char id=56 x=984 y=2 width=125 height=181 xoffset=0 yoffset=1 xadvance=125 page=0 chnl=15
+char id=57 x=1111 y=2 width=127 height=182 xoffset=0 yoffset=0 xadvance=127 page=0 chnl=15
+kernings count=0
