@@ -8,6 +8,7 @@ import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
 import { StreakManager } from './manager/StreakManager';
+import { SDKManager } from '../../loading/SDKManager';
 
 declare const wx: any;
 
@@ -296,6 +297,7 @@ export class UIStartLayer extends Component {
 
     async onClickStartButton(event: EventTouch, data: any) {
         if (this.enteringGame) return;
+        //this.uploadRankDataForStartButtonTest();
         await this.enterGame('main');
     }
 
@@ -350,6 +352,16 @@ export class UIStartLayer extends Component {
             this.enteringGame = false;
         }
     }
+
+    private uploadRankDataForStartButtonTest(): void {
+        if (!this.isWeChatGame()) return;
+
+        const levelScore = Math.max(0, Math.floor(ProgressManager.loadLevel()));
+        const winStreakScore = Math.max(0, Math.floor(StreakManager.getStreak()));
+        SDKManager.instance.uploadWechatRankScores(levelScore, winStreakScore);
+        console.log('UIStartLayer: test upload rank scores', { levelScore, winStreakScore });
+    }
+
     onClickRankButton() {
         AudioManager.instance.playClick();
         LayerManager.instance.showUI("rank");

@@ -1,8 +1,9 @@
-import { _decorator, Button, Component, EventTouch, instantiate, Label, Layout, Node, ScrollView, SubContextView, sys, tween, Tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, Button, Component, EventTouch, ImageAsset, instantiate, Label, Layout, Node, ScrollView, Sprite, SpriteFrame, SubContextView, sys, Texture2D, tween, Tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { AudioManager } from './manager/AudioManager';
 import { SDKManager } from '../../loading/SDKManager';
-import type { JHRankEntry } from '../../loading/SDKManager';
+import type { JHRankBoard, JHRankEntry } from '../../loading/SDKManager';
 import { ProgressManager } from './manager/ProgressManager';
+import { StreakManager } from './manager/StreakManager';
 const { ccclass, property } = _decorator;
 
 interface RankItemData {
@@ -44,7 +45,11 @@ export class UIRankLayer extends Component {
     private rankRequestToken = 0;
     private requestingWechatProfile = false;
     private static readonly WECHAT_RANK_PROFILE_KEY = 'mahjong_match_rank_profile';
+    private static readonly FALLBACK_RANK_NICKNAME_KEY = 'mahjong_match_rank_fallback_nickname';
     private static readonly SERVER_RANK_DISPLAY_LIMIT = 100;
+    private static readonly AVATAR_HEAD_BG_INSET = 8;
+    private avatarFrameCache: Map<string, SpriteFrame> = new Map();
+    private avatarFrameWaiters: Map<string, Array<(frame: SpriteFrame | null) => void>> = new Map();
 
     protected onLoad(): void {
         this.initNodeRefs();
@@ -74,6 +79,7 @@ export class UIRankLayer extends Component {
             this.closeButtonNode.off(Button.EventType.CLICK, this.onButonCloseClick, this);
         }
         this.postOpenDataMessage({ type: 'clear' });
+        this.avatarFrameWaiters.clear();
         this.stopPopupTweens();
     }
 
@@ -147,13 +153,16 @@ export class UIRankLayer extends Component {
         SDKManager.instance.fetchJhRank(rankName)
             .then((board) => {
                 if (requestToken !== this.rankRequestToken) return;
-                const rankData = this.toRankItemData(board.topEntries, board.myInfo);
-                this.renderRankList(index, this.limitServerRankData(index, rankData));
+                const entries = this.resolveServerRankEntries(board);
+                this.logServerRankResponse(index, rankName, board, entries);
+                let rankData = this.limitServerRankData(index, this.toRankItemData(entries, board.myInfo));
+                if (rankData.length <= 0) rankData = this.createDefaultSelfRankData(index);
+                this.renderRankList(index, rankData);
             })
             .catch((err) => {
                 if (requestToken !== this.rankRequestToken) return;
                 console.warn('UIRankLayer: fetch JH rank failed', err);
-                this.renderRankList(index, []);
+                this.renderRankList(index, this.createDefaultSelfRankData(index));
             });
     }
 
@@ -185,15 +194,32 @@ export class UIRankLayer extends Component {
     }
 
     private getServerRankName(index: number): string {
-        if (index === 3) return SDKManager.instance.getJhRankName('winStreak');
+        if (index === 2) return SDKManager.instance.getJhRankName('winStreak');
         return SDKManager.instance.getJhRankName('level');
+    }
+
+    private resolveServerRankEntries(board: JHRankBoard): JHRankEntry[] {
+        const entries = (board?.topEntries || []).filter((entry) => !!entry && (entry.rank > 0 || entry.count > 0));
+        if (entries.length > 0) return entries;
+        return board?.myInfo ? [board.myInfo] : [];
+    }
+
+    private logServerRankResponse(index: number, rankName: string, board: JHRankBoard, entries: JHRankEntry[]) {
+        console.log('UIRankLayer: JH rank response', {
+            tabIndex: index,
+            rankName,
+            myInfo: board?.myInfo || null,
+            topEntries: board?.topEntries || [],
+            renderCount: entries.length,
+        });
     }
 
     private toRankItemData(entries: JHRankEntry[], selfEntry?: JHRankEntry | null): RankItemData[] {
         const selfUid = selfEntry?.uid || SDKManager.instance.getOpenid();
+        const fallbackName = this.getFallbackRankName();
         return (entries || []).map((entry, index) => ({
             rank: entry.rank > 0 ? entry.rank : index + 1,
-            name: entry.name || 'Player',
+            name: (entry.name || '').trim() || fallbackName,
             count: entry.count,
             avatar: entry.avatar,
             isSelf: this.isSelfRankEntry(entry, selfEntry, selfUid),
@@ -203,6 +229,26 @@ export class UIRankLayer extends Component {
     private limitServerRankData(index: number, rankData: RankItemData[]): RankItemData[] {
         if (index !== 2 && index !== 3) return rankData;
         return rankData.slice(0, UIRankLayer.SERVER_RANK_DISPLAY_LIMIT);
+    }
+
+    private createDefaultSelfRankData(index: number): RankItemData[] {
+        if (index !== 2 && index !== 3) return [];
+        const profile = this.getCachedWechatRankProfile();
+        return [{
+            rank: 1,
+            name: profile?.nickname || this.getFallbackRankName(),
+            count: this.getLocalServerRankScore(index),
+            avatar: profile?.avatarUrl || '',
+            isSelf: true,
+        }];
+    }
+
+    private getLocalServerRankScore(index: number): number {
+        const rankName = this.getServerRankName(index);
+        const value = rankName === SDKManager.instance.getJhRankName('winStreak')
+            ? StreakManager.getStreak()
+            : ProgressManager.loadLevel();
+        return Math.max(0, Math.floor(value));
     }
 
     private isSelfRankEntry(entry: JHRankEntry, selfEntry?: JHRankEntry | null, selfUid: string = ''): boolean {
@@ -293,6 +339,7 @@ export class UIRankLayer extends Component {
             nickname: profile.nickname || '',
             avatarUrl: profile.avatarUrl || '',
         }));
+        SDKManager.instance.setJhRankUploadProfile(profile.nickname, profile.avatarUrl);
     }
 
     private requestWechatRankProfile(onComplete: (profile: { nickname?: string; avatarUrl?: string }) => void) {
@@ -450,6 +497,7 @@ export class UIRankLayer extends Component {
     private renderRankItem(item: Node, data: RankItemData) {
         this.setRankBackground(item, !!data.isSelf);
         this.setRankIcon(item, data.rank);
+        this.setAvatar(item, data.avatar);
         this.setLabelString(item.getChildByName('num'), `${data.rank}`);
         this.setLabelString(item.getChildByName('name'), data.name);
         this.setLabelString(item.getChildByName('count'), `${data.count}`);
@@ -475,6 +523,131 @@ export class UIRankLayer extends Component {
     private setLabelString(labelNode: Node | null, value: string) {
         const label = labelNode?.getComponent(Label);
         if (label) label.string = value;
+    }
+
+    private setAvatar(item: Node, avatarUrl?: string) {
+        const headBgNode = item.getChildByName('headBg');
+        if (headBgNode) headBgNode.active = true;
+
+        const defaultHeadNode = item.getChildByName('defaultHead') || item.getChildByName('head');
+        const defaultHeadSprite = defaultHeadNode?.getComponent(Sprite);
+        const defaultFrame = defaultHeadSprite?.spriteFrame || null;
+        if (defaultHeadNode) defaultHeadNode.active = false;
+
+        const avatarNode = this.getOrCreateAvatarNode(item, headBgNode || defaultHeadNode, defaultFrame);
+        const sprite = avatarNode?.getComponent(Sprite);
+        if (!avatarNode || !sprite) return;
+
+        avatarNode.active = true;
+        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+
+        const url = this.normalizeRemoteAvatarUrl(avatarUrl);
+        if (!url) return;
+
+        (avatarNode as any).__rankAvatarUrl = url;
+        this.loadAvatarSpriteFrame(url, (frame) => {
+            if (!frame || !avatarNode.isValid || (avatarNode as any).__rankAvatarUrl !== url) return;
+            const currentSprite = avatarNode.getComponent(Sprite);
+            if (!currentSprite) return;
+            currentSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+            currentSprite.spriteFrame = frame;
+        });
+    }
+
+    private getOrCreateAvatarNode(item: Node, referenceNode: Node | null, defaultFrame: SpriteFrame | null): Node {
+        let avatarNode = item.getChildByName('avatar');
+        if (!avatarNode) {
+            avatarNode = new Node('avatar');
+            avatarNode.layer = item.layer;
+            item.addChild(avatarNode);
+            avatarNode.addComponent(UITransform);
+            avatarNode.addComponent(Sprite);
+        }
+
+        const avatarTransform = avatarNode.getComponent(UITransform) || avatarNode.addComponent(UITransform);
+        const avatarSprite = avatarNode.getComponent(Sprite) || avatarNode.addComponent(Sprite);
+        const referenceTransform = referenceNode?.getComponent(UITransform);
+        const referenceSize = referenceTransform?.contentSize;
+        const width = Math.max(1, (referenceSize?.width || 90) - UIRankLayer.AVATAR_HEAD_BG_INSET * 2);
+        const height = Math.max(1, (referenceSize?.height || 90) - UIRankLayer.AVATAR_HEAD_BG_INSET * 2);
+
+        avatarNode.active = true;
+        avatarNode.layer = item.layer;
+        if (referenceNode) {
+            const position = referenceNode.position;
+            avatarNode.setPosition(new Vec3(position.x, position.y, position.z));
+            avatarNode.setSiblingIndex(referenceNode.getSiblingIndex() + 1);
+        }
+        avatarTransform.setAnchorPoint(0.5, 0.5);
+        avatarTransform.setContentSize(width, height);
+        avatarSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        if (defaultFrame) avatarSprite.spriteFrame = defaultFrame;
+
+        return avatarNode;
+    }
+
+    private loadAvatarSpriteFrame(url: string, onComplete: (frame: SpriteFrame | null) => void) {
+        const cached = this.avatarFrameCache.get(url);
+        if (cached) {
+            onComplete(cached);
+            return;
+        }
+
+        const waiters = this.avatarFrameWaiters.get(url);
+        if (waiters) {
+            waiters.push(onComplete);
+            return;
+        }
+
+        this.avatarFrameWaiters.set(url, [onComplete]);
+        assetManager.loadRemote<ImageAsset>(url, { ext: this.getRemoteImageExt(url) }, (err, imageAsset) => {
+            let frame: SpriteFrame | null = null;
+            if (!err && imageAsset) {
+                const texture = new Texture2D();
+                texture.image = imageAsset;
+                frame = new SpriteFrame();
+                frame.texture = texture;
+                this.avatarFrameCache.set(url, frame);
+            } else {
+                console.warn('UIRankLayer: load avatar failed', url, err);
+            }
+
+            const callbacks = this.avatarFrameWaiters.get(url) || [];
+            this.avatarFrameWaiters.delete(url);
+            callbacks.forEach((callback) => callback(frame));
+        });
+    }
+
+    private normalizeRemoteAvatarUrl(avatarUrl?: string): string {
+        const url = typeof avatarUrl === 'string' ? avatarUrl.trim() : '';
+        if (!url) return '';
+        if (/^https?:\/\//i.test(url)) return url;
+        if (url.indexOf('//') === 0) return `https:${url}`;
+        return '';
+    }
+
+    private getRemoteImageExt(url: string): string {
+        const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
+        const match = cleanUrl.match(/\.(png|jpg|jpeg|webp)$/);
+        if (!match) return '.png';
+        return match[1] === 'jpeg' ? '.jpg' : `.${match[1]}`;
+    }
+
+    private getFallbackRankName(): string {
+        const profile = this.getCachedWechatRankProfile();
+        const cachedNickname = profile?.nickname?.trim();
+        if (cachedNickname) return cachedNickname;
+
+        const openid = `${SDKManager.instance.getOpenid() || ''}`.replace(/[^a-zA-Z0-9]/g, '');
+        const shortId = openid ? openid.slice(-6) : '';
+        if (shortId) return `\u73a9\u5bb6${shortId}`;
+
+        const cached = sys.localStorage.getItem(UIRankLayer.FALLBACK_RANK_NICKNAME_KEY);
+        if (cached) return cached;
+
+        const nickname = `\u73a9\u5bb6${Math.floor(100000 + Math.random() * 900000)}`;
+        sys.localStorage.setItem(UIRankLayer.FALLBACK_RANK_NICKNAME_KEY, nickname);
+        return nickname;
     }
 
     private recordTabDefaultSiblingIndexes() {

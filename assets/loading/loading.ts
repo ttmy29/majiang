@@ -199,7 +199,7 @@ export class loading extends Component {
             timeout: 10000,
             enableLog: false  // 生产环境建议设为 false
         });
-        SDKManager.instance.initJhRank('https://jh.shenzhenyuren.com', '', '');
+        SDKManager.instance.initJhRank('https://jh.shenzhenyuren.com', 'xcbfh', 'wx');
         SDKManager.instance.wxLogin((userId) => {
             //console.log('wxLogin success:', userId);
             SDKManager.instance.report({ event: SDKEvent.login, isNowSend: true });

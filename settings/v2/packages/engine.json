@@ -12,10 +12,10 @@
             "_value": true
           },
           "gfx-webgl2": {
-            "_value": false
+            "_value": true
           },
           "gfx-webgpu": {
-            "_value": false
+            "_value": true
           },
           "animation": {
             "_value": true
@@ -24,7 +24,7 @@
             "_value": true
           },
           "3d": {
-            "_value": true
+            "_value": false
           },
           "meshopt": {
             "_value": false
@@ -33,10 +33,10 @@
             "_value": true
           },
           "sorting-2d": {
-            "_value": false
+            "_value": true
           },
           "rich-text": {
-            "_value": true
+            "_value": false
           },
           "mask": {
             "_value": true
@@ -54,10 +54,10 @@
             "_value": true
           },
           "particle": {
-            "_value": true
+            "_value": false
           },
           "physics": {
-            "_value": true,
+            "_value": false,
             "_option": "physics-ammo"
           },
           "physics-ammo": {
@@ -101,7 +101,7 @@
             "_value": true
           },
           "primitive": {
-            "_value": true
+            "_value": false
           },
           "profiler": {
             "_value": true
@@ -122,7 +122,7 @@
             "_value": true
           },
           "video": {
-            "_value": true
+            "_value": false
           },
           "webview": {
             "_value": true
@@ -134,16 +134,16 @@
             "_value": true
           },
           "websocket-server": {
-            "_value": false
+            "_value": true
           },
           "terrain": {
-            "_value": true
+            "_value": false
           },
           "light-probe": {
-            "_value": true
+            "_value": false
           },
           "tiled-map": {
-            "_value": true
+            "_value": false
           },
           "vendor-google": {
             "_value": false
@@ -171,7 +171,7 @@
             "_value": true
           },
           "procedural-animation": {
-            "_value": false
+            "_value": true
           },
           "custom-pipeline-post-process": {
             "_value": false
@@ -191,12 +191,10 @@
           }
         },
         "flags": {
-          "LOAD_SPINE_MANUALLY": false,
-          "LOAD_BULLET_MANUALLY": false
+          "LOAD_SPINE_MANUALLY": false
         },
         "includeModules": [
           "2d",
-          "3d",
           "affine-transform",
           "animation",
           "audio",
@@ -204,27 +202,24 @@
           "custom-pipeline",
           "dragon-bones",
           "gfx-webgl",
+          "gfx-webgl2",
+          "gfx-webgpu",
           "graphics",
           "intersection-2d",
-          "light-probe",
           "marionette",
           "mask",
-          "particle",
           "particle-2d",
           "physics-2d-box2d",
-          "physics-ammo",
-          "primitive",
+          "procedural-animation",
           "profiler",
-          "rich-text",
           "skeletal-animation",
+          "sorting-2d",
           "spine-4.2",
-          "terrain",
-          "tiled-map",
           "tween",
           "ui",
           "ui-skew",
-          "video",
           "websocket",
+          "websocket-server",
           "webview",
           "xr"
         ],

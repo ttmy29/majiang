@@ -50,6 +50,11 @@ export interface JHRankBoard {
     topEntries: JHRankEntry[];
 }
 
+interface JHRankUploadProfile {
+    nickname: string;
+    avatarUrl: string;
+}
+
 @ccclass('SDKManager')
 export class SDKManager {
     private static _instance: SDKManager;
@@ -77,6 +82,10 @@ export class SDKManager {
     private static jhCid: string = "";
     private static jhLoginId: string = "";
     private static jhLoginPromise: Promise<string> | null = null;
+    private static jhRankUploadProfile: JHRankUploadProfile | null = null;
+    private static readonly jhRankProfileStorageKey: string = 'mahjong_match_rank_profile';
+    private static readonly jhFallbackNicknameStorageKey: string = 'mahjong_match_rank_fallback_nickname';
+    private static readonly jhDefaultAvatarUrl: string = 'https://sziaa-cdn.jinkezhexin.top/mahjong_share/1.jpg';
     private static jhRankNames: { level: string; winStreak: string } = {
         level: "level",
         winStreak: "winsk",
@@ -272,6 +281,13 @@ export class SDKManager {
         });
     }
 
+    public setJhRankUploadProfile(nickname?: string, avatarUrl?: string): void {
+        const profile = this.normalizeJhRankUploadProfile(nickname, avatarUrl, false);
+        if (!profile) return;
+        SDKManager.jhRankUploadProfile = profile;
+        sys.localStorage.setItem(SDKManager.jhRankProfileStorageKey, JSON.stringify(profile));
+    }
+
     public saveJhRankScores(scores: Record<string, number | string>): Promise<any> {
         const rank: Record<string, string> = {};
         Object.keys(scores || {}).forEach((key) => {
@@ -279,7 +295,8 @@ export class SDKManager {
             rank[key] = `${value}`;
         });
         if (Object.keys(rank).length <= 0) return Promise.resolve(null);
-        return this.saveJhProfile({ rank });
+        return this.ensureJhRankUploadProfile()
+            .then(() => this.saveJhProfile({ rank }));
     }
 
     public fetchJhRank(rankName: string = SDKManager.jhRankNames.level): Promise<JHRankBoard> {
@@ -442,8 +459,10 @@ export class SDKManager {
 
     private parseJhRankEntry(item: any, rankName: string): JHRankEntry | null {
         if (!item || typeof item !== 'object') return null;
-        const rank = Math.floor(Number(item.index || item.rank || 0));
-        const score = Math.floor(Number(item[rankName] ?? item.score ?? item.level ?? 0));
+        const rawRank = item.index ?? (typeof item.rank === 'number' || typeof item.rank === 'string' ? item.rank : 0);
+        const parsedRank = Number(rawRank);
+        const rank = Number.isFinite(parsedRank) ? Math.floor(parsedRank) : 0;
+        const score = this.parseJhRankScore(item, rankName);
         if (rank <= 0 && score <= 0) return null;
         return {
             rank: rank > 0 ? rank : 0,
@@ -451,6 +470,117 @@ export class SDKManager {
             count: Math.max(0, score),
             avatar: item.avatar || item.avatarUrl || "",
             uid: item.uid || item.openid || "",
+        };
+    }
+
+    private parseJhRankScore(item: any, rankName: string): number {
+        const rankData = item && typeof item.rank === 'object' ? item.rank : null;
+        const candidates = [
+            item?.[rankName],
+            item?.score,
+            rankData?.[rankName],
+            item?.level,
+            item?.winsk,
+        ];
+
+        for (const value of candidates) {
+            if (value === null || value === undefined || value === '') continue;
+            const score = Number(value);
+            if (Number.isFinite(score)) return Math.max(0, Math.floor(score));
+        }
+
+        return 0;
+    }
+
+    private ensureJhRankUploadProfile(): Promise<any> {
+        if (!this.canUseJhRank(false)) return Promise.resolve(null);
+        return this.ensureJhLogin()
+            .then(() => this.resolveJhRankUploadProfile())
+            .then((profile) => this.jhSignedPost('/v3/setAvatarAndNickname', {
+                avatar: profile.avatarUrl,
+                nickname: profile.nickname,
+            }, true))
+            .catch((err) => {
+                this.log('setAvatarAndNickname failed:', err);
+                return null;
+            });
+    }
+
+    private resolveJhRankUploadProfile(): Promise<JHRankUploadProfile> {
+        const cached = SDKManager.jhRankUploadProfile || this.loadJhRankUploadProfile();
+        if (cached) return Promise.resolve(cached);
+
+        return this.fetchWechatRankUploadProfile().then((profile) => {
+            const resolved = profile || this.getFallbackJhRankUploadProfile();
+            SDKManager.jhRankUploadProfile = resolved;
+            sys.localStorage.setItem(SDKManager.jhRankProfileStorageKey, JSON.stringify(resolved));
+            return resolved;
+        });
+    }
+
+    private fetchWechatRankUploadProfile(): Promise<JHRankUploadProfile | null> {
+        if (sys.platform !== sys.Platform.WECHAT_GAME || typeof wx === 'undefined') {
+            return Promise.resolve(null);
+        }
+
+        const wxApi: any = wx;
+        if (typeof wxApi.getUserInfo !== 'function') {
+            return Promise.resolve(null);
+        }
+
+        return new Promise((resolve) => {
+            wxApi.getUserInfo({
+                success: (res: any) => {
+                    const userInfo = res?.userInfo;
+                    resolve(this.normalizeJhRankUploadProfile(
+                        userInfo?.nickName || userInfo?.nickname,
+                        userInfo?.avatarUrl,
+                        false,
+                    ));
+                },
+                fail: () => resolve(null),
+            });
+        });
+    }
+
+    private loadJhRankUploadProfile(): JHRankUploadProfile | null {
+        const raw = sys.localStorage.getItem(SDKManager.jhRankProfileStorageKey);
+        if (!raw) return null;
+        try {
+            const profile = JSON.parse(raw);
+            return this.normalizeJhRankUploadProfile(profile?.nickname, profile?.avatarUrl, false);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    private getFallbackJhRankUploadProfile(): JHRankUploadProfile {
+        return this.normalizeJhRankUploadProfile(this.getFallbackJhRankNickname(), SDKManager.jhDefaultAvatarUrl, true)!;
+    }
+
+    private getFallbackJhRankNickname(): string {
+        const openid = `${SDKManager.openid || ''}`.replace(/[^a-zA-Z0-9]/g, '');
+        const shortId = openid ? openid.slice(-6) : '';
+        if (shortId) return `玩家${shortId}`;
+
+        const cached = sys.localStorage.getItem(SDKManager.jhFallbackNicknameStorageKey);
+        if (cached) return cached;
+
+        const randomId = Math.floor(100000 + Math.random() * 900000);
+        const nickname = `玩家${randomId}`;
+        sys.localStorage.setItem(SDKManager.jhFallbackNicknameStorageKey, nickname);
+        return nickname;
+    }
+
+    private normalizeJhRankUploadProfile(nickname: any, avatarUrl: any, allowFallback: boolean): JHRankUploadProfile | null {
+        const name = typeof nickname === 'string' ? nickname.trim().slice(0, 100) : '';
+        const avatarRaw = typeof avatarUrl === 'string' ? avatarUrl.trim() : '';
+        const avatar = avatarRaw.length <= 200 ? avatarRaw : '';
+        if (!name && !allowFallback) return null;
+
+        return {
+            nickname: name || this.getFallbackJhRankNickname(),
+            avatarUrl: avatar || SDKManager.jhDefaultAvatarUrl,
         };
     }
 
