@@ -1,4 +1,4 @@
-import { _decorator, Button, Component, Node, tween, Tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Button, Color, Component, Node, Sprite, tween, Tween, UIOpacity, Vec3, Widget } from 'cc';
 import { AudioManager } from './manager/AudioManager';
 const { ccclass, property } = _decorator;
 
@@ -180,7 +180,25 @@ export class UIaddDesktopLayer extends Component {
         tween(target)
             .to(0.35, { scale: new Vec3(OPEN_OVERSHOOT_SCALE, OPEN_OVERSHOOT_SCALE, 1) }, { easing: 'sineOut' })
             .to(0.15, { scale: new Vec3(VIEW_SCALE, VIEW_SCALE, 1) }, { easing: 'sineInOut' })
+            .call(() => {
+                if (target?.isValid && target.name === 'view2') this.revealView2Content(target);
+            })
             .start();
+    }
+
+    private revealView2Content(target: Node) {
+        const content = target.getChildByName('content2');
+        if (!content?.isValid) return;
+
+        content.getComponent(Widget)?.updateAlignment();
+
+        const opacity = content.getComponent(UIOpacity) || content.addComponent(UIOpacity);
+        opacity.opacity = 255;
+
+        const sprite = content.getComponent(Sprite);
+        if (sprite && sprite.color.a < 255) {
+            sprite.color = new Color(sprite.color.r, sprite.color.g, sprite.color.b, 255);
+        }
     }
 
     private getActiveViewNode(): Node {
@@ -214,4 +232,4 @@ export class UIaddDesktopLayer extends Component {
         return null;
     }
 }
-
+

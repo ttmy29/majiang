@@ -438,6 +438,7 @@ export class UIStartLayer extends Component {
         if (!this.signNode?.isValid) return;
 
         this.signNode.active = !ProgressManager.isFirstSeenToday();
+        this.refreshSignIconState();
         this.refreshSignRedPoint();
     }
 
@@ -449,6 +450,15 @@ export class UIStartLayer extends Component {
     private refreshSignRedPoint() {
         const redNode = this.signNode?.getChildByName('red') || this.findChildByName(this.signNode, 'red');
         if (redNode?.isValid) redNode.active = this.signNode.active && ProgressManager.hasClaimableSignReward();
+    }
+
+    private refreshSignIconState() {
+        const signIcon1 = this.signNode?.getChildByName('signIcon1') || this.findChildByName(this.signNode, 'signIcon1');
+        const signIcon2 = this.signNode?.getChildByName('signIcon2') || this.findChildByName(this.signNode, 'signIcon2');
+        const hasSignedToday = ProgressManager.hasSignedToday();
+
+        if (signIcon1?.isValid) signIcon1.active = hasSignedToday;
+        if (signIcon2?.isValid) signIcon2.active = !hasSignedToday;
     }
 
     private formatLeafConut(count: number): string {

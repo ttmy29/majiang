@@ -11,6 +11,8 @@ export enum StorageKey {
     ActivitySnapshot = 'mahjong_match_activity_snapshot',
     ActivityRetryCount = 'mahjong_match_activity_retry_count',
     IronTipsShown = 'mahjong_match_iron_tips_shown',
+    CoverTipsShown = 'mahjong_match_cover_tips_shown',
+    RopeTipsShown = 'mahjong_match_rope_tips_shown',
     UndoCount = 'mahjong_match_undo_count',
     SwitchCount = 'mahjong_match_switch_count',
     UnlockCount = 'mahjong_match_unlock_count',

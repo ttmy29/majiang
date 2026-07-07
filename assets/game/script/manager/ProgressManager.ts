@@ -28,6 +28,7 @@ export interface BoxSnap {
 export interface ProgressSnapshot {
     version: 1;
     level: number;
+    boardId?: number;
     iqValue?: number;
     iqClearCount?: number;
     taskQueue: string[];
@@ -215,6 +216,10 @@ export class ProgressManager {
             days,
         });
         return true;
+    }
+
+    static hasSignedToday(now = new Date()): boolean {
+        return StorageManager.instance.getItem(StorageKey.SignLastDate) === this.formatSignDate(now);
     }
 
     static loadSignStreak(now = new Date()): number {

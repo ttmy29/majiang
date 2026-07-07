@@ -141,10 +141,8 @@ export class LayerManager {
             if (oldToast && oldToast.isValid) {
                 // 停止旧 Toast 身上所有的等待定时器和动画
                 Tween.stopAllByTarget(oldToast);
-                let oldOpacity = oldToast.getComponent(UIOpacity);
-                if (oldOpacity) {
-                    Tween.stopAllByTarget(oldOpacity);
-                }
+                const oldOpacity = oldToast.getComponent(UIOpacity) ?? oldToast.addComponent(UIOpacity);
+                Tween.stopAllByTarget(oldOpacity);
 
                 // 获取旧 Toast 当前的实时位置（防止在移动中途被打断）
                 const currentPos = oldToast.position.clone();
@@ -154,11 +152,9 @@ export class LayerManager {
                     .call(() => { oldToast.destroy(); })
                     .start();
 
-                if (oldOpacity) {
-                    tween(oldOpacity)
-                        .to(0.15, { opacity: 0 })
-                        .start();
-                }
+                tween(oldOpacity)
+                    .to(0.15, { opacity: 0 })
+                    .start();
             }
         }
         // 旧的全部进入退场状态，清空记录数组

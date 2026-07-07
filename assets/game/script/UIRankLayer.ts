@@ -1,11 +1,16 @@
 import { _decorator, Button, Component, EventTouch, instantiate, Label, Layout, Node, ScrollView, SubContextView, sys, tween, Tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { AudioManager } from './manager/AudioManager';
+import { SDKManager } from '../../loading/SDKManager';
+import type { JHRankEntry } from '../../loading/SDKManager';
+import { ProgressManager } from './manager/ProgressManager';
 const { ccclass, property } = _decorator;
 
 interface RankItemData {
     rank: number;
     name: string;
     count: number;
+    avatar?: string;
+    isSelf?: boolean;
 }
 
 @ccclass('UIRankLayer')
@@ -36,6 +41,10 @@ export class UIRankLayer extends Component {
     private tabDefaultSiblingIndexes: number[] = [];
     private friendRankNode: Node | null = null;
     private friendRankView: SubContextView | null = null;
+    private rankRequestToken = 0;
+    private requestingWechatProfile = false;
+    private static readonly WECHAT_RANK_PROFILE_KEY = 'mahjong_match_rank_profile';
+    private static readonly SERVER_RANK_DISPLAY_LIMIT = 100;
 
     protected onLoad(): void {
         this.initNodeRefs();
@@ -92,6 +101,7 @@ export class UIRankLayer extends Component {
 
     private switchRankTab(index: number) {
         this.nowIndex = index;
+        this.rankRequestToken++;
         this.updateTabSiblingOrder(this.getTabNode(index));
 
         if (index === 1 && this.showFriendRank()) {
@@ -123,11 +133,36 @@ export class UIRankLayer extends Component {
     private refreshRankList(index: number) {
         if (!this.contentNode || !this.itemNode) return;
 
+        const requestToken = ++this.rankRequestToken;
         this.contentNode.active = true;
         this.clearContentNode();
         this.itemNode.active = false;
 
-        const rankData = this.createFakeRankData(index);
+        if (!this.isWechatGamePlatform()) {
+            this.renderRankList(index, this.createFakeRankData(index));
+            return;
+        }
+
+        const rankName = this.getServerRankName(index);
+        SDKManager.instance.fetchJhRank(rankName)
+            .then((board) => {
+                if (requestToken !== this.rankRequestToken) return;
+                const rankData = this.toRankItemData(board.topEntries, board.myInfo);
+                this.renderRankList(index, this.limitServerRankData(index, rankData));
+            })
+            .catch((err) => {
+                if (requestToken !== this.rankRequestToken) return;
+                console.warn('UIRankLayer: fetch JH rank failed', err);
+                this.renderRankList(index, []);
+            });
+    }
+
+    private renderRankList(index: number, rankData: RankItemData[]) {
+        if (!this.contentNode || !this.itemNode) return;
+
+        this.clearContentNode();
+        this.itemNode.active = false;
+
         for (const data of rankData) {
             const item = instantiate(this.itemNode);
             item.name = `item_${index}_${data.rank}`;
@@ -149,6 +184,38 @@ export class UIRankLayer extends Component {
         }
     }
 
+    private getServerRankName(index: number): string {
+        if (index === 3) return SDKManager.instance.getJhRankName('winStreak');
+        return SDKManager.instance.getJhRankName('level');
+    }
+
+    private toRankItemData(entries: JHRankEntry[], selfEntry?: JHRankEntry | null): RankItemData[] {
+        const selfUid = selfEntry?.uid || SDKManager.instance.getOpenid();
+        return (entries || []).map((entry, index) => ({
+            rank: entry.rank > 0 ? entry.rank : index + 1,
+            name: entry.name || 'Player',
+            count: entry.count,
+            avatar: entry.avatar,
+            isSelf: this.isSelfRankEntry(entry, selfEntry, selfUid),
+        }));
+    }
+
+    private limitServerRankData(index: number, rankData: RankItemData[]): RankItemData[] {
+        if (index !== 2 && index !== 3) return rankData;
+        return rankData.slice(0, UIRankLayer.SERVER_RANK_DISPLAY_LIMIT);
+    }
+
+    private isSelfRankEntry(entry: JHRankEntry, selfEntry?: JHRankEntry | null, selfUid: string = ''): boolean {
+        if (!entry) return false;
+        if (selfUid && entry.uid && entry.uid === selfUid) return true;
+        if (selfEntry?.uid && entry.uid && entry.uid === selfEntry.uid) return true;
+        return !!selfEntry
+            && entry.rank > 0
+            && selfEntry.rank > 0
+            && entry.rank === selfEntry.rank
+            && entry.count === selfEntry.count;
+    }
+
     private showFriendRank(): boolean {
         if (!this.isWechatOpenDataAvailable()) return false;
         if (!this.ensureFriendRankView()) return false;
@@ -162,12 +229,33 @@ export class UIRankLayer extends Component {
             title: '好友排行',
             scoreLabel: '通过关卡',
             emptyText: '暂无好友排行',
+            fallbackSelf: {
+                nickname: this.getCachedWechatRankProfile()?.nickname || '\u6211',
+                avatarUrl: this.getCachedWechatRankProfile()?.avatarUrl || '',
+                openid: SDKManager.instance.getOpenid(),
+                uid: SDKManager.instance.getOpenid(),
+                rankScore: Math.max(0, Math.floor(ProgressManager.loadLevel())),
+            },
         };
 
         this.postOpenDataMessage(rankMessage);
 
         this.scheduleOnce(() => {
             this.postOpenDataMessage(rankMessage);
+            this.friendRankView?.update();
+        });
+
+        this.requestWechatRankProfile((profile) => {
+            if (!this.friendRankNode?.isValid || !this.friendRankNode.active) return;
+            const updatedRankMessage = {
+                ...rankMessage,
+                fallbackSelf: {
+                    ...rankMessage.fallbackSelf,
+                    nickname: profile.nickname || rankMessage.fallbackSelf.nickname,
+                    avatarUrl: profile.avatarUrl || rankMessage.fallbackSelf.avatarUrl,
+                },
+            };
+            this.postOpenDataMessage(updatedRankMessage);
             this.friendRankView?.update();
         });
 
@@ -182,6 +270,80 @@ export class UIRankLayer extends Component {
             this.contentNode.active = true;
         }
         this.postOpenDataMessage({ type: 'clear' });
+    }
+
+    private getCachedWechatRankProfile(): { nickname?: string; avatarUrl?: string } | null {
+        const raw = sys.localStorage.getItem(UIRankLayer.WECHAT_RANK_PROFILE_KEY);
+        if (!raw) return null;
+        try {
+            const profile = JSON.parse(raw);
+            if (!profile || typeof profile !== 'object') return null;
+            return {
+                nickname: typeof profile.nickname === 'string' ? profile.nickname : '',
+                avatarUrl: typeof profile.avatarUrl === 'string' ? profile.avatarUrl : '',
+            };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    private saveWechatRankProfile(profile: { nickname?: string; avatarUrl?: string }) {
+        if (!profile.nickname && !profile.avatarUrl) return;
+        sys.localStorage.setItem(UIRankLayer.WECHAT_RANK_PROFILE_KEY, JSON.stringify({
+            nickname: profile.nickname || '',
+            avatarUrl: profile.avatarUrl || '',
+        }));
+    }
+
+    private requestWechatRankProfile(onComplete: (profile: { nickname?: string; avatarUrl?: string }) => void) {
+        if (!this.isWechatGamePlatform() || typeof wx === 'undefined' || this.requestingWechatProfile) return;
+        const cached = this.getCachedWechatRankProfile();
+        if (cached?.avatarUrl) return;
+
+        const wxApi: any = wx;
+        const finish = () => {
+            this.requestingWechatProfile = false;
+        };
+        const handleUserInfo = (userInfo: any) => {
+            const profile = {
+                nickname: userInfo?.nickName || userInfo?.nickname || '',
+                avatarUrl: userInfo?.avatarUrl || '',
+            };
+            this.saveWechatRankProfile(profile);
+            onComplete(profile);
+        };
+        const tryGetUserProfile = () => {
+            if (typeof wxApi.getUserProfile !== 'function') {
+                finish();
+                return;
+            }
+            wxApi.getUserProfile({
+                desc: '\u7528\u4e8e\u5c55\u793a\u6392\u884c\u699c\u5934\u50cf\u6635\u79f0',
+                success: (res: any) => {
+                    finish();
+                    handleUserInfo(res?.userInfo);
+                },
+                fail: finish,
+            });
+        };
+
+        this.requestingWechatProfile = true;
+        if (typeof wxApi.getUserInfo === 'function') {
+            wxApi.getUserInfo({
+                success: (res: any) => {
+                    if (!res?.userInfo?.avatarUrl && typeof wxApi.getUserProfile === 'function') {
+                        tryGetUserProfile();
+                        return;
+                    }
+                    finish();
+                    handleUserInfo(res?.userInfo);
+                },
+                fail: tryGetUserProfile,
+            });
+            return;
+        }
+
+        tryGetUserProfile();
     }
 
     private ensureFriendRankView(): boolean {
@@ -216,8 +378,12 @@ export class UIRankLayer extends Component {
         return true;
     }
 
+    private isWechatGamePlatform(): boolean {
+        return sys.platform === sys.Platform.WECHAT_GAME;
+    }
+
     private isWechatOpenDataAvailable(): boolean {
-        return sys.platform === sys.Platform.WECHAT_GAME
+        return this.isWechatGamePlatform()
             && typeof wx !== 'undefined'
             && typeof wx.getOpenDataContext === 'function';
     }
@@ -282,10 +448,18 @@ export class UIRankLayer extends Component {
     }
 
     private renderRankItem(item: Node, data: RankItemData) {
+        this.setRankBackground(item, !!data.isSelf);
         this.setRankIcon(item, data.rank);
         this.setLabelString(item.getChildByName('num'), `${data.rank}`);
         this.setLabelString(item.getChildByName('name'), data.name);
         this.setLabelString(item.getChildByName('count'), `${data.count}`);
+    }
+
+    private setRankBackground(item: Node, isSelf: boolean) {
+        const selfBgNode = item.getChildByName('bg1');
+        const otherBgNode = item.getChildByName('bg2');
+        if (selfBgNode) selfBgNode.active = isSelf;
+        if (otherBgNode) otherBgNode.active = !isSelf;
     }
 
     private setRankIcon(item: Node, rank: number) {

@@ -1,4 +1,5 @@
-import { _decorator, Button, Component, Node, tween, Tween, UIOpacity, UITransform, Vec3, view, Widget } from 'cc';
+import { _decorator, Button, Component, Label, Node, tween, Tween, UIOpacity, UITransform, Vec3, view, Widget } from 'cc';
+import { Constants } from './config/Constants';
 import { AudioManager } from './manager/AudioManager';
 import { ProgressManager } from './manager/ProgressManager';
 const { ccclass, property } = _decorator;
@@ -18,10 +19,12 @@ export class UIwinSignLayer extends Component {
     private isClosing = false;
     private hasGrantedOpenLeaf = false;
     private closeButtonNode: Node | null = null;
+    private tipsLabel: Label | null = null;
     private onCloseComplete: (() => void) | null = null;
 
     protected onLoad(): void {
         this.initNodeRefs();
+        this.refreshTipsText();
         this.refreshTodayFinish();
         this.fitBgToViewTop();
         this.fitEffectToViewRightTop();
@@ -29,6 +32,7 @@ export class UIwinSignLayer extends Component {
     }
 
     protected onEnable(): void {
+        this.refreshTipsText();
         this.refreshTodayFinish();
         this.fitBgToViewTop();
         this.fitEffectToViewRightTop();
@@ -57,6 +61,7 @@ export class UIwinSignLayer extends Component {
         this.openedByInit = true;
         this.onCloseComplete = typeof onClose === 'function' ? onClose : null;
         this.initNodeRefs();
+        this.refreshTipsText();
         this.refreshTodayFinish();
         this.fitBgToViewTop();
         this.fitEffectToViewRightTop();
@@ -87,6 +92,16 @@ export class UIwinSignLayer extends Component {
         this.viewNode = this.viewNode || this.node.getChildByName('view') || this.node;
         this.effectNode = this.effectNode || this.node.getChildByName('effect');
         this.maskNode = this.maskNode || this.bgNode;
+        this.tipsLabel = this.tipsLabel || this.findChildByName(this.node, 'tips')?.getComponent(Label) || null;
+    }
+
+    private refreshTipsText(now = new Date()) {
+        const label = this.tipsLabel || this.findChildByName(this.node, 'tips')?.getComponent(Label);
+        if (!label?.isValid) return;
+
+        this.tipsLabel = label;
+        const index = now.getDay() === 1 ? 0 : 1;
+        label.string = Constants.winSign[index] || Constants.winSign[1] || Constants.winSign[0] || '';
     }
 
     private grantOpenLeaf() {

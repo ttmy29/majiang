@@ -37,6 +37,19 @@ export interface SDKConfig {
     enableLog?: boolean;
 }
 
+export interface JHRankEntry {
+    rank: number;
+    name: string;
+    count: number;
+    avatar?: string;
+    uid?: string;
+}
+
+export interface JHRankBoard {
+    myInfo: JHRankEntry | null;
+    topEntries: JHRankEntry[];
+}
+
 @ccclass('SDKManager')
 export class SDKManager {
     private static _instance: SDKManager;
@@ -58,6 +71,22 @@ export class SDKManager {
     private static platform: number = 1; // 1:android 2:ios 3:other
     private static source: number = 1;
     private static node: number = 1;
+    private static jhRankEnabled: boolean = false;
+    private static jhApiUrl: string = "https://jh.shenzhenyuren.com";
+    private static jhGid: string = "";
+    private static jhCid: string = "";
+    private static jhLoginId: string = "";
+    private static jhLoginPromise: Promise<string> | null = null;
+    private static jhRankNames: { level: string; winStreak: string } = {
+        level: "level",
+        winStreak: "winsk",
+    };
+    private static readonly jhSecretIndexes: number[] = [
+        20, 7, 19, 28, 10, 12, 25, 2,
+        20, 19, 10, 10, 21, 6, 1, 14,
+        31, 8, 14, 18, 1, 24, 12, 20,
+        16, 20, 10, 20, 16, 24, 5, 30,
+    ];
 
 
     public static rewardedVideoAd: any = null
@@ -214,9 +243,65 @@ export class SDKManager {
         return SDKManager.openid;
     }
 
+    public initJhRank(apiUrl: string, gid: string, cid: string): void {
+        SDKManager.jhApiUrl = (apiUrl || "https://jh.shenzhenyuren.com").replace(/\/+$/, "");
+        SDKManager.jhGid = (gid || "").trim();
+        SDKManager.jhCid = (cid || "").trim();
+        SDKManager.jhLoginId = "";
+        SDKManager.jhLoginPromise = null;
+        SDKManager.jhRankEnabled = !!SDKManager.jhApiUrl && !!SDKManager.jhGid && !!SDKManager.jhCid;
+        if (!SDKManager.jhRankEnabled) {
+            this.log('JH rank init skipped: apiUrl, gid and cid are required');
+        }
+    }
+
+    public getJhRankName(type: 'level' | 'winStreak'): string {
+        return SDKManager.jhRankNames[type];
+    }
+
+    public loginJhRank(): Promise<string> {
+        if (!this.canUseJhRank(true)) return Promise.reject(new Error('JH rank is not configured'));
+        return this.ensureJhLogin();
+    }
+
+    public saveJhProfile(profile: any): Promise<any> {
+        if (!this.canUseJhRank(false)) return Promise.resolve(null);
+        return this.ensureJhLogin().then(() => {
+            const data = JSON.stringify(profile || {});
+            return this.jhSignedPost('/v3/saveProfile', { data }, true);
+        });
+    }
+
+    public saveJhRankScores(scores: Record<string, number | string>): Promise<any> {
+        const rank: Record<string, string> = {};
+        Object.keys(scores || {}).forEach((key) => {
+            const value = Math.max(0, Math.floor(Number(scores[key]) || 0));
+            rank[key] = `${value}`;
+        });
+        if (Object.keys(rank).length <= 0) return Promise.resolve(null);
+        return this.saveJhProfile({ rank });
+    }
+
+    public fetchJhRank(rankName: string = SDKManager.jhRankNames.level): Promise<JHRankBoard> {
+        if (!this.canUseJhRank(false)) {
+            return Promise.resolve({ myInfo: null, topEntries: [] });
+        }
+        return this.ensureJhLogin()
+            .then(() => this.jhSignedPost('/v3/getRank', { rankName }, true))
+            .then((data) => this.parseJhRankBoard(data, rankName));
+    }
+
     public uploadWechatRankScores(levelScore: number, winStreakScore: number): void {
         this.setWechatCloudScore('level', levelScore);
         this.setWechatCloudScore('winsk', winStreakScore);
+        if (sys.platform !== sys.Platform.WECHAT_GAME) return;
+
+        const scores: Record<string, number> = {};
+        scores[SDKManager.jhRankNames.level] = levelScore;
+        scores[SDKManager.jhRankNames.winStreak] = winStreakScore;
+        this.saveJhRankScores(scores).catch((err) => {
+            this.log('saveJhRankScores failed:', err);
+        });
     }
 
     public setWechatCloudScore(key: string, score: number): void {
@@ -237,6 +322,136 @@ export class SDKManager {
                 this.log('setUserCloudStorage failed:', key, err);
             },
         });
+    }
+
+    private canUseJhRank(logMissing: boolean): boolean {
+        const ready = SDKManager.jhRankEnabled
+            && !!SDKManager.jhGid
+            && !!SDKManager.jhCid;
+        if (!ready && logMissing) {
+            this.log('JH rank config missing: call initJhRank(apiUrl, gid, cid) first');
+        }
+        return ready;
+    }
+
+    private ensureJhLogin(): Promise<string> {
+        if (SDKManager.jhLoginId) return Promise.resolve(SDKManager.jhLoginId);
+        if (SDKManager.jhLoginPromise) return SDKManager.jhLoginPromise;
+
+        if (!SDKManager.openid) {
+            return new Promise<string>((resolve, reject) => {
+                this.wxLogin(() => {
+                    this.ensureJhLogin().then(resolve).catch(reject);
+                }, reject);
+            });
+        }
+
+        const promise = this.jhSignedPost('/v3/login', {}, false)
+            .then((data) => {
+                const loginId = data && data.loginid ? `${data.loginid}` : "";
+                if (!loginId) throw new Error('JH login response missing loginid');
+                SDKManager.jhLoginId = loginId;
+                return loginId;
+            });
+
+        SDKManager.jhLoginPromise = promise.then((loginId) => {
+            SDKManager.jhLoginPromise = null;
+            return loginId;
+        }, (err) => {
+            SDKManager.jhLoginPromise = null;
+            throw err;
+        });
+
+        return SDKManager.jhLoginPromise;
+    }
+
+    private jhSignedPost(path: string, data: Record<string, any>, includeLoginId: boolean): Promise<any> {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const payload: Record<string, any> = {
+            gid: SDKManager.jhGid,
+            cid: SDKManager.jhCid,
+            uid: SDKManager.openid,
+            timestamp,
+            ...(data || {}),
+        };
+
+        if (includeLoginId) {
+            if (!SDKManager.jhLoginId) {
+                return Promise.reject(new Error('JH loginid is empty'));
+            }
+            payload.loginid = SDKManager.jhLoginId;
+        }
+
+        payload.sign = this.createJhSign(payload, this.createJhSecret(timestamp));
+        return this.jhJsonPost(path, payload);
+    }
+
+    private jhJsonPost(path: string, payload: Record<string, any>): Promise<any> {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.timeout = SDKManager.timeout;
+            const url = SDKManager.jhApiUrl + path;
+
+            xhr.onreadystatechange = () => {
+                if (xhr.readyState !== 4) return;
+                if (xhr.status === 0) return;
+
+                let response: any = null;
+                try {
+                    response = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+                } catch (e) {
+                    reject(new Error(`JH response parse failed: ${xhr.responseText}`));
+                    return;
+                }
+
+                if (xhr.status >= 200 && xhr.status < 400 && response && response.code === 200) {
+                    resolve(response.data);
+                    return;
+                }
+
+                const message = response && response.msg ? response.msg : `JH request failed: ${xhr.status}`;
+                reject(new Error(message));
+            };
+
+            xhr.onerror = () => reject(new Error('JH network error'));
+            xhr.ontimeout = () => reject(new Error('JH request timeout'));
+            xhr.open('POST', url, true);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.send(JSON.stringify(payload));
+            this.log('JH request sent:', url, payload);
+        });
+    }
+
+    private parseJhRankBoard(data: any, rankName: string): JHRankBoard {
+        const myInfo = this.parseJhRankEntry(data?.myInfo, rankName);
+        const topEntries = this.parseJhWorldInfo(data?.worldInfo, rankName);
+        if (topEntries.length <= 0 && myInfo) topEntries.push(myInfo);
+        return { myInfo, topEntries };
+    }
+
+    private parseJhWorldInfo(worldInfo: any, rankName: string): JHRankEntry[] {
+        if (!worldInfo) return [];
+        const values = Array.isArray(worldInfo)
+            ? worldInfo
+            : Object.keys(worldInfo).map((key) => worldInfo[key]);
+        return values
+            .map((item) => this.parseJhRankEntry(item, rankName))
+            .filter((item): item is JHRankEntry => !!item)
+            .sort((a, b) => a.rank - b.rank);
+    }
+
+    private parseJhRankEntry(item: any, rankName: string): JHRankEntry | null {
+        if (!item || typeof item !== 'object') return null;
+        const rank = Math.floor(Number(item.index || item.rank || 0));
+        const score = Math.floor(Number(item[rankName] ?? item.score ?? item.level ?? 0));
+        if (rank <= 0 && score <= 0) return null;
+        return {
+            rank: rank > 0 ? rank : 0,
+            name: `${item.nickname || item.name || item.uid || item.openid || ''}`,
+            count: Math.max(0, score),
+            avatar: item.avatar || item.avatarUrl || "",
+            uid: item.uid || item.openid || "",
+        };
     }
 
     /**
@@ -965,6 +1180,25 @@ export class SDKManager {
         }
         str += secret;
         this.log('[SDKManager] createSign', str);
+        return this.getMD5(str);
+    }
+
+    private createJhSecret(timestamp: number): string {
+        const tail = `${timestamp}`.slice(-4);
+        const md5 = this.getMD5(tail);
+        return SDKManager.jhSecretIndexes
+            .map((index) => md5.charAt(index))
+            .join('');
+    }
+
+    private createJhSign(param: Record<string, any>, secret: string): string {
+        let str = '';
+        Object.keys(param).sort().forEach((key) => {
+            if (key === 'sign') return;
+            str += `${key}=${param[key]}&`;
+        });
+        str += secret;
+        this.log('[SDKManager] createJhSign', str);
         return this.getMD5(str);
     }
 }

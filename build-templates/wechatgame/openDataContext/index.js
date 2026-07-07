@@ -6,7 +6,30 @@ var currentKey = 'level';
 var currentTitle = '好友排行';
 var currentScoreLabel = '通过关卡';
 var currentEmptyText = '暂无好友排行';
+var currentFallbackSelf = null;
 var imageCache = {};
+var rankBgPaths = {
+    self: ['openDataContext/bg1.png'],
+    other: ['openDataContext/bg2.png'],
+};
+var rankMedalPaths = ['openDataContext/1.png', 'openDataContext/2.png', 'openDataContext/3.png'];
+var headBgPath = 'openDataContext/headBg.png';
+var defaultHeadPath = 'openDataContext/defaultHead.png';
+var rankItemBase = {
+    width: 576,
+    height: 80.064,
+    gap: 8,
+    top: 12,
+    rankX: 62.58,
+    avatarX: 168.83,
+    nameX: 293.5,
+    scoreX: 490.77,
+    medalWidth: 100.48,
+    medalHeight: 65.92,
+    avatarSize: 64.64,
+    rankFontSize: 35,
+    textFontSize: 23,
+};
 
 function clearCanvas() {
     if (!ctx || !sharedCanvas) return;
@@ -51,7 +74,76 @@ function normalizeRankData(rawData, key) {
     }).slice(0, 10);
 }
 
-function drawRoundRect(x, y, width, height, radius, color) {
+function normalizeFallbackSelf(data) {
+    if (!data) return null;
+    var rawScore = data.rankScore != null ? data.rankScore : data.score;
+    var score = Number(rawScore);
+    if (!isFinite(score)) score = 0;
+    return {
+        nickname: data.nickname || data.name || 'Me',
+        avatarUrl: data.avatarUrl || data.avatar || '',
+        openid: data.openid || data.uid || data.userId || '',
+        uid: data.uid || data.openid || data.userId || '',
+        rankScore: Math.max(0, Math.floor(score)),
+        isSelf: true,
+        isSelfFallback: true,
+    };
+}
+
+function getFallbackRankData() {
+    var self = normalizeFallbackSelf(currentFallbackSelf);
+    return self ? [self] : [];
+}
+
+function getRankUserId(item) {
+    return item ? (item.openid || item.uid || item.userId || '') : '';
+}
+
+function isSameRankUser(item, self) {
+    if (!item || !self) return false;
+    var itemId = getRankUserId(item);
+    var selfId = getRankUserId(self);
+    if (itemId && selfId && itemId === selfId) return true;
+    return !!self.avatarUrl
+        && item.avatarUrl === self.avatarUrl
+        && item.nickname === self.nickname;
+}
+
+function mergeFallbackSelf(rankData) {
+    var data = Array.isArray(rankData) ? rankData.slice() : [];
+    var self = normalizeFallbackSelf(currentFallbackSelf);
+    if (!self) return data;
+
+    var hasSelf = false;
+    for (var i = 0; i < data.length; i++) {
+        if (data[i].isSelf || data[i].isSelfFallback || isSameRankUser(data[i], self)) {
+            data[i].isSelf = true;
+            hasSelf = true;
+        }
+    }
+
+    if (!hasSelf) data.push(self);
+    data.sort(function(a, b) {
+        return b.rankScore - a.rankScore;
+    });
+
+    var selfIndex = data.indexOf(self);
+    if (selfIndex >= 10) {
+        return data.slice(0, 9).concat([self]);
+    }
+    return data.slice(0, 10);
+}
+
+function drawFallbackOrEmpty() {
+    var fallbackData = getFallbackRankData();
+    if (fallbackData.length) {
+        drawRankList(fallbackData);
+    } else {
+        drawEmpty();
+    }
+}
+
+function traceRoundRect(x, y, width, height, radius) {
     ctx.beginPath();
     ctx.moveTo(x + radius, y);
     ctx.lineTo(x + width - radius, y);
@@ -63,8 +155,51 @@ function drawRoundRect(x, y, width, height, radius, color) {
     ctx.lineTo(x, y + radius);
     ctx.quadraticCurveTo(x, y, x + radius, y);
     ctx.closePath();
+}
+
+function drawRoundRect(x, y, width, height, radius, color) {
+    traceRoundRect(x, y, width, height, radius);
     ctx.fillStyle = color;
     ctx.fill();
+}
+
+function getCachedImage(src) {
+    if (!src || !env) return null;
+    var cached = imageCache[src];
+    if (cached && cached._rankLoaded) return cached;
+    if (cached) return null;
+
+    var image = env.createImage ? env.createImage() : null;
+    if (!image) return null;
+    image.onload = function() {
+        image._rankLoaded = true;
+        drawRankList(lastRankData);
+    };
+    image.onerror = function() {
+        image._rankFailed = true;
+    };
+    image.src = src;
+    imageCache[src] = image;
+    return null;
+}
+
+function isSelfRankItem(item) {
+    return !!(item && (item.isSelf || item.isSelfFallback));
+}
+
+function drawRankBackground(isSelf, x, y, width, height) {
+    var sources = isSelf ? rankBgPaths.self : rankBgPaths.other;
+    for (var i = 0; i < sources.length; i++) {
+        var image = getCachedImage(sources[i]);
+        if (image) {
+            try {
+                ctx.drawImage(image, x, y, width, height);
+                return;
+            } catch (e) {}
+        }
+    }
+
+    drawRoundRect(x, y, width, height, 10, isSelf ? '#f4d8aa' : '#efd09a');
 }
 
 function drawText(text, x, y, size, color, align, bold) {
@@ -75,34 +210,102 @@ function drawText(text, x, y, size, color, align, bold) {
     ctx.fillText(text, x, y);
 }
 
+function drawImageAsset(src, x, y, width, height) {
+    var image = getCachedImage(src);
+    if (!image) return false;
+    try {
+        ctx.drawImage(image, x, y, width, height);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function drawImageInBox(image, x, y, width, height, mode) {
+    try {
+        var iw = image.width || image.naturalWidth || width;
+        var ih = image.height || image.naturalHeight || height;
+        if (!iw || !ih) {
+            ctx.drawImage(image, x, y, width, height);
+            return true;
+        }
+
+        var scale = mode === 'cover' ? Math.max(width / iw, height / ih) : Math.min(width / iw, height / ih);
+        var drawW = iw * scale;
+        var drawH = ih * scale;
+        ctx.drawImage(image, x + (width - drawW) / 2, y + (height - drawH) / 2, drawW, drawH);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function drawImageFit(src, x, y, width, height) {
+    var image = getCachedImage(src);
+    if (!image) return false;
+    return drawImageInBox(image, x, y, width, height, 'contain');
+}
+
+function drawImageCover(image, x, y, width, height) {
+    return drawImageInBox(image, x, y, width, height, 'cover');
+}
+
+function drawImageCoverRounded(image, x, y, width, height, radius) {
+    try {
+        ctx.save();
+        traceRoundRect(x, y, width, height, radius);
+        ctx.clip();
+        var ok = drawImageCover(image, x, y, width, height);
+        ctx.restore();
+        return ok;
+    } catch (e) {
+        try {
+            ctx.restore();
+        } catch (restoreError) {}
+        return false;
+    }
+}
+
 function clipText(text, maxChars) {
     text = text || '好友';
     if (text.length <= maxChars) return text;
     return text.slice(0, maxChars - 1) + '…';
 }
 
-function drawAvatar(url, x, y, size) {
-    drawRoundRect(x, y, size, size, 10, '#f2d29b');
-    drawText('?', x + size / 2, y + size / 2 + 1, 30, '#8f4b25', 'center', true);
+function drawAvatar(url, x, y, size, fallbackText) {
+    var radius = Math.max(8, size * 0.18);
+    if (!drawImageAsset(headBgPath, x, y, size, size)) {
+        drawRoundRect(x, y, size, size, radius, '#f2d29b');
+    }
 
-    if (!url || !env) return;
+    var inset = Math.max(4, size * 0.12);
+    var innerX = x + inset;
+    var innerY = y + inset;
+    var innerSize = Math.max(0, size - inset * 2);
+    var innerRadius = Math.max(6, innerSize * 0.16);
+
     var cached = imageCache[url];
-    if (cached && cached.complete) {
-        try {
-            ctx.drawImage(cached, x, y, size, size);
-        } catch (e) {}
+    if (cached && cached._rankLoaded) {
+        drawImageCoverRounded(cached, innerX, innerY, innerSize, innerSize, innerRadius);
         return;
     }
+
+    var drewDefault = drawImageFit(defaultHeadPath, x, y, size, size);
+    if (!drewDefault) {
+        drawText((fallbackText || '?').slice(0, 1), x + size / 2, y + size / 2 + 1, Math.max(18, size * 0.46), '#8f4b25', 'center', true);
+    }
+
+    if (!url || !env) return;
 
     if (cached) return;
     var image = env.createImage ? env.createImage() : null;
     if (!image) return;
     image.onload = function() {
-        image.complete = true;
+        image._rankLoaded = true;
         drawRankList(lastRankData);
     };
     image.onerror = function() {
-        image.failed = true;
+        image._rankFailed = true;
     };
     image.src = url;
     imageCache[url] = image;
@@ -126,46 +329,59 @@ function drawRankList(data) {
     }
 
     var width = sharedCanvas.width;
-    var rowHeight = Math.min(78, Math.floor((sharedCanvas.height - 22) / 10));
-    var rowGap = 6;
-    var startY = 12;
-    var rowWidth = Math.min(860, width - 80);
+    var horizontalPadding = Math.max(32, width * 0.05);
+    var rowWidth = Math.max(0, width - horizontalPadding * 2);
+    var rowScale = rowWidth / rankItemBase.width;
+    var rowHeight = rankItemBase.height * rowScale;
+    var rowGap = rankItemBase.gap * rowScale;
+    var startY = rankItemBase.top * rowScale;
     var rowX = (width - rowWidth) / 2;
-    var avatarSize = Math.max(46, Math.min(58, rowHeight - 20));
+    var avatarSize = rankItemBase.avatarSize * rowScale;
+    var medalWidth = rankItemBase.medalWidth * rowScale;
+    var medalHeight = rankItemBase.medalHeight * rowScale;
+    var rankFontSize = rankItemBase.rankFontSize * rowScale;
+    var textFontSize = rankItemBase.textFontSize * rowScale;
 
     for (var i = 0; i < lastRankData.length; i++) {
         var item = lastRankData[i];
         var y = startY + i * (rowHeight + rowGap);
         var centerY = y + rowHeight / 2;
-        var bgColor = i % 2 === 0 ? '#f4d8aa' : '#efd09a';
-        drawRoundRect(rowX, y, rowWidth, rowHeight, 10, bgColor);
+        var rankX = rowX + rankItemBase.rankX * rowScale;
+        var avatarX = rowX + rankItemBase.avatarX * rowScale - avatarSize / 2;
+        var nameX = rowX + rankItemBase.nameX * rowScale;
+        var scoreX = rowX + rankItemBase.scoreX * rowScale;
+        drawRankBackground(isSelfRankItem(item), rowX, y, rowWidth, rowHeight);
 
         var rankColor = i < 3 ? '#ffffff' : '#9b4e27';
         var medalColor = i === 0 ? '#ffb52e' : (i === 1 ? '#a9d3e8' : (i === 2 ? '#e27f3d' : ''));
         if (i < 3) {
-            drawRoundRect(rowX + 34, centerY - 24, 54, 48, 14, medalColor);
+            if (!drawImageFit(rankMedalPaths[i], rankX - medalWidth / 2, centerY - medalHeight / 2, medalWidth, medalHeight)) {
+                drawRoundRect(rankX - 27 * rowScale, centerY - 24 * rowScale, 54 * rowScale, 48 * rowScale, 14 * rowScale, medalColor);
+                drawText(String(i + 1), rankX, centerY + rowScale, rankFontSize, rankColor, 'center', true);
+            }
+        } else {
+            drawText(String(i + 1), rankX, centerY + rowScale, rankFontSize, rankColor, 'center', true);
         }
-        drawText(String(i + 1), rowX + 61, centerY + 1, i < 3 ? 30 : 28, rankColor, 'center', true);
 
-        drawAvatar(item.avatarUrl, rowX + 142, centerY - avatarSize / 2, avatarSize);
-        drawText(clipText(item.nickname, 8), rowX + 230, centerY, 28, '#8d3f25', 'left', true);
-        drawText(String(item.rankScore), rowX + rowWidth - 96, centerY, 30, '#8d3f25', 'center', true);
+        drawAvatar(item.avatarUrl, avatarX, centerY - avatarSize / 2, avatarSize, item.nickname);
+        drawText(clipText(item.nickname, 8), nameX, centerY, textFontSize, '#8d3f25', 'center', true);
+        drawText(String(item.rankScore), scoreX, centerY, textFontSize, '#8d3f25', 'center', true);
     }
 }
 
 function requestFriendRank(key) {
     if (!env || !env.getFriendCloudStorage) {
-        drawEmpty();
+        drawFallbackOrEmpty();
         return;
     }
 
     env.getFriendCloudStorage({
         keyList: [key],
         success: function(res) {
-            drawRankList(normalizeRankData(res && res.data, key));
+            drawRankList(mergeFallbackSelf(normalizeRankData(res && res.data, key)));
         },
         fail: function() {
-            drawEmpty();
+            drawFallbackOrEmpty();
         },
     });
 }
@@ -188,6 +404,7 @@ function handleMessage(data) {
         currentTitle = data.title || currentTitle;
         currentScoreLabel = data.scoreLabel || currentScoreLabel;
         currentEmptyText = data.emptyText || currentEmptyText;
+        currentFallbackSelf = data.fallbackSelf || null;
         requestFriendRank(currentKey);
     }
 }

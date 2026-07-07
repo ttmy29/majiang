@@ -852,7 +852,7 @@
   },
   {
     "__type__": "cc.Node",
-    "_name": "Label",
+    "_name": "tips",
     "_objFlags": 0,
     "__editorExtras__": {},
     "_parent": {
@@ -914,7 +914,7 @@
     },
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 342,
+      "width": 0,
       "height": 47.88
     },
     "_anchorPoint": {
@@ -950,7 +950,7 @@
       "b": 128,
       "a": 255
     },
-    "_string": "一步一步，坚持向前",
+    "_string": "",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 38,
