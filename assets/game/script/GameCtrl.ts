@@ -196,7 +196,7 @@ export class GameCtrl extends Component {
     private static readonly TIPS_TYPE_IRON: TipsType = 1;
     private static readonly TIPS_TYPE_COVER: TipsType = 2;
     private static readonly TIPS_TYPE_ROPE: TipsType = 3;
-    private static readonly SHARE_PROP_EXPT_KEY = 'expt_1783480921';
+    private static readonly SHARE_PROP_EXPT_KEY = 'expt_1783495675';
     private static readonly SHARE_PROP_EXPT_GROUP_VALUE = '1';
     private static readonly SHARE_PROP_EXPT_DAILY_LIMIT = 2;
     private sharePropExperimentRequested = false;
