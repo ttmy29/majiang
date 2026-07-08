@@ -2348,15 +2348,16 @@ export class GameCtrl extends Component {
         box.unlocked = true;
         box.refreshing = true;
         director.emit(Constants.eventNames.EventShowSlotUnlock, this.getTargetBoxSlotID(box));
-        //底部槽满时，从底部槽找一个牌型，如果它还在目标队列里，就把这个牌型提前到队首。随后 assignNewTarget(box) 会用这个牌型作为新解锁盒子的目标。
+        // 底部槽满时,先看队首目标能不能接住一张底部牌;能接住就保持原始任务顺序。
+        // 只有队首不能救场时,才按剩余 taskQueue 顺序找第一个能接住底部牌的类型并提前。
         if (this.slots.length >= this.getSlotFailThreshold()) {
-            //if (this.gameMode === 'activity' && this.slots.length >= this.getSlotFailThreshold()) {
-            for (const tile of this.slots) {
-                const typeIndex = this.taskQueue.indexOf(tile.type);
+            const slotTypes = new Set(this.slots.map((tile) => tile.type));
+            const nextType = this.taskQueue[0];
+            if (!nextType || !slotTypes.has(nextType)) {
+                const typeIndex = this.taskQueue.findIndex((type) => slotTypes.has(type));
                 if (typeIndex >= 0) {
                     const type = this.taskQueue.splice(typeIndex, 1)[0];
                     this.taskQueue.unshift(type);
-                    break;
                 }
             }
         }
