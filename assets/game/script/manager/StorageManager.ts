@@ -17,6 +17,7 @@ export enum StorageKey {
     SwitchCount = 'mahjong_match_switch_count',
     UnlockCount = 'mahjong_match_unlock_count',
     FavoriteRewardDate = 'mahjong_match_favorite_reward_date',
+    ExperimentSharePropDaily = 'mahjong_match_experiment_share_prop_daily',
     GlobalAdCount = 'mahjong_match_global_ad_count',
     LevelRetryCount = 'mahjong_match_level_retry_count',
     LeafConut = 'mahjong_match_leafConut',

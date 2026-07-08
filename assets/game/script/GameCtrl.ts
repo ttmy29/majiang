@@ -196,8 +196,16 @@ export class GameCtrl extends Component {
     private static readonly TIPS_TYPE_IRON: TipsType = 1;
     private static readonly TIPS_TYPE_COVER: TipsType = 2;
     private static readonly TIPS_TYPE_ROPE: TipsType = 3;
+    private static readonly SHARE_PROP_EXPT_KEY = 'expt_1783480921';
+    private static readonly SHARE_PROP_EXPT_GROUP_VALUE = '1';
+    private static readonly SHARE_PROP_EXPT_DAILY_LIMIT = 2;
+    private sharePropExperimentRequested = false;
+    private sharePropExperimentEnabled = false;
+    private randomPropButtonConsumedThisLevel = false;
+    private randomPropLevelContextReady = false;
 
     start() {
+        this.requestSharePropExperimentInfo();
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
         director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
         director.on(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
@@ -279,7 +287,99 @@ export class GameCtrl extends Component {
         game.off(Game.EVENT_HIDE, this.onAppHide, this);
     }
 
-    // 读关卡号 + 中途快照。引导关永远忽略快照(也清掉防御性 dump)
+    // Fetch AB experiment for the daily share-prop entry.
+    private requestSharePropExperimentInfo() {
+        if (this.sharePropExperimentRequested) return;
+        this.sharePropExperimentRequested = true;
+        this.sharePropExperimentEnabled = false;
+
+        if (sys.platform !== sys.Platform.WECHAT_GAME) return;
+        if (typeof wx === 'undefined' || !wx || typeof wx.getGameExptInfo !== 'function') return;
+
+        try {
+            wx.getGameExptInfo({
+                keyList: [GameCtrl.SHARE_PROP_EXPT_KEY],
+                success: (res: any) => {
+                    const list = Array.isArray(res?.list) ? res.list : [];
+                    const item = list.find((info: any) => info?.param_name === GameCtrl.SHARE_PROP_EXPT_KEY);
+                    this.sharePropExperimentEnabled = `${item?.param_value ?? ''}` === GameCtrl.SHARE_PROP_EXPT_GROUP_VALUE;
+                    this.refreshRandomPropButtonVisibility();
+                },
+                fail: (err: any) => {
+                    this.sharePropExperimentEnabled = false;
+                    console.warn('GameCtrl: getGameExptInfo failed', err);
+                },
+            });
+        } catch (err) {
+            this.sharePropExperimentEnabled = false;
+            console.warn('GameCtrl: getGameExptInfo error', err);
+        }
+    }
+
+    private refreshRandomPropButtonVisibility() {
+        if (!this.randomPropLevelContextReady) return;
+        director.emit(Constants.eventNames.EventSetRandomPropButton, this.shouldShowRandomPropButton());
+    }
+
+    private shouldShowRandomPropButton(): boolean {
+        if (this.randomPropButtonConsumedThisLevel) return false;
+        return this.isOriginalRandomPropButtonLevel() || this.isExperimentRandomPropButtonAvailable();
+    }
+
+    private isOriginalRandomPropButtonLevel(): boolean {
+        return this.gameMode === 'main' && Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0;
+    }
+
+    private isExperimentRandomPropButtonAvailable(): boolean {
+        return this.sharePropExperimentEnabled
+            && this.loadExperimentSharePropDailyCount() < GameCtrl.SHARE_PROP_EXPT_DAILY_LIMIT;
+    }
+
+    private shouldCountExperimentSharePropUse(): boolean {
+        return !this.isOriginalRandomPropButtonLevel() && this.isExperimentRandomPropButtonAvailable();
+    }
+
+    private addExperimentSharePropDailyCount(): number {
+        const next = Math.min(
+            GameCtrl.SHARE_PROP_EXPT_DAILY_LIMIT,
+            this.loadExperimentSharePropDailyCount() + 1
+        );
+        StorageManager.instance.setItem(StorageKey.ExperimentSharePropDaily, JSON.stringify({
+            date: this.getTodayString(),
+            count: next,
+        }));
+        ArchiveManager.instance.scheduleUpload();
+        return next;
+    }
+
+    private loadExperimentSharePropDailyCount(): number {
+        const raw = StorageManager.instance.getItem(StorageKey.ExperimentSharePropDaily);
+        if (!raw) return 0;
+
+        try {
+            const obj = JSON.parse(raw) as { date?: string; count?: number };
+            if (!obj || obj.date !== this.getTodayString()) return 0;
+            const count = Math.floor(Number(obj.count));
+            return Number.isFinite(count) && count > 0 ? count : 0;
+        } catch (err) {
+            console.warn('GameCtrl: experiment share prop daily parse failed', err);
+            return 0;
+        }
+    }
+
+    private getTodayString(): string {
+        const date = new Date();
+        const year = date.getFullYear();
+        const month = this.padDatePart(date.getMonth() + 1);
+        const day = this.padDatePart(date.getDate());
+        return `${year}-${month}-${day}`;
+    }
+
+    private padDatePart(value: number): string {
+        return value < 10 ? `0${value}` : `${value}`;
+    }
+
+    // Load saved level id and in-level snapshot.
     private loadSavedProgress(): { level: number; snapshot: ProgressSnapshot | null } {
         if (this.gameMode === 'activity') {
             const level = ProgressManager.loadActivityLevel();
@@ -378,6 +478,8 @@ export class GameCtrl extends Component {
         this.applyMahjongFramesForMode();
         this.gameState = 'ready';
         this.nowLevel = level;
+        this.randomPropButtonConsumedThisLevel = false;
+        this.randomPropLevelContextReady = true;
         this._guideTapCount = 0;
         this.levelDisplayName = this.gameMode === 'activity' ? `世界杯之旅 ${this.nowLevel + 1}` : `关卡${this.nowLevel}`;
         const openingToastText = this.getOpeningToastText(level, difficultyLevel);
@@ -389,8 +491,8 @@ export class GameCtrl extends Component {
             displayName: this.levelDisplayName,
             openingToastText,
         });
-        director.emit(Constants.eventNames.EventSetRandomPropButton, this.gameMode === 'main' && Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0);
-        // 随机道具(额外免费道具)按钮:仅在配置关卡显示。失败重开/重新进入会再走一遍 startLevel,按钮按关卡重新出现
+        this.refreshRandomPropButtonVisibility();
+        // Random share-prop button: config levels keep old behavior; experiment users get daily-limited entries.
         // 上报关卡进入事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
         //
@@ -1203,8 +1305,8 @@ export class GameCtrl extends Component {
         this.tipsActive = true;
         // 1=解锁槽位按钮,2=换牌按钮,随机选一个
         let tipsIndex = Math.random() < 0.5 ? 1 : 2;
-        if (Constants.showRandomPropButtonLevel.indexOf(this.nowLevel) >= 0) {
-            if (find("Canvas/gameLayer/down/button4").active) tipsIndex = 3
+        if (this.shouldShowRandomPropButton()) {
+            if (find("Canvas/gameLayer/down/button4")?.active) tipsIndex = 3
         }
         director.emit(Constants.eventNames.EventShowTipsAnimator, tipsIndex);
     };
@@ -3734,6 +3836,7 @@ export class GameCtrl extends Component {
         // 又命中这里重复触发。按钮是否隐藏仍取决于效果是否真正执行——执行不了只弹提示、按钮保留可重点。
         const propType = this.isFreePropState;
         this.isFreePropState = null;
+        const shouldCountExperimentUse = this.shouldCountExperimentSharePropUse();
 
         // propType:"0"=撤回,"1"=换牌,"2"=解锁槽位(由 UIGameLayer.onSetRandomPropButtonShow 随机贴图时写入)。
         // 额外免费道具:复用各自的 execute*,不扣次数、不看广告。效果当前无法执行时只弹提示、不消耗按钮。
@@ -3767,6 +3870,8 @@ export class GameCtrl extends Component {
         }
 
         // 成功执行了某个效果 -> 一次性道具,隐藏按钮(待用状态已在上面消费)
-        director.emit(Constants.eventNames.EventSetRandomPropButton, false);
+        if (shouldCountExperimentUse) this.addExperimentSharePropDailyCount();
+        this.randomPropButtonConsumedThisLevel = true;
+        this.refreshRandomPropButtonVisibility();
     }
 }

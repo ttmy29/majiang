@@ -40,6 +40,7 @@ export class ArchiveManager {
         StorageKey.SwitchCount,
         StorageKey.UnlockCount,
         StorageKey.FavoriteRewardDate,
+        StorageKey.ExperimentSharePropDaily,
         StorageKey.GlobalAdCount,
         StorageKey.LevelRetryCount,
         StorageKey.LeafConut,
