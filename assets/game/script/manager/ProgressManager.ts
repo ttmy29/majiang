@@ -105,7 +105,7 @@ export class ProgressManager {
         }));
     }
 
-    // —— 道具(撤回/换牌/解锁)剩余次数,永久保存,首次默认 1 ——
+    // —— 道具剩余次数,永久保存:撤回/换牌首次默认 1,解锁首次默认 0 ——
     static loadUndoCount(): number {
         return this.loadCount(StorageKey.UndoCount);
     }
@@ -123,7 +123,7 @@ export class ProgressManager {
     }
 
     static loadUnlockCount(): number {
-        return this.loadCount(StorageKey.UnlockCount);
+        return this.loadCount(StorageKey.UnlockCount, 0);
     }
 
     static saveUnlockCount(count: number): void {
@@ -452,11 +452,11 @@ export class ProgressManager {
         return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
     }
 
-    private static loadCount(key: StorageKey): number {
+    private static loadCount(key: StorageKey, defaultValue = 1): number {
         const raw = StorageManager.instance.getItem(key);
-        if (raw === null) return 1; // key 从未写过 => 首次默认 1
+        if (raw === null) return defaultValue; // key 从未写过 => 使用对应首次默认值
         const value = parseInt(raw, 10);
-        return Number.isFinite(value) && value >= 0 ? value : 1;
+        return Number.isFinite(value) && value >= 0 ? value : defaultValue;
     }
 
     private static saveCount(key: StorageKey, count: number): void {

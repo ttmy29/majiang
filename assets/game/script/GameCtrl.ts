@@ -148,7 +148,7 @@ export class GameCtrl extends Component {
     private shuffleAnimating = false;
     private slotFullInputLocked = false;
     private shuffleSeq = 0;
-    // 道具(撤回/换牌/解锁)剩余次数:>0 直接消耗使用,==0 时点击改为看广告 +3 补充。永久保存(ProgressManager)
+    // 道具剩余次数永久保存:撤回/换牌为 0 时看广告 +3;解锁为 0 时看广告直接解锁一次。
     private undoCount = 0;
     private switchCount = 0;
     private unlockCount = 0;
@@ -3312,7 +3312,7 @@ export class GameCtrl extends Component {
         director.emit(Constants.eventNames.EventSetUndoButtonStatus, empty);
     }
 
-    // 从本地存储读取三个道具的剩余次数(首次默认 1)
+    // 从本地存储读取三个道具的剩余次数
     private loadPropCounts() {
         this.undoCount = ProgressManager.loadUndoCount();
         this.switchCount = ProgressManager.loadSwitchCount();
@@ -3363,9 +3363,10 @@ export class GameCtrl extends Component {
         if (this.unlockCount <= 0) {
             SDKManager.instance.showVideoAd(() => {
                 this.bumpAdCount();
-                this.setUnlockCount(this.unlockCount + 3);
-                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
-                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
+                if (this.gameState !== 'playing' || box.unlocked) return;
+                window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
+                this.executeUnlock(box);
+                SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
             }, 'unlock');
