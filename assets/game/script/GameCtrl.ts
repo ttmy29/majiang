@@ -3627,16 +3627,15 @@ export class GameCtrl extends Component {
         }
 
         // 2. 覆盖 taskQueue (buildTaskQueue 已先填了原始队列)
-        this.taskQueue = snap.taskQueue.slice();
+        this.taskQueue = Array.isArray(snap.taskQueue) ? snap.taskQueue.map((id) => String(id)) : [];
 
         // 3. 还原每张牌的 type/collected/removed (type 可能被 shuffle 改过)
         for (const snapTile of snap.tiles) {
             const tile = lookup(snapTile);
             if (!tile) continue;
-            if (snapTile.type !== tile.type) {
-                tile.type = snapTile.type;
-                tile.item.setData(snapTile.type, tile.row, tile.col, tile.layer, this.iconFrames.get(snapTile.type) || null);
-            }
+            const restoredType = String(snapTile.type ?? tile.type);
+            tile.type = restoredType;
+            tile.item.setData(restoredType, tile.row, tile.col, tile.layer, this.iconFrames.get(restoredType) || null);
             tile.collected = snapTile.collected;
             tile.removed = snapTile.removed;
             tile.covered = !!snapTile.covered
@@ -3675,7 +3674,7 @@ export class GameCtrl extends Component {
             const snapProgress = typeof boxSnap.progress === 'number' && Number.isFinite(boxSnap.progress)
                 ? Math.floor(boxSnap.progress)
                 : 0;
-            box.type = boxSnap.type;
+            box.type = String(boxSnap.type ?? '');
             box.unlocked = boxSnap.unlocked;
             box.required = snapRequired;
             box.progress = Math.min(box.required, Math.max(snapProgress, boxSnap.tileKeys.length));

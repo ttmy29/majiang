@@ -291,6 +291,7 @@ export class MahjongItem extends Component {
         this.col = col;
         this.layer = layer;
         this.faceFrame = frame;
+        this.restoreRootOpacity();
 
         const sprite = this.iconNode.getComponent(Sprite);
         if (!sprite) return;
@@ -596,27 +597,10 @@ export class MahjongItem extends Component {
         const baseScale = this.getBoardScale();
         this.stopTouchTween();
 
-        // 牌身淡入:setPlayable 只创建 UIOpacity 不写 opacity,所以这里独占该通道,互不干扰
-        const opacity = this.node.getComponent(UIOpacity) || this.node.addComponent(UIOpacity);
-        opacity.opacity = 0;
-        Tween.stopAllByTarget(opacity);
-        tween(opacity)
-            .delay(delay)
-            .to(0.2, { opacity: 255 }, { easing: 'sineOut' })
-            .start();
-
-        // 阴影挂在层容器里、不是牌的子节点,牌身 UIOpacity 不会级联到它,
-        // 单独补一段同样的淡入,避免"阴影先现、牌后淡入"的割裂。保留它原有目标透明度。
-        if (this.shadowNode?.isValid && this.shadowNode.active) {
-            const shadowOpacity = this.shadowNode.getComponent(UIOpacity) || this.shadowNode.addComponent(UIOpacity);
-            const shadowTarget = shadowOpacity.opacity > 0 ? shadowOpacity.opacity : 255;
-            shadowOpacity.opacity = 0;
-            Tween.stopAllByTarget(shadowOpacity);
-            tween(shadowOpacity)
-                .delay(delay)
-                .to(0.2, { opacity: shadowTarget }, { easing: 'sineOut' })
-                .start();
-        }
+        // 读档恢复时阴影已经挂到独立 layer，不能先把牌根节点透明度打到 0。
+        // 否则切后台或重启流程打断 tween 后，会留下“只有阴影可见”的状态。
+        this.restoreRootOpacity();
+        this.restoreShadowOpacity();
 
         // 轻微缩放弹入:从 0.82 倍弹回原大小,backOut 带一点过冲营造"弹一下"的手感
         this.node.setScale(baseScale.x * 0.82, baseScale.y * 0.82, baseScale.z);
@@ -625,6 +609,20 @@ export class MahjongItem extends Component {
             .to(0.26, { scale: baseScale.clone() }, { easing: 'backOut' })
             .call(() => { this.touchTween = null; })
             .start();
+    }
+
+    private restoreRootOpacity() {
+        const opacity = this.node.getComponent(UIOpacity) || this.node.addComponent(UIOpacity);
+        Tween.stopAllByTarget(opacity);
+        opacity.opacity = 255;
+    }
+
+    private restoreShadowOpacity() {
+        if (!this.shadowNode?.isValid) return;
+        const opacity = this.shadowNode.getComponent(UIOpacity);
+        if (!opacity) return;
+        Tween.stopAllByTarget(opacity);
+        if (opacity.opacity <= 0) opacity.opacity = 255;
     }
 
     private stopTouchTween() {

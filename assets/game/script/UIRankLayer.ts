@@ -48,13 +48,29 @@ export class UIRankLayer extends Component {
     private static readonly FALLBACK_RANK_NICKNAME_KEY = 'mahjong_match_rank_fallback_nickname';
     private static readonly SERVER_RANK_DISPLAY_LIMIT = 100;
     private static readonly AVATAR_HEAD_BG_INSET = 8;
+    private static readonly VIRTUAL_RANK_BUFFER_ROWS = 2;
+    private static readonly RANK_SCROLLING_EVENT = 'scrolling';
+    private static readonly AVATAR_LOAD_DELAY_SECONDS = 0.08;
     private avatarFrameCache: Map<string, SpriteFrame> = new Map();
     private avatarFrameWaiters: Map<string, Array<(frame: SpriteFrame | null) => void>> = new Map();
+    private rankData: RankItemData[] = [];
+    private rankItemPool: Node[] = [];
+    private visibleRankItems: Map<number, Node> = new Map();
+    private virtualItemHeight = 0;
+    private virtualItemSpacingY = 0;
+    private virtualRowHeight = 1;
+    private visibleStartIndex = -1;
+    private visibleEndIndex = -1;
+    private rankScrollDirty = false;
+    private isRankScrolling = false;
+    private rankScrollIdleSeconds = 0;
+    private boundRankScrollView: ScrollView | null = null;
 
     protected onLoad(): void {
         this.initNodeRefs();
         this.recordTabDefaultSiblingIndexes();
         this.bindCloseButton();
+        this.bindRankScrollView();
         if (this.itemNode) this.itemNode.active = false;
         this.switchRankTab(this.nowIndex);
     }
@@ -71,13 +87,26 @@ export class UIRankLayer extends Component {
     }
 
     update(deltaTime: number) {
+        if (this.rankScrollDirty) {
+            this.rankScrollDirty = false;
+            this.updateVisibleRankItems(false);
+        }
 
+        if (this.isRankScrolling) {
+            this.rankScrollIdleSeconds -= deltaTime;
+            if (this.rankScrollIdleSeconds <= 0) {
+                this.isRankScrolling = false;
+                this.refreshVisibleRankAvatars();
+            }
+        }
     }
 
     protected onDestroy(): void {
         if (this.closeButtonNode?.isValid) {
             this.closeButtonNode.off(Button.EventType.CLICK, this.onButonCloseClick, this);
         }
+        this.unbindRankScrollView();
+        this.resetVirtualRankItems(true);
         this.postOpenDataMessage({ type: 'clear' });
         this.avatarFrameWaiters.clear();
         this.stopPopupTweens();
@@ -169,28 +198,201 @@ export class UIRankLayer extends Component {
     private renderRankList(index: number, rankData: RankItemData[]) {
         if (!this.contentNode || !this.itemNode) return;
 
+        this.nowIndex = index;
+        this.isRankScrolling = false;
         this.clearContentNode();
         this.itemNode.active = false;
-
-        for (const data of rankData) {
-            const item = instantiate(this.itemNode);
-            item.name = `item_${index}_${data.rank}`;
-            item.active = true;
-            item.setScale(new Vec3(1, 1, 1));
-            item.setPosition(0, 0, 0);
-            this.contentNode.addChild(item);
-            this.renderRankItem(item, data);
-        }
-
+        this.rankData = rankData;
+        this.prepareVirtualRankList(rankData.length);
         this.resizeContentNode(rankData.length);
-
-        const layout = this.contentNode.getComponent(Layout);
-        if (layout) layout.updateLayout(true);
 
         const scrollView = this.getScrollViewComponent();
         if (scrollView) {
             scrollView.scrollToTop(0);
         }
+        this.updateVisibleRankItems(true);
+        this.scheduleOnce(() => this.updateVisibleRankItems(true));
+    }
+
+    private prepareVirtualRankList(itemCount: number) {
+        const layout = this.contentNode?.getComponent(Layout);
+        if (layout) layout.enabled = false;
+
+        this.virtualItemHeight = this.getRankItemHeight();
+        this.virtualItemSpacingY = layout?.spacingY ?? 0;
+        this.virtualRowHeight = Math.max(1, this.virtualItemHeight + this.virtualItemSpacingY);
+        this.ensureRankItemPool(this.getVirtualPoolSize(itemCount));
+    }
+
+    private onRankScroll() {
+        this.isRankScrolling = true;
+        this.rankScrollIdleSeconds = 0.15;
+        this.rankScrollDirty = true;
+    }
+
+    private updateVisibleRankItems(force: boolean = false) {
+        if (!this.contentNode?.active) return;
+
+        const total = this.rankData.length;
+        if (total <= 0) {
+            this.resetVisibleRankItems();
+            return;
+        }
+
+        if (this.virtualRowHeight <= 0) {
+            this.virtualItemHeight = this.getRankItemHeight();
+            this.virtualRowHeight = Math.max(1, this.virtualItemHeight + this.virtualItemSpacingY);
+        }
+
+        const scrollOffsetY = this.getRankScrollOffsetY();
+        const viewHeight = this.getRankViewHeight();
+        const startIndex = Math.max(0, Math.floor(scrollOffsetY / this.virtualRowHeight) - UIRankLayer.VIRTUAL_RANK_BUFFER_ROWS);
+        const endIndex = Math.min(
+            total - 1,
+            Math.ceil((scrollOffsetY + viewHeight) / this.virtualRowHeight) + UIRankLayer.VIRTUAL_RANK_BUFFER_ROWS,
+        );
+
+        if (!force && startIndex === this.visibleStartIndex && endIndex === this.visibleEndIndex) return;
+
+        this.visibleStartIndex = startIndex;
+        this.visibleEndIndex = endIndex;
+        this.ensureRankItemPool(endIndex - startIndex + 1);
+
+        for (const [index, item] of this.visibleRankItems) {
+            if (index < startIndex || index > endIndex || force) {
+                this.recycleRankItem(item);
+                this.visibleRankItems.delete(index);
+            }
+        }
+
+        for (let index = startIndex; index <= endIndex; index++) {
+            let item = this.visibleRankItems.get(index);
+            if (!item?.isValid) {
+                item = this.getAvailableRankItem();
+                if (!item) continue;
+                this.visibleRankItems.set(index, item);
+                this.renderVirtualRankItem(item, index);
+                this.positionVirtualRankItem(item, index);
+                item.active = true;
+                continue;
+            }
+        }
+    }
+
+    private renderVirtualRankItem(item: Node, dataIndex: number) {
+        const data = this.rankData[dataIndex];
+        if (!data) return;
+
+        (item as any).__rankDataIndex = dataIndex;
+        this.renderRankItem(item, data);
+    }
+
+    private positionVirtualRankItem(item: Node, dataIndex: number) {
+        const y = -dataIndex * this.virtualRowHeight - this.virtualItemHeight * 0.5;
+        item.setPosition(0, y, 0);
+    }
+
+    private ensureRankItemPool(count: number) {
+        if (!this.contentNode || !this.itemNode) return;
+        const targetCount = Math.max(0, Math.floor(count));
+
+        while (this.rankItemPool.length < targetCount) {
+            const item = instantiate(this.itemNode);
+            item.name = `rankVirtualItem_${this.rankItemPool.length}`;
+            item.active = false;
+            item.setScale(new Vec3(1, 1, 1));
+            this.prepareRankItemNode(item);
+            this.contentNode.addChild(item);
+            this.rankItemPool.push(item);
+        }
+    }
+
+    private prepareRankItemNode(item: Node) {
+        const labelNames = ['num', 'name', 'count'];
+        for (const name of labelNames) {
+            const label = item.getChildByName(name)?.getComponent(Label);
+            if (label) label.cacheMode = Label.CacheMode.BITMAP;
+        }
+    }
+
+    private getAvailableRankItem(): Node | null {
+        for (const item of this.rankItemPool) {
+            if (!item?.isValid) continue;
+            if ((item as any).__rankDataIndex === undefined || (item as any).__rankDataIndex < 0) return item;
+        }
+        return null;
+    }
+
+    private recycleRankItem(item: Node) {
+        if (!item?.isValid) return;
+        item.active = false;
+        (item as any).__rankDataIndex = -1;
+        const avatarNode = item.getChildByName('avatar');
+        if (avatarNode) {
+            avatarNode.active = false;
+            (avatarNode as any).__rankAvatarUrl = '';
+            (avatarNode as any).__rankAvatarLoadToken = ((avatarNode as any).__rankAvatarLoadToken || 0) + 1;
+        }
+
+        const defaultHeadNode = item.getChildByName('defaultHead') || item.getChildByName('head');
+        if (defaultHeadNode) defaultHeadNode.active = true;
+    }
+
+    private resetVisibleRankItems() {
+        for (const item of this.visibleRankItems.values()) {
+            this.recycleRankItem(item);
+        }
+        this.visibleRankItems.clear();
+        this.visibleStartIndex = -1;
+        this.visibleEndIndex = -1;
+    }
+
+    private resetVirtualRankItems(destroyItems: boolean) {
+        this.resetVisibleRankItems();
+        this.rankData = [];
+        this.isRankScrolling = false;
+        this.rankScrollDirty = false;
+        this.rankScrollIdleSeconds = 0;
+
+        if (destroyItems) {
+            for (const item of this.rankItemPool) {
+                if (item?.isValid) {
+                    item.removeFromParent();
+                    item.destroy();
+                }
+            }
+            this.rankItemPool = [];
+        }
+    }
+
+    private getVirtualPoolSize(itemCount: number): number {
+        if (itemCount <= 0) return 0;
+
+        const viewHeight = this.getRankViewHeight();
+        const visibleCount = Math.ceil(viewHeight / Math.max(1, this.virtualRowHeight));
+        return Math.min(itemCount, visibleCount + UIRankLayer.VIRTUAL_RANK_BUFFER_ROWS * 2 + 2);
+    }
+
+    private getRankItemHeight(): number {
+        const itemTransform = this.itemNode?.getComponent(UITransform);
+        return Math.max(1, itemTransform?.contentSize.height ?? 1);
+    }
+
+    private getRankViewHeight(): number {
+        const scrollView = this.getActiveRankScrollView();
+        return scrollView?.view?.contentSize.height
+            ?? scrollView?.node.getComponent(UITransform)?.contentSize.height
+            ?? this.contentNode?.parent?.getComponent(UITransform)?.contentSize.height
+            ?? 0;
+    }
+
+    private getRankScrollOffsetY(): number {
+        const scrollView = this.getActiveRankScrollView();
+        if (!scrollView) return 0;
+
+        const offsetY = scrollView.getScrollOffset().y;
+        const maxOffsetY = scrollView.getMaxScrollOffset().y;
+        return Math.max(0, Math.min(offsetY, Math.max(0, maxOffsetY)));
     }
 
     private getServerRankName(index: number): string {
@@ -205,11 +407,13 @@ export class UIRankLayer extends Component {
     }
 
     private logServerRankResponse(index: number, rankName: string, board: JHRankBoard, entries: JHRankEntry[]) {
+        const topEntries = board?.topEntries || [];
         console.log('UIRankLayer: JH rank response', {
             tabIndex: index,
             rankName,
             myInfo: board?.myInfo || null,
-            topEntries: board?.topEntries || [],
+            topEntryCount: topEntries.length,
+            topEntrySample: topEntries.slice(0, 3),
             renderCount: entries.length,
         });
     }
@@ -447,11 +651,16 @@ export class UIRankLayer extends Component {
     private clearContentNode() {
         if (!this.contentNode) return;
 
+        this.resetVisibleRankItems();
+        this.rankData = [];
+
         for (const child of this.contentNode.children.slice()) {
             if (child === this.itemNode) continue;
             child.removeFromParent();
             child.destroy();
         }
+
+        this.rankItemPool = [];
     }
 
     private resizeContentNode(itemCount: number) {
@@ -460,10 +669,10 @@ export class UIRankLayer extends Component {
         if (!contentTransform || !itemTransform) return;
 
         const layout = this.contentNode.getComponent(Layout);
-        const spacingY = layout?.spacingY ?? 0;
-        const itemHeight = itemTransform.contentSize.height;
-        const listHeight = itemCount * itemHeight + Math.max(0, itemCount - 1) * spacingY;
-        const viewHeight = this.getScrollViewComponent()?.node.getComponent(UITransform)?.contentSize.height ?? 0;
+        const spacingY = this.virtualItemSpacingY > 0 ? this.virtualItemSpacingY : (layout?.spacingY ?? 0);
+        const itemHeight = this.virtualItemHeight > 0 ? this.virtualItemHeight : itemTransform.contentSize.height;
+        const listHeight = itemCount > 0 ? itemCount * itemHeight + Math.max(0, itemCount - 1) * spacingY : 0;
+        const viewHeight = this.getRankViewHeight();
         contentTransform.setContentSize(contentTransform.contentSize.width, Math.max(listHeight, viewHeight));
     }
 
@@ -530,28 +739,71 @@ export class UIRankLayer extends Component {
         if (headBgNode) headBgNode.active = true;
 
         const defaultHeadNode = item.getChildByName('defaultHead') || item.getChildByName('head');
+        if (defaultHeadNode) defaultHeadNode.active = true;
+
+        const url = this.normalizeRemoteAvatarUrl(avatarUrl);
+        const existingAvatarNode = item.getChildByName('avatar');
+        if (!url || this.isRankScrolling) {
+            if (existingAvatarNode) {
+                existingAvatarNode.active = false;
+                (existingAvatarNode as any).__rankAvatarUrl = url;
+                (existingAvatarNode as any).__rankAvatarLoadToken = ((existingAvatarNode as any).__rankAvatarLoadToken || 0) + 1;
+            }
+            return;
+        }
+
         const defaultHeadSprite = defaultHeadNode?.getComponent(Sprite);
         const defaultFrame = defaultHeadSprite?.spriteFrame || null;
-        if (defaultHeadNode) defaultHeadNode.active = false;
-
         const avatarNode = this.getOrCreateAvatarNode(item, headBgNode || defaultHeadNode, defaultFrame);
         const sprite = avatarNode?.getComponent(Sprite);
         if (!avatarNode || !sprite) return;
 
-        avatarNode.active = true;
+        (avatarNode as any).__rankAvatarUrl = url;
         sprite.sizeMode = Sprite.SizeMode.CUSTOM;
 
-        const url = this.normalizeRemoteAvatarUrl(avatarUrl);
-        if (!url) return;
+        const cachedFrame = this.avatarFrameCache.get(url);
+        if (cachedFrame) {
+            if (defaultHeadNode) defaultHeadNode.active = false;
+            avatarNode.active = true;
+            sprite.spriteFrame = cachedFrame;
+            return;
+        }
 
-        (avatarNode as any).__rankAvatarUrl = url;
-        this.loadAvatarSpriteFrame(url, (frame) => {
-            if (!frame || !avatarNode.isValid || (avatarNode as any).__rankAvatarUrl !== url) return;
-            const currentSprite = avatarNode.getComponent(Sprite);
-            if (!currentSprite) return;
-            currentSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-            currentSprite.spriteFrame = frame;
-        });
+        avatarNode.active = false;
+
+        const loadToken = ((avatarNode as any).__rankAvatarLoadToken || 0) + 1;
+        (avatarNode as any).__rankAvatarLoadToken = loadToken;
+        this.scheduleOnce(() => {
+            if (!avatarNode.isValid
+                || (avatarNode as any).__rankAvatarLoadToken !== loadToken
+                || (avatarNode as any).__rankAvatarUrl !== url) {
+                return;
+            }
+
+            this.loadAvatarSpriteFrame(url, (frame) => {
+                if (!frame
+                    || !avatarNode.isValid
+                    || (avatarNode as any).__rankAvatarLoadToken !== loadToken
+                    || (avatarNode as any).__rankAvatarUrl !== url) {
+                    return;
+                }
+                const currentSprite = avatarNode.getComponent(Sprite);
+                if (!currentSprite) return;
+                currentSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+                currentSprite.spriteFrame = frame;
+                avatarNode.active = true;
+                if (defaultHeadNode?.isValid) defaultHeadNode.active = false;
+            });
+        }, UIRankLayer.AVATAR_LOAD_DELAY_SECONDS);
+    }
+
+    private refreshVisibleRankAvatars() {
+        for (const [index, item] of this.visibleRankItems.entries()) {
+            if (!item?.isValid || !item.active) continue;
+            const data = this.rankData[index];
+            if (!data) continue;
+            this.setAvatar(item, data.avatar);
+        }
     }
 
     private getOrCreateAvatarNode(item: Node, referenceNode: Node | null, defaultFrame: SpriteFrame | null): Node {
@@ -581,7 +833,7 @@ export class UIRankLayer extends Component {
         avatarTransform.setAnchorPoint(0.5, 0.5);
         avatarTransform.setContentSize(width, height);
         avatarSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-        if (defaultFrame) avatarSprite.spriteFrame = defaultFrame;
+        avatarSprite.spriteFrame = defaultFrame;
 
         return avatarNode;
     }
@@ -693,6 +945,27 @@ export class UIRankLayer extends Component {
             || this.findChildByName(this.scrollViewNode, 'scrollView')?.getComponent(ScrollView)
             || this.findChildByName(this.node, 'scrollView')?.getComponent(ScrollView)
             || null;
+    }
+
+    private getActiveRankScrollView(): ScrollView | null {
+        return this.boundRankScrollView?.isValid ? this.boundRankScrollView : this.getScrollViewComponent();
+    }
+
+    private bindRankScrollView() {
+        const scrollView = this.getScrollViewComponent();
+        if (!scrollView || this.boundRankScrollView === scrollView) return;
+
+        this.unbindRankScrollView();
+        this.boundRankScrollView = scrollView;
+        scrollView.node.off(UIRankLayer.RANK_SCROLLING_EVENT, this.onRankScroll, this);
+        scrollView.node.on(UIRankLayer.RANK_SCROLLING_EVENT, this.onRankScroll, this);
+    }
+
+    private unbindRankScrollView() {
+        if (this.boundRankScrollView?.node?.isValid) {
+            this.boundRankScrollView.node.off(UIRankLayer.RANK_SCROLLING_EVENT, this.onRankScroll, this);
+        }
+        this.boundRankScrollView = null;
     }
 
     private bindCloseButton() {
