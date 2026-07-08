@@ -205,7 +205,7 @@ export class GameCtrl extends Component {
     private randomPropLevelContextReady = false;
 
     start() {
-        this.requestSharePropExperimentInfo();
+        //this.requestSharePropExperimentInfo();
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
         director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
         director.on(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
