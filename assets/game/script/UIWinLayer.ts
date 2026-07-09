@@ -1,4 +1,4 @@
-import { _decorator, Component, director, Label, Node, sys, tween, UIOpacity, v3, Vec3 } from 'cc';
+import { _decorator, Component, director, Label, Node, sys, tween, UIOpacity, v3, Vec3, Widget } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
@@ -95,6 +95,9 @@ export class UIWinLayer extends Component {
         tween(target)
             .to(0.35, { scale: new Vec3(1.05, 1.05, 1) }, { easing: 'sineOut' })
             .to(0.15, { scale: new Vec3(1, 1, 1) }, { easing: 'sineInOut' })
+            .call(() => {
+                this.refreshOpenAnimationWidgets(target);
+            })
             .start();
 
         if (maskOpacity) {
@@ -102,6 +105,38 @@ export class UIWinLayer extends Component {
                 .to(0.5, { opacity: 255 }, { easing: 'sineOut' })
                 .start();
         }
+    }
+
+    private refreshOpenAnimationWidgets(target: Node) {
+        this.refreshWinWidgetNodes(target);
+        this.scheduleOnce(() => {
+            this.refreshWinWidgetNodes(target);
+        }, 0);
+    }
+
+    private refreshWinWidgetNodes(target: Node) {
+        if (!this.node?.isValid) return;
+
+        this.refreshWidget(target);
+        this.refreshWidget(this.iqLabel?.node);
+        this.refreshWidget(this.findChildByName(target, 'ye'));
+    }
+
+    private refreshWidget(node: Node | null | undefined) {
+        if (!node?.isValid) return;
+        node.getComponent(Widget)?.updateAlignment();
+    }
+
+    private findChildByName(parent: Node | null | undefined, name: string): Node | null {
+        if (!parent?.isValid) return null;
+        if (parent.name === name) return parent;
+
+        for (const child of parent.children) {
+            const result = this.findChildByName(child, name);
+            if (result) return result;
+        }
+
+        return null;
     }
 
     private playCloseAnimation() {
