@@ -439,7 +439,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": -0.439,
-      "y": 6.853,
+      "y": 3.8529999999999998,
       "z": 0
     },
     "_lrot": {
@@ -479,8 +479,8 @@
     },
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 228.35888671875,
-      "height": 89.9
+      "width": 306.33203125,
+      "height": 118.88
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -518,10 +518,10 @@
     "_string": "关卡 88",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
-    "_actualFontSize": 65,
-    "_fontSize": 65,
+    "_actualFontSize": 88,
+    "_fontSize": 88,
     "_fontFamily": "Arial",
-    "_lineHeight": 65,
+    "_lineHeight": 88,
     "_overflow": 0,
     "_enableWrapText": true,
     "_font": null,
