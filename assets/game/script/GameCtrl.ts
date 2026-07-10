@@ -196,7 +196,7 @@ export class GameCtrl extends Component {
     private static readonly TIPS_TYPE_IRON: TipsType = 1;
     private static readonly TIPS_TYPE_COVER: TipsType = 2;
     private static readonly TIPS_TYPE_ROPE: TipsType = 3;
-    private static readonly SHARE_PROP_EXPT_KEY = 'expt_1783495675';
+    private static readonly SHARE_PROP_EXPT_KEY = 'expt_1783480921';
     private static readonly SHARE_PROP_EXPT_GROUP_VALUE = '1';
     private static readonly SHARE_PROP_EXPT_DAILY_LIMIT = 2;
     private sharePropExperimentRequested = false;
@@ -2448,10 +2448,9 @@ export class GameCtrl extends Component {
             return true;
         }
 
-        const taskIndex = this.taskQueue.indexOf(type);
-        if (taskIndex < 0) return false;
-        this.taskQueue.splice(taskIndex, 1);
-        return true;
+        // 保持全局任务队列顺序:挂起牌不要从未来队列里插队消耗,
+        // 等对应 type 按 FIFO 正常出现在目标槽时再回收。
+        return false;
     }
 
     // ==========================================
@@ -2640,26 +2639,7 @@ export class GameCtrl extends Component {
 
     // 严格按 task[] 顺序出队:队列空了 box.type='' 返回 false,上层会把槽位标记 movedOut
     private assignNewTarget(box: TargetBox): boolean {
-        let type = '';
-
-        const urgentTypes = new Set<string>();
-        for (const tile of this.discardedTiles) {
-            if (tile.node?.isValid) urgentTypes.add(tile.type);
-        }
-        for (const tile of this.slots) {
-            if (tile.node?.isValid) urgentTypes.add(tile.type);
-        }
-
-        for (const urgentType of urgentTypes) {
-            const taskIndex = this.taskQueue.indexOf(urgentType);
-            if (taskIndex < 0) continue;
-            type = this.taskQueue.splice(taskIndex, 1)[0];
-            break;
-        }
-
-        if (!type) {
-            type = this.taskQueue.shift() || '';
-        }
+        const type = this.taskQueue.shift() || '';
 
         this.emitClearSlot(box);
         box.type = type;
