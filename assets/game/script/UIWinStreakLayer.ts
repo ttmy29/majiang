@@ -653,8 +653,8 @@ export class UIWinStreakLayer extends Component {
         if (!content?.isValid) return;
 
         // prefab 中 line43 是 45 胜的备用表现，最终节点统一使用 content/top。
-        const alternateFinal = content.getChildByName('line43');
-        if (alternateFinal?.isValid) alternateFinal.active = false;
+        //const alternateFinal = content.getChildByName('line43');
+        //if (alternateFinal?.isValid) alternateFinal.active = false;
 
         for (const child of content.children) {
             const match = /^line(\d+)$/.exec(child.name);
