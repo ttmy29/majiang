@@ -1,10 +1,11 @@
-import { _decorator, Component, EventMouse, Node, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Component, director, EventMouse, Node, tween, UIOpacity, Vec3 } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
 import { ProgressManager } from './manager/ProgressManager';
 import { Utils } from './util/Utils';
 import { getCurrentGameMode } from './config/GameMode';
+import { Constants } from './config/Constants';
 const { ccclass, property } = _decorator;
 
 @ccclass('UISetingLayer')
@@ -146,11 +147,11 @@ export class UISetingLayer extends Component {
         if (getCurrentGameMode() === 'activity') {
             ProgressManager.clearActivitySnapshot();
         } else {
+            director.emit(Constants.eventNames.EventMainLevelGiveUp);
             ProgressManager.clearSnapshot();
         }
         LayerManager.instance.showStartLayer();
     }
 
 }
-
 

@@ -44,6 +44,17 @@ export class LayerManager {
     public initToastPrefab(prefab: Prefab): void {
         this._toastPrefab = prefab;
     }
+
+    public hasUI(uiName: string): boolean {
+        return this._uiPrefabs.has(uiName);
+    }
+
+    public getOpenUI(uiName: string): Node | null {
+        const uiLayer = this._layers.get(LayerType.UI);
+        if (!uiLayer) return null;
+
+        return uiLayer.children.find((child) => child.isValid && child.name === uiName) || null;
+    }
     /**
          * 根据预制体名称显示 UI
          * @param uiName 预制体名称（即 constants.prefab 中的文件名，例如 'setting'）

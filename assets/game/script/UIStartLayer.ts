@@ -1,4 +1,4 @@
-import { _decorator, Component, director, EventTouch, Label, Node, sp, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
+import { _decorator, Component, director, EventTouch, Label, Node, sp, Sprite, SpriteFrame, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { Constants } from './config/Constants';
 import { GameMode, setCurrentGameMode } from './config/GameMode';
 import { ensureActivityLevelJson, ensureLevelJson, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
@@ -61,6 +61,10 @@ export class UIStartLayer extends Component {
     signNode: Node = null!;
     @property(Node)
     startNode: Node = null!;
+    @property(Sprite)
+    tierIcon: Sprite = null!;
+    @property({ type: [SpriteFrame] })
+    tierSpriteArr: SpriteFrame[] = [];
     private enteringGame = false;
     private hasStarted = false;
     private logoOriginScale: Vec3 | null = null;
@@ -68,6 +72,7 @@ export class UIStartLayer extends Component {
     private uiNodeTargetOpacity: Map<Node, number> = new Map();
     private wxGameClubBtn: any = null;
     private favoriteRewardToastRetryCount = 0;
+    private dailySignPopupOpening = false;
 
     protected onLoad(): void {
         ProgressManager.initSignUserState();
@@ -88,6 +93,10 @@ export class UIStartLayer extends Component {
         director.on(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
         director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
         director.on(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
+        director.off(Constants.eventNames.EventUIPrefabsReady, this.onUIPrefabsReady, this);
+        director.on(Constants.eventNames.EventUIPrefabsReady, this.onUIPrefabsReady, this);
+        director.off(Constants.eventNames.EventWinStreakStartGame, this.onEventWinStreakStartGame, this);
+        director.on(Constants.eventNames.EventWinStreakStartGame, this.onEventWinStreakStartGame, this);
         this.enteringGame = false;
         this.refreshSignNodeVisible();
         this.refreshStartNodeState();
@@ -101,6 +110,7 @@ export class UIStartLayer extends Component {
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.show();
         if (this.hasStarted) this.scheduleFavoriteRewardCheck();
+        this.tryShowDailySignPopup();
     }
 
     protected onDisable(): void {
@@ -111,6 +121,7 @@ export class UIStartLayer extends Component {
         director.off("gameBack", this.onGameBack, this);
         director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
         director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
+        director.off(Constants.eventNames.EventWinStreakStartGame, this.onEventWinStreakStartGame, this);
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.hide();
     }
@@ -123,6 +134,8 @@ export class UIStartLayer extends Component {
         director.off("gameBack", this.onGameBack, this);
         director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
         director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
+        director.off(Constants.eventNames.EventUIPrefabsReady, this.onUIPrefabsReady, this);
+        director.off(Constants.eventNames.EventWinStreakStartGame, this.onEventWinStreakStartGame, this);
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.destroy();
     }
@@ -137,6 +150,15 @@ export class UIStartLayer extends Component {
 
     private onSignInUpdate = () => {
         this.refreshSignNodeVisible();
+    };
+
+    private onUIPrefabsReady = () => {
+        this.tryShowDailySignPopup();
+    };
+
+    private onEventWinStreakStartGame = () => {
+        if (this.enteringGame) return;
+        void this.enterGame('main');
     };
 
     start() {
@@ -157,6 +179,7 @@ export class UIStartLayer extends Component {
         }
 
         this.scheduleFavoriteRewardCheck();
+        this.tryShowDailySignPopup();
     }
 
     update(deltaTime: number) {
@@ -348,9 +371,23 @@ export class UIStartLayer extends Component {
                 return;
             }
             LayerManager.instance.showGameLayer();
+            this.tryShowDailySignPopup();
         } finally {
             this.enteringGame = false;
         }
+    }
+
+    private tryShowDailySignPopup() {
+        if (this.dailySignPopupOpening) return;
+        if (!ProgressManager.shouldAutoShowDailySignToday()) return;
+        if (!LayerManager.instance.hasUI("signDaily")) return;
+
+        this.dailySignPopupOpening = !!this.openSignDailyPopup();
+    }
+
+    private openSignDailyPopup(): Node | null {
+        return LayerManager.instance.getOpenUI("signDaily")
+            || LayerManager.instance.showUI("signDaily");
     }
 
     private uploadRankDataForStartButtonTest(): void {
@@ -400,6 +437,17 @@ export class UIStartLayer extends Component {
         AudioManager.instance.playClick();
         LayerManager.instance.showUI("sign");
     }
+
+    onClickSignDailyButton() {
+        AudioManager.instance.playClick();
+        this.openSignDailyPopup();
+    }
+
+    onClickWinStreakButton() {
+        AudioManager.instance.playClick();
+        LayerManager.instance.showUI("winStreak");
+    }
+
     private refreshWarmupWindow() {
         const level = ProgressManager.loadLevel();
         void warmupForwardWindow(level, 10);
@@ -409,22 +457,54 @@ export class UIStartLayer extends Component {
     }
 
     private refreshStartNodeState() {
+        const levelRecord = ProgressManager.loadLevel();
         if (!this.startNode?.isValid) return;
 
-        const levelRecord = ProgressManager.loadLevel();
         const hasLevelRecord = levelRecord > 0;
 
         const sprite1 = this.startNode.getChildByName('sprite1');
         const sprite2 = this.startNode.getChildByName('sprite2');
+        const tierIcon = this.tierIcon || this.startNode.getChildByName('tierIcon')?.getComponent(Sprite);
         const label1 = this.startNode.getChildByName('label1');
         const label2 = this.startNode.getChildByName('label2');
 
         if (sprite1?.isValid) sprite1.active = !hasLevelRecord;
         if (sprite2?.isValid) sprite2.active = hasLevelRecord;
+        if (tierIcon?.node?.isValid) {
+            tierIcon.node.active = hasLevelRecord;
+            if (hasLevelRecord) this.refreshTierIcon(levelRecord, tierIcon);
+        }
 
         const levelText = hasLevelRecord ? `关卡 ${levelRecord}` : '';
         this.setStartLevelLabel(label1, levelText, hasLevelRecord);
         this.setStartLevelLabel(label2, levelText, hasLevelRecord);
+    }
+
+    private refreshTierIcon(level: number, tierIcon: Sprite) {
+        const normalizedLevel = Math.max(1, Math.floor(Number(level) || 1));
+        const rankCount = Math.min(this.tierSpriteArr.length, Constants.rankStartLevels.length);
+        if (rankCount <= 0) {
+            tierIcon.node.active = false;
+            return;
+        }
+
+        let rankIndex = 0;
+
+        for (let i = rankCount - 1; i >= 0; i--) {
+            if (normalizedLevel >= Constants.rankStartLevels[i]) {
+                rankIndex = i;
+                break;
+            }
+        }
+
+        const spriteFrame = this.tierSpriteArr[rankIndex];
+        if (!spriteFrame) {
+            tierIcon.node.active = false;
+            return;
+        }
+
+        tierIcon.sizeMode = Sprite.SizeMode.TRIMMED;
+        tierIcon.spriteFrame = spriteFrame;
     }
 
     private refreshLeafConutLabel() {

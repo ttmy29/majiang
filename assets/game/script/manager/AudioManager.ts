@@ -6,6 +6,7 @@ const { ccclass } = _decorator;
 
 export enum AudioClipNames {
     Click = 'button_sound',//按钮点击
+    close_door = 'close_door', //关闭门
     mahjongClick = 'mj_up', //麻将点击
     pageOpen = 'pageopen_sound', //页面打开
     gaigaizi = 'gaigaizi', //盖子合上的音效
@@ -23,8 +24,7 @@ export enum AudioClipNames {
     combo_level5 = 'taiqiangle5', //5_真厉害
     combo_level6 = 'yingmale6', // 6_太棒了
     combo_level7 = 'wudile7', //7_绝绝子
-    open_door = 'open_door', //打开门
-    close_door = 'close_door', //关闭门
+    open_door = 'open_door' //打开门
 }
 
 export type AudioClipName = AudioClipNames | string | number;

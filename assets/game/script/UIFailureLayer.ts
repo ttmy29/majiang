@@ -4,6 +4,7 @@ import { Constants } from './config/Constants';
 import { getCurrentGameMode } from './config/GameMode';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
+import { StreakManager } from './manager/StreakManager';
 import { SDKManager } from '../../loading/SDKManager';
 
 const { ccclass, property } = _decorator;
@@ -54,6 +55,8 @@ export class UIFailureLayer extends Component {
 
     init(isMax: boolean = false, soltNode: Node = null) {
         this.isMax = isMax;
+        const restartConfirmNode = this.getRestartConfirmNode();
+        if (restartConfirmNode) restartConfirmNode.active = false;
         // opentype 非空 = 槽位全部已解锁，切到"清空底部 slot"模式:隐藏默认图标、显示 slot 占位,
         //   并记下底部 slot 节点供 start() 把牌摆过来。
         // opentype 为空 = 还有未解锁槽位，沿用 prefab 默认文案("继续游戏并解锁一个新盒子?")
@@ -145,14 +148,32 @@ export class UIFailureLayer extends Component {
         this.playCloseAnimation();
         // 关失败弹窗回主菜单 = 放弃本局 → 清掉中途快照,下次从这关 fresh 开始
         if (getCurrentGameMode() === 'activity') ProgressManager.clearActivitySnapshot();
-        else ProgressManager.clearSnapshot();
+        else {
+            director.emit(Constants.eventNames.EventMainLevelGiveUp);
+            ProgressManager.clearSnapshot();
+        }
         LayerManager.instance.showStartLayer();
     }
 
     onButtonRestartClick() {
         AudioManager.instance.playClick();
+
+        const restartConfirmNode = this.getRestartConfirmNode();
+        if (getCurrentGameMode() === 'main'
+            && StreakManager.getStreak() > 0
+            && restartConfirmNode
+            && !restartConfirmNode.active) {
+            restartConfirmNode.active = true;
+            return;
+        }
+
         director.emit(Constants.eventNames.EventFailureRestart);
         this.playCloseAnimation();
+    }
+
+    private getRestartConfirmNode(): Node | null {
+        const gameFrame = this.viewNode?.getChildByName('Game_frame');
+        return gameFrame?.getChildByName('frame_3') ?? null;
     }
 
     onButtonContinueClick() {

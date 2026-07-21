@@ -2,72 +2,377 @@ import { StorageKey, StorageManager } from './StorageManager';
 import { ArchiveManager } from './ArchiveManager';
 import { Constants } from '../config/Constants';
 import { getAvailableBoardIds, LevelTier } from '../config/LevelJsonLoader';
+import { ProgressManager } from './ProgressManager';
 
-// 一次开局的方案：要用哪个难度档(tier) + 要加载哪个盘面(boardId)。
 export interface LevelStartPlan {
     tier: LevelTier;
     boardId: number;
 }
 
-// 当前关已分配的方案 + 是否失败过。用于重进/重开保持同一盘面(快照可命中)、支撑 failed 标记。
 interface LevelDiffState {
-    level: number;     // 进度关号(nowLevel)
+    level: number;
     tier: LevelTier;
-    boardId: number;   // 实际加载的盘面 id（难度池模式下与关号解耦）
+    boardId: number;
+    /** 仅为兼容已有存档保留，不再影响复活后的胜利结算。 */
     failed: boolean;
 }
 
-const fixedBaseLevelIds = new Set<number>([15]);
+export type WinStreakRewardType = 'switch' | 'leaf' | 'undo' | 'unlock';
+
+export interface WinStreakRewardConfig {
+    threshold: number;
+    type: WinStreakRewardType;
+    amount: number;
+    /** 1 铜、2 银、3/4 红。原资源中的 4 也映射到红宝箱。 */
+    boxType: 1 | 2 | 3 | 4;
+}
+
+export interface WinStreakViewState {
+    /** 排行榜与动态难度使用的真实连续胜场。 */
+    streak: number;
+    /** 当前 72 小时奖励轨道进度。 */
+    progress: number;
+    /** 已到达的最近奖励节点，未到首节点时为 0。 */
+    checkpoint: number;
+    previousThreshold: number;
+    nextThreshold: number;
+    nextReward: WinStreakRewardConfig;
+    remainingSeconds: number;
+    completed: boolean;
+    cycleStartedAt: number;
+}
+
+export interface WinStreakSettlement {
+    before: WinStreakViewState;
+    after: WinStreakViewState;
+    displayFrom: number;
+    displayTo: number;
+    displayProgressBefore: number;
+    displayProgressAfter: number;
+    displayReward: WinStreakRewardConfig;
+    claimableRewards: WinStreakRewardConfig[];
+}
+
+interface StoredWinStreakRewardState {
+    version: 1;
+    startTime: number;
+    progress: number;
+    claimedThresholds: number[];
+}
+
+const REWARD_STATE_VERSION = 1 as const;
+const REWARD_CYCLE_SECONDS = 72 * 60 * 60;
+const MAIN_LEVEL_START = 1;
+
+const REWARD_CONFIGS: ReadonlyArray<Readonly<WinStreakRewardConfig>> = [
+    { threshold: 3, type: 'switch', amount: 1, boxType: 1 },
+    { threshold: 6, type: 'leaf', amount: 20, boxType: 1 },
+    { threshold: 10, type: 'undo', amount: 2, boxType: 2 },
+    { threshold: 13, type: 'undo', amount: 2, boxType: 2 },
+    { threshold: 16, type: 'leaf', amount: 20, boxType: 2 },
+    { threshold: 20, type: 'switch', amount: 2, boxType: 2 },
+    { threshold: 25, type: 'unlock', amount: 1, boxType: 3 },
+    { threshold: 28, type: 'switch', amount: 1, boxType: 1 },
+    { threshold: 32, type: 'leaf', amount: 50, boxType: 2 },
+    { threshold: 35, type: 'switch', amount: 2, boxType: 2 },
+    { threshold: 40, type: 'switch', amount: 2, boxType: 2 },
+    { threshold: 45, type: 'leaf', amount: 100, boxType: 4 },
+];
 
 function isLevelTier(value: unknown): value is LevelTier {
     return value === 'base' || value === 'easy' || value === 'normal' || value === 'hard';
 }
 
-/**
- * 连胜值难度分档 + 难度池出题（单例静态类）。
- *
- * 规则（见需求 / Constants.WinStreak）：
- *  - 前 StartLevel-1 关：固定基础盘面(base)，盘面 id = 关号，不进池不去重。
- *  - StartLevel(11) 关起：按连胜值摇难度档(简单/普通/困难)；
- *    · 难度池开启：从 [StartLevel..PoolMaxLevel] 里随机抽一个「没玩过」的盘面，关号仅作进度计数；
- *      全部玩过后重置循环。盘面去重按盘面号(跨难度)。
- *    · 失败重开：按已清零的连胜重摇难度档，并从该档重新抽一个实际存在的盘面。
- *  - 失败(进入 fail 状态) → 连胜清零 + 本关标记 failed(之后复活/重开通关也不 +1)。
- *  - 每天清零(客户端本地日期)。通关(含复活后) → 记该盘面为已玩；干净通关(未失败) → 连胜 +1。
- *
- * 持久化走 StorageManager(localStorage)，并通过 ArchiveManager 同步云端（含已玩盘面 id 集合）。
- */
+function cloneReward(config: Readonly<WinStreakRewardConfig>): WinStreakRewardConfig {
+    return { ...config };
+}
+
+function clamp01(value: number): number {
+    return Math.max(0, Math.min(1, value));
+}
+
+/** 真实连胜、72 小时奖励轨道和动态难度盘面分配。 */
 export class StreakManager {
-    // —— 连胜值 ——
     static getStreak(): number {
         const raw = StorageManager.instance.getItem(StorageKey.WinStreak);
         if (raw === null) return 0;
         const value = parseInt(raw, 10);
-        return Number.isFinite(value) && value >= 0 ? value : 0;
+        return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
     }
 
     static setStreak(value: number): void {
         StorageManager.instance.setItem(StorageKey.WinStreak, Math.max(0, Math.floor(value)));
     }
 
-    // —— 本地日期 YYYY-MM-DD ——
-    private static todayStr(): string {
-        const d = new Date();
-        const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    /** 旧版本入口保留，真实连续胜场不再按自然日清零。 */
+    static applyDailyResetIfNeeded(): void {
+        // WinStreakDate 故意保留在存档中，避免升级时破坏已有云存档。
     }
 
-    // 跨天则连胜清零并把日期推进到今天。每次进关(resolveLevelPlanForStart)前自动调用，幂等。
-    static applyDailyResetIfNeeded(): void {
-        const today = this.todayStr();
-        const last = StorageManager.instance.getItem(StorageKey.WinStreakDate);
-        if (last === today) return;
+    static getRewardConfigs(): WinStreakRewardConfig[] {
+        return REWARD_CONFIGS.map(cloneReward);
+    }
+
+    static getRewardAt(threshold: number): WinStreakRewardConfig | null {
+        const config = REWARD_CONFIGS.find((item) => item.threshold === threshold);
+        return config ? cloneReward(config) : null;
+    }
+
+    static getClaimableRewards(nowUnixSeconds = this.nowUnixSeconds()): WinStreakRewardConfig[] {
+        return this.getClaimableRewardsForState(this.loadRewardState(nowUnixSeconds));
+    }
+
+    static getRewardName(type: WinStreakRewardType): string {
+        switch (type) {
+            case 'switch': return '换牌';
+            case 'leaf': return '叶子';
+            case 'undo': return '撤回';
+            case 'unlock': return '解锁';
+        }
+    }
+
+    static getRewardDescription(config: WinStreakRewardConfig): string {
+        return `${this.getRewardName(config.type)} ×${config.amount}`;
+    }
+
+    static formatRemainingTime(seconds: number): string {
+        const safe = Math.max(0, Math.floor(seconds));
+        const hours = Math.floor(safe / 3600);
+        const minutes = Math.floor((safe % 3600) / 60);
+        const secs = safe % 60;
+        const pad = (value: number) => value < 10 ? `0${value}` : `${value}`;
+        return `${pad(hours)}:${pad(minutes)}:${pad(secs)}`;
+    }
+
+    /**
+     * 获取奖励轨道视图。可选 nowUnixSeconds 便于精确验证 0/-1 秒边界。
+     * 只有剩余时间严格小于 0 才开启新周期；恰好 0 秒仍属于旧周期。
+     */
+    static getRewardViewState(nowUnixSeconds = this.nowUnixSeconds()): WinStreakViewState {
+        const stored = this.loadRewardState(nowUnixSeconds);
+        return this.createRewardViewState(stored, nowUnixSeconds);
+    }
+
+    private static createRewardViewState(
+        stored: StoredWinStreakRewardState,
+        nowUnixSeconds: number,
+    ): WinStreakViewState {
+        const remaining = stored.startTime + REWARD_CYCLE_SECONDS - nowUnixSeconds;
+        const progress = stored.progress;
+        const checkpoint = this.getCheckpoint(progress);
+        const next = REWARD_CONFIGS.find((item) => item.threshold > progress)
+            ?? REWARD_CONFIGS[REWARD_CONFIGS.length - 1];
+
+        return {
+            streak: this.getStreak(),
+            progress,
+            checkpoint,
+            previousThreshold: checkpoint,
+            nextThreshold: next.threshold,
+            nextReward: cloneReward(next),
+            remainingSeconds: Math.max(0, Math.floor(remaining)),
+            completed: progress >= REWARD_CONFIGS[REWARD_CONFIGS.length - 1].threshold,
+            cycleStartedAt: stored.startTime,
+        };
+    }
+
+    /** 主线通关结算；活动关和引导关返回 null 且不修改任何连胜状态。 */
+    static commitClear(level: number): WinStreakSettlement | null {
+        const saved = this.loadDiffState();
+        if (level >= Constants.WinStreak.StartLevel) {
+            const boardId = (saved && saved.level === level) ? saved.boardId : level;
+            this.markBoardPlayed(boardId);
+        }
+        if (level < MAIN_LEVEL_START) return null;
+
+        const now = this.nowUnixSeconds();
+        const storedBefore = this.loadRewardState(now);
+        const before = this.createRewardViewState(storedBefore, now);
+        this.setStreak(this.getStreak() + 1);
+
+        const maxProgress = REWARD_CONFIGS[REWARD_CONFIGS.length - 1].threshold;
+        const nextProgress = Math.min(maxProgress, before.progress + 1);
+        const rewardState: StoredWinStreakRewardState = {
+            version: REWARD_STATE_VERSION,
+            startTime: before.cycleStartedAt,
+            progress: nextProgress,
+            claimedThresholds: storedBefore.claimedThresholds.slice(),
+        };
+        this.saveRewardState(rewardState);
+
+        const claimableRewards = this.getClaimableRewardsForState(rewardState);
+
+        const after = this.createRewardViewState(rewardState, now);
+        const reachedReward = claimableRewards[0] ?? null;
+        const displayReward = reachedReward ?? after.nextReward;
+        const displayTo = displayReward.threshold;
+        const previousConfig = [...REWARD_CONFIGS]
+            .reverse()
+            .find((item) => item.threshold < displayTo);
+        const displayFrom = previousConfig?.threshold ?? 0;
+        const span = Math.max(1, displayTo - displayFrom);
+
+        ArchiveManager.instance.scheduleUpload();
+        return {
+            before,
+            after,
+            displayFrom,
+            displayTo,
+            displayProgressBefore: clamp01((before.progress - displayFrom) / span),
+            displayProgressAfter: clamp01((after.progress - displayFrom) / span),
+            displayReward: cloneReward(displayReward),
+            claimableRewards: claimableRewards.map(cloneReward),
+        };
+    }
+
+    /**
+     * 领取已经达到、但尚未发放的连胜奖励。按奖励节点持久化去重，可安全重复调用。
+     */
+    static claimRewards(rewards: ReadonlyArray<WinStreakRewardConfig>): WinStreakRewardConfig[] {
+        if (!rewards.length) return [];
+
+        const now = this.nowUnixSeconds();
+        const state = this.loadRewardState(now);
+        const claimedThresholds = new Set(state.claimedThresholds);
+        const claimedRewards: WinStreakRewardConfig[] = [];
+
+        for (const requested of rewards) {
+            const reward = REWARD_CONFIGS.find((item) => item.threshold === requested.threshold);
+            if (!reward || reward.threshold > state.progress || claimedThresholds.has(reward.threshold)) continue;
+
+            this.grantReward(reward);
+            claimedThresholds.add(reward.threshold);
+            claimedRewards.push(cloneReward(reward));
+        }
+
+        if (claimedRewards.length > 0) {
+            state.claimedThresholds = Array.from(claimedThresholds).sort((a, b) => a - b);
+            this.saveRewardState(state);
+            ArchiveManager.instance.scheduleUpload();
+        }
+
+        return claimedRewards;
+    }
+
+    /**
+     * 玩家主动放弃当前主线时断连。奖励进度退回最近检查点，完成 45 胜后不再回退。
+     */
+    static commitLoss(level: number): void {
+        if (level < MAIN_LEVEL_START) return;
+
+        const now = this.nowUnixSeconds();
+        const view = this.getRewardViewState(now);
         this.setStreak(0);
-        StorageManager.instance.setItem(StorageKey.WinStreakDate, today);
+        if (!view.completed) {
+            this.saveRewardState({
+                version: REWARD_STATE_VERSION,
+                startTime: view.cycleStartedAt,
+                progress: view.checkpoint,
+                claimedThresholds: this.loadRewardState(now).claimedThresholds,
+            });
+        }
+
+        const saved = this.loadDiffState();
+        if (saved && saved.level === level && saved.failed) {
+            saved.failed = false;
+            this.saveDiffState(saved);
+        }
         ArchiveManager.instance.scheduleUpload();
     }
 
-    // —— 当前关方案 {level, tier, boardId, failed} ——
+    /** @deprecated 使用 commitLoss；仅为旧调用兼容。 */
+    static markFailed(level: number): void {
+        this.commitLoss(level);
+    }
+
+    private static nowUnixSeconds(): number {
+        return Math.floor(Date.now() / 1000);
+    }
+
+    private static getCheckpoint(progress: number): number {
+        let checkpoint = 0;
+        for (const config of REWARD_CONFIGS) {
+            if (config.threshold > progress) break;
+            checkpoint = config.threshold;
+        }
+        return checkpoint;
+    }
+
+    private static getClaimableRewardsForState(state: StoredWinStreakRewardState): WinStreakRewardConfig[] {
+        const claimedThresholds = new Set(state.claimedThresholds);
+        return REWARD_CONFIGS
+            .filter((item) => item.threshold <= state.progress && !claimedThresholds.has(item.threshold))
+            .map(cloneReward);
+    }
+
+    private static loadRewardState(nowUnixSeconds: number): StoredWinStreakRewardState {
+        const raw = StorageManager.instance.getItem(StorageKey.WinStreakRewardState);
+        let state: StoredWinStreakRewardState | null = null;
+        if (raw) {
+            try {
+                const parsed = JSON.parse(raw) as Partial<StoredWinStreakRewardState>;
+                if (parsed.version === REWARD_STATE_VERSION
+                    && typeof parsed.startTime === 'number' && Number.isFinite(parsed.startTime)
+                    && typeof parsed.progress === 'number' && Number.isFinite(parsed.progress)) {
+                    const progress = Math.max(0, Math.min(45, Math.floor(parsed.progress)));
+                    const hasClaimedThresholds = Array.isArray(parsed.claimedThresholds);
+                    // 旧存档中的节点奖励已在通关时直接发放；迁移时视为全部已领取，防止重复补发。
+                    const claimedThresholds = hasClaimedThresholds
+                        ? parsed.claimedThresholds!
+                            .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+                            .map((value) => Math.floor(value))
+                            .filter((value) => value <= progress && !!REWARD_CONFIGS.find((item) => item.threshold === value))
+                        : REWARD_CONFIGS.filter((item) => item.threshold <= progress).map((item) => item.threshold);
+                    state = {
+                        version: REWARD_STATE_VERSION,
+                        startTime: Math.floor(parsed.startTime),
+                        progress,
+                        claimedThresholds: Array.from(new Set(claimedThresholds)).sort((a, b) => a - b),
+                    };
+                    if (!hasClaimedThresholds) this.saveRewardState(state);
+                }
+            } catch (e) {
+                console.warn('StreakManager: reward state parse failed', e);
+            }
+        }
+
+        const expired = !!state && state.startTime + REWARD_CYCLE_SECONDS - nowUnixSeconds < 0;
+        const hasPendingReward = !!state && this.getClaimableRewardsForState(state).length > 0;
+        // 已达到但尚未领取的节点先保留，领取后下次刷新再开启新周期，避免结算界面停留时奖励过期丢失。
+        if (!state || (expired && !hasPendingReward)) {
+            state = {
+                version: REWARD_STATE_VERSION,
+                startTime: nowUnixSeconds,
+                progress: 0,
+                claimedThresholds: [],
+            };
+            this.saveRewardState(state);
+        }
+        return state;
+    }
+
+    private static saveRewardState(state: StoredWinStreakRewardState): void {
+        StorageManager.instance.setItem(StorageKey.WinStreakRewardState, JSON.stringify(state));
+        ArchiveManager.instance.scheduleUpload();
+    }
+
+    private static grantReward(reward: WinStreakRewardConfig): void {
+        switch (reward.type) {
+            case 'switch':
+                ProgressManager.saveSwitchCount(ProgressManager.loadSwitchCount() + reward.amount);
+                break;
+            case 'leaf':
+                ProgressManager.addLeafConut(reward.amount);
+                break;
+            case 'undo':
+                ProgressManager.saveUndoCount(ProgressManager.loadUndoCount() + reward.amount);
+                break;
+            case 'unlock':
+                ProgressManager.saveUnlockCount(ProgressManager.loadUnlockCount() + reward.amount);
+                break;
+        }
+    }
+
     private static loadDiffState(): LevelDiffState | null {
         const raw = StorageManager.instance.getItem(StorageKey.LevelDiffState);
         if (!raw) return null;
@@ -86,105 +391,96 @@ export class StreakManager {
         StorageManager.instance.setItem(StorageKey.LevelDiffState, JSON.stringify(state));
     }
 
-    // 按连胜值摇一个难度档（简单/普通/困难）
     static rollTier(streak: number): Exclude<LevelTier, 'base'> {
         const cfg = Constants.WinStreak;
         const dist = streak < cfg.Tier2Min ? cfg.Distribution.tier1
             : streak < cfg.Tier3Min ? cfg.Distribution.tier2
                 : cfg.Distribution.tier3;
-
         const r = Math.random();
         if (r < dist.easy) return 'easy';
         if (r < dist.easy + dist.normal) return 'normal';
         return 'hard';
     }
 
-    // 从难度池里随机抽一个「没玩过」的盘面号；全玩过则重置循环。
-    private static async pickPoolBoardId(tier: Exclude<LevelTier, 'base'>): Promise<number> {
-        const cfg = Constants.WinStreak;
-        const ids = (await getAvailableBoardIds(tier))
-            .filter((id) => id >= cfg.StartLevel && id <= cfg.PoolMaxLevel);
-        if (ids.length === 0) return cfg.StartLevel;
+    private static async getOrderedNormalBoardIds(): Promise<number[]> {
+        return (await getAvailableBoardIds('normal'))
+            .filter((id) => id >= Constants.WinStreak.StartLevel);
+    }
+
+    private static async pickRandomContinuationBoardId(ids: ReadonlyArray<number>): Promise<number> {
+        if (ids.length === 0) return Constants.WinStreak.StartLevel;
 
         const played = new Set(this.getPlayedBoardIds());
         let unplayed = ids.filter((id) => !played.has(id));
         if (unplayed.length === 0) {
-            // 池已全部玩过 → 重置循环（允许再次出现）
             this.resetPlayedBoardIds();
             unplayed = ids.slice();
         }
         return unplayed[Math.floor(Math.random() * unplayed.length)];
     }
 
-    /**
-     * 进关时决定开局方案 {tier, boardId}：
-     *  - level < StartLevel → 基础盘面：{tier:'base', boardId:level}。
-     *  - 同关重进(非强制重摇) → 复用已存方案（重开 App 盘面不变，快照可命中）。
-     *  - 失败重开(forceReroll) → 按已清零的连胜重摇难度档，并从新档重新抽盘面。
-     *  - 进新关 → 难度池抽一个没玩过的盘面(或关闭池时用关号) + 按连胜摇难度档。
-     */
-    static async resolveLevelPlanForStart(level: number, opts?: { forceReroll?: boolean }): Promise<LevelStartPlan> {
-        this.applyDailyResetIfNeeded();
+    private static async resolveAvailableTier(
+        boardId: number,
+        preferredTier: Exclude<LevelTier, 'base'>,
+    ): Promise<Exclude<LevelTier, 'base'>> {
+        const fallbackOrder: Array<Exclude<LevelTier, 'base'>> = [preferredTier, 'normal', 'easy', 'hard'];
+        for (const tier of fallbackOrder) {
+            const ids = await getAvailableBoardIds(tier);
+            if (ids.indexOf(boardId) >= 0) return tier;
+        }
+        return 'normal';
+    }
 
+    static async resolveLevelPlanForStart(level: number, opts?: { forceReroll?: boolean }): Promise<LevelStartPlan> {
         const forceReroll = !!opts?.forceReroll;
         const saved = this.loadDiffState();
         const sameLevel = !!saved && saved.level === level;
 
-        if (level < Constants.WinStreak.StartLevel || fixedBaseLevelIds.has(level)) {
+        const baseBoardIds = await getAvailableBoardIds('base');
+        if (level < Constants.WinStreak.StartLevel || baseBoardIds.indexOf(level) >= 0) {
             const plan: LevelStartPlan = { tier: 'base', boardId: level };
-            const failed = sameLevel ? saved!.failed : false;
-            this.saveDiffState({ level, tier: plan.tier, boardId: plan.boardId, failed });
+            this.saveDiffState({ level, tier: plan.tier, boardId: plan.boardId, failed: false });
             return plan;
         }
 
-        // 同一关重进、非强制重摇：已保存方案仍可用时原样复用（盘面一致，快照命中）
+        // level_hard（normal 档）是主线基准；按资源排序映射进度，可自然跳过缺号文件。
+        const orderedBoardIds = await this.getOrderedNormalBoardIds();
+        const boardIndex = level - Constants.WinStreak.StartLevel;
+        const sequentialBoardId = boardIndex >= 0 && boardIndex < orderedBoardIds.length
+            ? orderedBoardIds[boardIndex]
+            : null;
+
+        const savedBoardIsExpected = sameLevel && saved!.tier !== 'base' && (
+            sequentialBoardId !== null
+                ? saved!.boardId === sequentialBoardId
+                : orderedBoardIds.indexOf(saved!.boardId) >= 0
+        );
+        const failureCount = ProgressManager.loadLevelRetryCount(level);
+        const easyBoardIds = failureCount >= Constants.WinStreak.EasyAfterFailures
+            ? await getAvailableBoardIds('easy')
+            : [];
+        const savedBoardShouldUseEasy = savedBoardIsExpected
+            && easyBoardIds.indexOf(saved!.boardId) >= 0;
+
         if (sameLevel && !forceReroll && saved!.tier !== 'base') {
             const availableIds = await getAvailableBoardIds(saved!.tier);
-            if (availableIds.indexOf(saved!.boardId) >= 0) {
+            const alreadyUsesRequiredTier = !savedBoardShouldUseEasy || saved!.tier === 'easy';
+            if (savedBoardIsExpected && alreadyUsesRequiredTier && availableIds.indexOf(saved!.boardId) >= 0) {
                 return { tier: saved!.tier, boardId: saved!.boardId };
             }
         }
-        // 失败重开/新关都会按当前连胜摇档，并从该档实际存在的高级盘面池里抽取。
-        const tier = this.rollTier(this.getStreak());
-        const boardId = Constants.WinStreak.UseDifficultyPool ? await this.pickPoolBoardId(tier) : level;
-        const failed = sameLevel ? saved!.failed : false;
-        this.saveDiffState({ level, tier, boardId, failed });
+
+        const boardId = sequentialBoardId
+            ?? (savedBoardShouldUseEasy ? saved!.boardId : await this.pickRandomContinuationBoardId(orderedBoardIds));
+        const forceEasy = easyBoardIds.indexOf(boardId) >= 0;
+        const tier = forceEasy
+            ? 'easy'
+            : await this.resolveAvailableTier(boardId, this.rollTier(this.getStreak()));
+        this.saveDiffState({ level, tier, boardId, failed: false });
         ArchiveManager.instance.scheduleUpload();
         return { tier, boardId };
     }
 
-    // 进入失败状态：连胜清零 + 标记本关 failed（之后复活/重开通关也不 +1）。不动已玩集合（未通关不算玩过）。
-    static markFailed(level: number): void {
-        this.setStreak(0);
-        if (level >= Constants.WinStreak.StartLevel) {
-            const saved = this.loadDiffState();
-            if (saved && saved.level === level) {
-                if (!saved.failed) {
-                    saved.failed = true;
-                    this.saveDiffState(saved);
-                }
-            } else {
-                // 防御：正常流程下 resolveLevelPlanForStart 已落库
-                this.saveDiffState({ level, tier: saved?.tier ?? 'normal', boardId: saved?.boardId ?? level, failed: true });
-            }
-        }
-        ArchiveManager.instance.scheduleUpload();
-    }
-
-    // 通关结算：记该盘面为已玩(去重，含失败后复活通关)；干净通关(本关未失败)且 level>=StartLevel → 连胜 +1
-    static commitClear(level: number): void {
-        const saved = this.loadDiffState();
-        if (level >= Constants.WinStreak.StartLevel) {
-            const boardId = (saved && saved.level === level) ? saved.boardId : level;
-            this.markBoardPlayed(boardId);
-        }
-        if (level < Constants.WinStreak.StartLevel) return;
-        if (saved && saved.level === level && saved.failed) return; // 本关失败过，不 +1
-        this.setStreak(this.getStreak() + 1);
-        ArchiveManager.instance.scheduleUpload();
-    }
-
-    // —— 已玩盘面 id 集合（云端同步，用于难度池去重）——
     static getPlayedBoardIds(): number[] {
         const raw = StorageManager.instance.getItem(StorageKey.PlayedLevels);
         if (!raw) return [];

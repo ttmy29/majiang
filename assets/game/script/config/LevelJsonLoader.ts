@@ -313,7 +313,7 @@ export async function ensureBundleReady(bundleName: string): Promise<AssetManage
     return trackedPromise;
 }
 
-export async function getAvailableBoardIds(tier: Exclude<LevelTier, 'base'>): Promise<number[]> {
+export async function getAvailableBoardIds(tier: LevelTier): Promise<number[]> {
     const state = await ensureVariantIndex(tier);
     return Array.from(state.indexedLevels).sort((a, b) => a - b);
 }

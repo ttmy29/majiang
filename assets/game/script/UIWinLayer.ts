@@ -1,15 +1,24 @@
-import { _decorator, Component, director, Label, Node, sys, tween, UIOpacity, v3, Vec3, Widget } from 'cc';
+import { _decorator, Button, Component, director, Label, Node, ProgressBar, sys, tween, Tween, UIOpacity, v3, Vec3, Widget } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { SDKManager } from '../../loading/SDKManager';
+import { StreakManager, WinStreakRewardConfig, WinStreakSettlement } from './manager/StreakManager';
+import { ProgressManager } from './manager/ProgressManager';
 const { ccclass, property } = _decorator;
+
+const SYSTEM_SUBSCRIBE_MESSAGE_TYPES = [
+    'SYS_MSG_TYPE_RANK',
+    'SYS_MSG_TYPE_WHATS_NEW',
+];
 
 interface WinLayerData {
     time?: number;
     iq?: number;
     nextLevel?: number;
     comboTimes?: number;
+    winStreakSettlement?: WinStreakSettlement | null;
+    isActivity?: boolean;
 }
 
 @ccclass('UIWinLayer')
@@ -36,16 +45,42 @@ export class UIWinLayer extends Component {
     effectNode2: Node = null!;
     @property(Node)
     effectNode3: Node = null!;
+    @property(Node)
+    winStreakNode: Node = null!;
+    @property(Label)
+    winStreakTimeLabel: Label = null!;
+    @property(Node)
+    winStreakBox1: Node = null!;
+    @property(Node)
+    winStreakBox2: Node = null!;
+    @property(Node)
+    winStreakBox3: Node = null!;
+    @property(ProgressBar)
+    winStreakProgressBar: ProgressBar = null!;
+    @property(Label)
+    winStreakNowLabel: Label = null!;
+    @property(Label)
+    winStreakNextLabel: Label = null!;
+
+    private streakSettlement: WinStreakSettlement | null = null;
+    private displayedReward: WinStreakRewardConfig | null = null;
+    private nextLevel = 0;
+    private isActivity = false;
+    private onContinue: (() => void) | null = null;
+    private isClosing = false;
     start() {
         AudioManager.instance.playOneShot(AudioClipNames.game_win);
     }
 
-    init(dataOrTime: WinLayerData | number = 0) {
+    init(dataOrTime: WinLayerData | number = 0, onContinue?: () => void) {
         const data = typeof dataOrTime === 'number' ? { time: dataOrTime } : (dataOrTime || {});
         const time = data.time ?? 0;
         const iqText = this.formatNumber(data.iq ?? 0);
         const nextLevel = Math.max(0, Math.floor(data.nextLevel ?? 0));
         const comboTimes = Math.max(0, Math.floor(data.comboTimes ?? 0));
+        this.nextLevel = nextLevel;
+        this.isActivity = !!data.isActivity;
+        this.onContinue = typeof onContinue === 'function' ? onContinue : null;
 
         director.emit(Constants.eventNames.EventSetIQLabelVisible, false);
         this.playOpenAnimation();
@@ -56,6 +91,157 @@ export class UIWinLayer extends Component {
         this.setLabelString(this.gridLabel2, iqText);
         this.setLabelString(this.gridLabel3, `${comboTimes}`);
         this.playLightBurst();
+        this.initWinStreak(data);
+    }
+
+    protected onDestroy(): void {
+        this.onContinue = null;
+        this.unschedule(this.refreshWinStreakCountdown);
+        if (this.winStreakProgressBar?.isValid) Tween.stopAllByTarget(this.winStreakProgressBar);
+        for (const box of this.getWinStreakBoxes()) {
+            if (box?.isValid) {
+                box.off(Button.EventType.CLICK, this.onWinStreakChestClick, this);
+                Tween.stopAllByTarget(box);
+            }
+        }
+    }
+
+    private initWinStreak(data: WinLayerData): void {
+        this.resolveWinStreakRefs();
+        const settlement = data.winStreakSettlement ?? null;
+        this.streakSettlement = settlement;
+        if (!this.winStreakNode?.isValid || data.isActivity || !settlement) {
+            if (this.winStreakNode?.isValid) this.winStreakNode.active = false;
+            return;
+        }
+
+        this.winStreakNode.active = true;
+        this.renderWinStreakSettlement(settlement);
+        this.bindWinStreakChestButtons();
+        this.unschedule(this.refreshWinStreakCountdown);
+        this.schedule(this.refreshWinStreakCountdown, 1);
+    }
+
+    private resolveWinStreakRefs(): void {
+        this.winStreakNode = this.winStreakNode || this.viewNode?.getChildByName('winStreak') || null!;
+        if (!this.winStreakNode?.isValid) return;
+        this.winStreakTimeLabel = this.winStreakTimeLabel
+            || this.winStreakNode.getChildByName('Label')?.getComponent(Label)
+            || null!;
+        this.winStreakBox1 = this.winStreakBox1 || this.winStreakNode.getChildByName('box1') || null!;
+        this.winStreakBox2 = this.winStreakBox2 || this.winStreakNode.getChildByName('box2') || null!;
+        this.winStreakBox3 = this.winStreakBox3 || this.winStreakNode.getChildByName('box3') || null!;
+        this.winStreakProgressBar = this.winStreakProgressBar
+            || this.winStreakNode.getChildByName('ProgressBar')?.getComponent(ProgressBar)
+            || null!;
+        this.winStreakNowLabel = this.winStreakNowLabel
+            || this.winStreakNode.getChildByName('now')?.getComponent(Label)
+            || null!;
+        this.winStreakNextLabel = this.winStreakNextLabel
+            || this.winStreakNode.getChildByName('mext')?.getComponent(Label)
+            || null!;
+    }
+
+    private renderWinStreakSettlement(settlement: WinStreakSettlement): void {
+        this.displayedReward = settlement.displayReward;
+        this.setLabelString(this.winStreakNowLabel, `${settlement.displayFrom}`);
+        this.setLabelString(this.winStreakNextLabel, `${settlement.displayTo}`);
+        this.setLabelString(
+            this.winStreakTimeLabel,
+            StreakManager.formatRemainingTime(settlement.after.remainingSeconds),
+        );
+        this.showWinStreakBox(settlement.displayReward.boxType);
+
+        const bar = this.winStreakProgressBar;
+        if (!bar?.isValid) return;
+        Tween.stopAllByTarget(bar);
+        bar.progress = this.getWinStreakDisplayProgress(
+            settlement.displayProgressBefore,
+            settlement.displayFrom,
+            settlement.displayTo,
+        );
+        tween(bar)
+            .delay(0.45)
+            .to(0.75, {
+                progress: this.getWinStreakDisplayProgress(
+                    settlement.displayProgressAfter,
+                    settlement.displayFrom,
+                    settlement.displayTo,
+                ),
+            }, { easing: 'sineOut' })
+            .call(() => {
+                if (settlement.claimableRewards.length <= 0) return;
+                const reward = settlement.claimableRewards[0];
+                LayerManager.instance.showToast(`已获得 ${StreakManager.getRewardDescription(reward)}`);
+            })
+            .start();
+    }
+
+    private refreshWinStreakCountdown = (): void => {
+        if (!this.winStreakNode?.isValid || !this.winStreakNode.active) return;
+        const viewState = StreakManager.getRewardViewState();
+        this.setLabelString(this.winStreakTimeLabel, StreakManager.formatRemainingTime(viewState.remainingSeconds));
+        if (this.streakSettlement && viewState.cycleStartedAt !== this.streakSettlement.after.cycleStartedAt) {
+            this.streakSettlement = null;
+            const reward = viewState.nextReward;
+            const from = viewState.previousThreshold;
+            const span = Math.max(1, reward.threshold - from);
+            this.displayedReward = reward;
+            this.setLabelString(this.winStreakNowLabel, `${from}`);
+            this.setLabelString(this.winStreakNextLabel, `${reward.threshold}`);
+            this.showWinStreakBox(reward.boxType);
+            if (this.winStreakProgressBar?.isValid) {
+                Tween.stopAllByTarget(this.winStreakProgressBar);
+                const progress = Math.max(0, Math.min(1, (viewState.progress - from) / span));
+                this.winStreakProgressBar.progress = this.getWinStreakDisplayProgress(
+                    progress,
+                    from,
+                    reward.threshold,
+                );
+            }
+        }
+    };
+
+    private getWinStreakDisplayProgress(progress: number, from: number, to: number): number {
+        const clamped = Math.max(0, Math.min(1, progress));
+        if (from !== 0 || to !== 3) return clamped;
+
+        // The first reward track art places its two separators at 30% and 66%.
+        if (clamped <= 1 / 3) return clamped * 0.9;
+        if (clamped <= 2 / 3) return 0.3 + (clamped - 1 / 3) * 1.08;
+        return 0.66 + (clamped - 2 / 3) * 1.02;
+    }
+
+    private bindWinStreakChestButtons(): void {
+        for (const box of this.getWinStreakBoxes()) {
+            if (!box?.isValid) continue;
+            const button = box.getComponent(Button) || box.addComponent(Button);
+            box.off(Button.EventType.CLICK, this.onWinStreakChestClick, this);
+            box.on(Button.EventType.CLICK, this.onWinStreakChestClick, this);
+            button.interactable = true;
+        }
+    }
+
+    private onWinStreakChestClick(): void {
+        const reward = this.displayedReward;
+        if (!reward) return;
+        AudioManager.instance.playClick();
+        const progress = StreakManager.getRewardViewState().progress;
+        const description = StreakManager.getRewardDescription(reward);
+        LayerManager.instance.showToast(progress >= reward.threshold
+            ? `已获得 ${description}`
+            : `达到 ${reward.threshold} 连胜可获得 ${description}`);
+    }
+
+    private showWinStreakBox(boxType: number): void {
+        const visibleIndex = boxType === 1 ? 0 : boxType === 2 ? 1 : 2;
+        this.getWinStreakBoxes().forEach((box, index) => {
+            if (box?.isValid) box.active = index === visibleIndex;
+        });
+    }
+
+    private getWinStreakBoxes(): Array<Node | null> {
+        return [this.winStreakBox1, this.winStreakBox2, this.winStreakBox3];
     }
 
     private formatTime(time: number): string {
@@ -139,8 +325,9 @@ export class UIWinLayer extends Component {
         return null;
     }
 
-    private playCloseAnimation() {
-        if (!this.node) return;
+    private playCloseAnimation(onClosed?: () => void) {
+        if (!this.node?.isValid || this.isClosing) return;
+        this.isClosing = true;
 
         const target = this.viewNode ?? this.node;
         const maskOpacity = this.maskNode ? this.maskNode.getComponent(UIOpacity) : null;
@@ -148,7 +335,8 @@ export class UIWinLayer extends Component {
         tween(target)
             .to(0.18, { scale: new Vec3(0.3, 0.3, 1) }, { easing: 'quadIn' })
             .call(() => {
-                this.node.destroy();
+                if (this.node?.isValid) this.node.destroy();
+                onClosed?.();
             })
             .start();
 
@@ -160,6 +348,7 @@ export class UIWinLayer extends Component {
     }
 
     onButonCloseClick() {
+        if (this.isClosing) return;
         AudioManager.instance.playClick();
         this.playCloseAnimation();
     }
@@ -176,9 +365,40 @@ export class UIWinLayer extends Component {
     }
 
     onButtonNextLevelClick() {
+        if (this.isClosing) return;
         AudioManager.instance.playClick();
-        director.emit(Constants.eventNames.EventWinNextLevel);
-        this.playCloseAnimation();
+        this.requestSystemSubscriptionAfterSecondLevel();
+        const onContinue = this.onContinue
+            ?? (() => director.emit(Constants.eventNames.EventWinNextLevel));
+        this.onContinue = null;
+        this.playCloseAnimation(onContinue);
+    }
+
+    private requestSystemSubscriptionAfterSecondLevel(): void {
+        // nextLevel === 3 表示当前结算的是第二关；活动关不触发主线订阅引导。
+        if (this.isActivity || this.nextLevel !== 3 || ProgressManager.hasPromptedSystemSubscription()) return;
+        if (sys.platform !== sys.Platform.WECHAT_GAME
+            || typeof wx === 'undefined'
+            || typeof wx.requestSubscribeSystemMessage !== 'function') {
+            console.warn('UIWinLayer: 当前环境不支持微信系统订阅消息');
+            return;
+        }
+
+        try {
+            // 必须在玩家点击回调内直接调用，否则微信不会展示订阅面板。
+            wx.requestSubscribeSystemMessage({
+                msgTypeList: SYSTEM_SUBSCRIBE_MESSAGE_TYPES,
+                success: (res: Record<string, string>) => {
+                    console.log('UIWinLayer: 微信系统订阅消息请求完成', res);
+                },
+                fail: (err: { errCode?: number; errMsg?: string }) => {
+                    console.warn('UIWinLayer: 微信系统订阅消息请求失败', err);
+                },
+            });
+            ProgressManager.markSystemSubscriptionPrompted();
+        } catch (err) {
+            console.warn('UIWinLayer: 调用微信系统订阅消息接口失败', err);
+        }
     }
 
     OnBtoonGoHomeClick() {

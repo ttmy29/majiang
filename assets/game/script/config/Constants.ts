@@ -48,11 +48,14 @@ const Constants = {
         EventFailureContinue: 'FailureContinue',
         // 失败弹窗"重新开始":UIFailureLayer -> GameCtrl,从当前关重开
         EventFailureRestart: 'FailureRestart',
+        EventMainLevelGiveUp: 'MainLevelGiveUp',
         // 胜利弹窗"下一关":UIWinLayer -> GameCtrl,进入下一关
         EventWinNextLevel: 'WinNextLevel',
+        EventWinStreakStartGame: 'WinStreakStartGame',
         EventFavoriteRewardClaimed: 'FavoriteRewardClaimed',
         EventLeafConutUpdate: 'LeafConutUpdate',
         EventSignInUpdate: 'SignInUpdate',
+        EventUIPrefabsReady: 'UIPrefabsReady',
     },
     // UIGameLayer.slotNodeArr 中节点的固定索引约定：
     // [0] = 底部存牌槽 (slot)，[1..4] = 顶部 4 个目标槽 (slot1~slot4)
@@ -87,21 +90,36 @@ const Constants = {
         rank: 'prefab/rank',
         sign: 'prefab/sign',
         winSign: 'prefab/winSign',
+        UIWinLayer: 'prefab/UIWinLayer',
+        signDaily: 'prefab/signDaily',
+        winStreak: 'prefab/winStreak',
     },
     GameBundleName: 'game',
     AudioBundleName: 'audio',
     BgmBundleName: 'bgm',
-    // —— 连胜值难度分档 + 难度池（可调）——
-    // 玩家从 StartLevel 关起按连胜值分档，每档按概率分配 简单/普通/困难 盘面。
-    // 失败清零、每天清零、干净通关 +1。详见 StreakManager。
+    rankNames: [
+        '青铜',
+        '白银',
+        '黄金',
+        '铂金',
+        '钻石',
+        '星耀',
+        '王者',
+        '无双',
+        '荣耀',
+        '至尊',
+    ],
+    // 与 rankNames 一一对应，表示各段位的起始关卡。
+    rankStartLevels: [1, 7, 19, 31, 43, 55, 67, 79, 91, 103],
+    // —— 连胜值难度分档（可调）——
+    // 难度从 StartLevel 关起按真实连续胜场分档；真实连胜从主线关卡 1 起累计。
+    // 复活不断连，玩家确认重玩或退出本局时清零。详见 StreakManager。
     WinStreak: {
         // 从该关号起启用分档；之前的关恒定用基础盘面（base）
         StartLevel: 12,
-        // 难度池：开启后按已摇到的 easy/normal/hard 档，从 config_levels_advanced 对应目录中
-        // 随机抽「没玩过」的盘面；关号仅作进度计数，全玩过再循环。
-        UseDifficultyPool: true,
-        // 难度池盘面号上限（含）。加完新关卡后改大此值即可纳入新盘面。
-        PoolMaxLevel: 1390,
+        // config_levels_base 中存在的同号关优先用 base，其余按 level_hard 实际顺序出题；走完后随机续关。
+        // 同一关进入失败状态达到该次数后，有同号 level_easy 资源就固定切换到简单档。
+        EasyAfterFailures: 5,
         // 档位边界：streak < Tier2Min → 一档；[Tier2Min, Tier3Min) → 二档；>= Tier3Min → 三档
         Tier2Min: 1,
         Tier3Min: 3,

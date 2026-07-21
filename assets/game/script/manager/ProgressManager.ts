@@ -222,6 +222,67 @@ export class ProgressManager {
         return StorageManager.instance.getItem(StorageKey.SignLastDate) === this.formatSignDate(now);
     }
 
+    // —— 独立 7 天登录签到（与每日首胜签到 Sign* 完全隔离）——
+    static hasDailySignedToday(now = new Date()): boolean {
+        return StorageManager.instance.getItem(StorageKey.DailySignLastDate) === this.formatSignDate(now);
+    }
+
+    static signDailyToday(now = new Date()): boolean {
+        const today = this.formatSignDate(now);
+        const lastDate = StorageManager.instance.getItem(StorageKey.DailySignLastDate);
+        if (lastDate === today) return false;
+
+        const yesterday = this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        const nextStreak = lastDate === yesterday ? this.loadStoredDailySignStreak() + 1 : 1;
+
+        StorageManager.instance.setItem(StorageKey.DailySignLastDate, today);
+        StorageManager.instance.setItem(StorageKey.DailySignStreak, nextStreak);
+        ArchiveManager.instance.scheduleUpload();
+        return true;
+    }
+
+    static loadDailySignStreak(now = new Date()): number {
+        const lastDate = StorageManager.instance.getItem(StorageKey.DailySignLastDate);
+        if (!lastDate) return 0;
+
+        const today = this.formatSignDate(now);
+        const yesterday = this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        if (lastDate !== today && lastDate !== yesterday) return 0;
+
+        return this.loadStoredDailySignStreak();
+    }
+
+    static loadSevenDaySignClaimedCount(now = new Date()): number {
+        const streak = this.loadDailySignStreak(now);
+        if (streak <= 0) return 0;
+
+        const claimed = streak % 7;
+        return this.hasDailySignedToday(now) && claimed === 0 ? 7 : claimed;
+    }
+
+    static shouldAutoShowDailySignToday(now = new Date()): boolean {
+        if (this.hasDailySignedToday(now)) return false;
+        return StorageManager.instance.getItem(StorageKey.DailySignShownDate) !== this.formatSignDate(now);
+    }
+
+    static markDailySignShownToday(now = new Date()): void {
+        const today = this.formatSignDate(now);
+        if (StorageManager.instance.getItem(StorageKey.DailySignShownDate) === today) return;
+
+        StorageManager.instance.setItem(StorageKey.DailySignShownDate, today);
+        ArchiveManager.instance.scheduleUpload();
+    }
+
+    static hasPromptedSystemSubscription(): boolean {
+        return StorageManager.instance.getItem(StorageKey.SystemSubscribePrompted) === '1';
+    }
+
+    static markSystemSubscriptionPrompted(): void {
+        if (this.hasPromptedSystemSubscription()) return;
+        StorageManager.instance.setItem(StorageKey.SystemSubscribePrompted, '1');
+        ArchiveManager.instance.scheduleUpload();
+    }
+
     static loadSignStreak(now = new Date()): number {
         const lastDate = StorageManager.instance.getItem(StorageKey.SignLastDate);
         if (!lastDate) return 0;
@@ -425,6 +486,13 @@ export class ProgressManager {
         return Number.isFinite(value) && value >= 0 ? value : 0;
     }
 
+    private static loadStoredDailySignStreak(): number {
+        const raw = StorageManager.instance.getItem(StorageKey.DailySignStreak);
+        if (!raw) return 0;
+        const value = parseInt(raw, 10);
+        return Number.isFinite(value) && value >= 0 ? value : 0;
+    }
+
     private static normalizeSignDays(days: number[], daysInMonth: number): number[] {
         const set = new Set<number>();
         for (const day of days) {
@@ -477,7 +545,7 @@ export class ProgressManager {
         return next;
     }
 
-    // —— 本关重拾(重开)次数。游戏无选关、关号只增，只存「当前这一关」一条 {level,count}；
+    // —— 本关失败次数（沿用旧 Retry API/存档键）。游戏无选关、关号只增，只存「当前这一关」一条 {level,count}；
     //    传入 level 与已存 level 不一致时自动归零重计，无需额外清理 ——
     static loadLevelRetryCount(level: number): number {
         const raw = StorageManager.instance.getItem(StorageKey.LevelRetryCount);

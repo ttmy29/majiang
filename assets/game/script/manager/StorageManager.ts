@@ -27,11 +27,21 @@ export enum StorageKey {
     SignMonthDays = 'mahjong_match_sign_month_days',
     SignRewardClaims = 'mahjong_match_sign_reward_claims',
     WinSignShownDate = 'mahjong_match_win_sign_shown_date',
+    // 独立的 7 天登录签到；不要与上面的“每日首胜签到”Sign* 数据混用。
+    DailySignLastDate = 'mahjong_match_daily_sign_last_date',
+    DailySignStreak = 'mahjong_match_daily_sign_streak',
+    DailySignShownDate = 'mahjong_match_daily_sign_home_shown_date',
+    // 首次通过第二关后，是否已请求过微信系统订阅消息。
+    SystemSubscribePrompted = 'mahjong_match_system_subscribe_prompted',
     // —— 连胜值难度分档 ——
-    // 当前连胜值（int，>=0）。失败清零、每天清零、干净通关 +1
+    // 当前真实连续胜场（int，>=0），用于排行榜和动态难度。
     WinStreak = 'mahjong_match_win_streak',
-    // 上次记录的本地日期 YYYY-MM-DD，用于「每天清零」跨天检测
+    // 旧版每日清零日期，废弃但保留以兼容已有存档。
     WinStreakDate = 'mahjong_match_win_streak_date',
+    /** 独立的 72 小时连胜奖励轨道；与排行榜连续胜场分开保存。 */
+    WinStreakRewardState = 'mahjong_match_win_streak_reward_state',
+    /** 结算排行榜的当前段位、段位内进度和排名。 */
+    SettlementRankState = 'mahjong_match_settlement_rank_state',
     // 当前关已分配的难度状态 JSON {level, tier, failed}：重进/重开保持盘面一致 + 支撑 failed 标记
     LevelDiffState = 'mahjong_match_level_diff_state',
     // 玩家已玩过的关卡 id 集合（JSON 数组），云端同步，用于避免重复盘面

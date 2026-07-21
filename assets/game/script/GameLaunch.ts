@@ -1,7 +1,8 @@
-import { _decorator, AudioClip, AudioSource, Component, assetManager, Prefab } from 'cc';
+import { _decorator, AudioClip, AudioSource, Component, assetManager, director, Prefab } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
+import { ProgressManager } from './manager/ProgressManager';
 
 
 const { ccclass, property } = _decorator;
@@ -87,9 +88,18 @@ export class GameLaunch extends Component {
                 }
                 //@ts-ignore
                 LayerManager.instance.initUIPrefab(prefabs);
+                director.emit(Constants.eventNames.EventUIPrefabsReady);
+                this.scheduleOnce(this.ensureDailySignPopupOpened, 0);
             });
         }
     }
+
+    private ensureDailySignPopupOpened = () => {
+        if (!ProgressManager.shouldAutoShowDailySignToday()) return;
+        if (LayerManager.instance.getOpenUI('signDaily')) return;
+
+        LayerManager.instance.showUI('signDaily');
+    };
 
     initAudioResources() {
         // assetManager.loadBundle(Constants.AudioBundleName, (err, bundle) => {

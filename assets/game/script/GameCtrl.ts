@@ -10,7 +10,7 @@ import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
 import { ArchiveManager } from './manager/ArchiveManager';
-import { StreakManager } from './manager/StreakManager';
+import { StreakManager, WinStreakSettlement } from './manager/StreakManager';
 import { Utils } from './util/Utils';
 import { SDKEvent, SDKManager } from '../../loading/SDKManager';
 
@@ -24,7 +24,29 @@ interface WinLayerData {
     iq: number;
     nextLevel: number;
     comboTimes: number;
+    winStreakSettlement: WinStreakSettlement | null;
+    isActivity: boolean;
 }
+
+type GameEvaluateEventName = 'ready' | 'show' | 'destroy' | 'error';
+
+interface GameEvaluatePageManager {
+    load(options: { openlink: string }): Promise<unknown> | unknown;
+    show(options?: { openlink: string }): Promise<unknown> | unknown;
+    destroy?(): void;
+    on?(eventName: GameEvaluateEventName, callback: (res?: {
+        isRecommended?: boolean;
+        errCode?: number;
+        errMsg?: string;
+    }) => void): void;
+}
+
+interface GameEvaluateWx {
+    createPageManager?: () => GameEvaluatePageManager;
+    getSystemInfoSync?: () => { SDKVersion?: string };
+}
+
+const GAME_EVALUATE_OPENLINK = 'TWFRCqV5WeM2AkMXhKwJ03MhfPOieJfAsvXKUbWvQFQtLyyA5etMPabBehga950uzfZcH3Vi3QeEh41xRGEVFw';
 
 const { ccclass, property } = _decorator;
 
@@ -203,12 +225,17 @@ export class GameCtrl extends Component {
     private sharePropExperimentEnabled = false;
     private randomPropButtonConsumedThisLevel = false;
     private randomPropLevelContextReady = false;
+    private gameEvaluatePageManager: GameEvaluatePageManager | null = null;
+    private gameEvaluateLoadPromise: Promise<void> | null = null;
+    private gameEvaluateShowRequested = false;
 
     start() {
+        void this.preloadGameEvaluate();
         //this.requestSharePropExperimentInfo();
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
         director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
         director.on(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
+        director.on(Constants.eventNames.EventMainLevelGiveUp, this.onEventMainLevelGiveUp, this);
         director.on(Constants.eventNames.EventWinNextLevel, this.onEventWinNextLevel, this);
         director.on(Constants.eventNames.EventClearAllMahjongTiles, this.clearAllMahjongTiles, this);
         director.on(Constants.eventNames.EventFavoriteRewardClaimed, this.onEventFavoriteRewardClaimed, this);
@@ -283,8 +310,79 @@ export class GameCtrl extends Component {
         // 防御性注销 — Canvas 是 persist 节点,GameCtrl 实际不会被销毁,
         // 但开发期 HMR / 场景切换会触发,避免重复监听
         director.off(Constants.eventNames.EventClearAllMahjongTiles, this.clearAllMahjongTiles, this);
+        director.off(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
+        director.off(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
+        director.off(Constants.eventNames.EventFailureRestart, this.onEventFailureRestart, this);
+        director.off(Constants.eventNames.EventMainLevelGiveUp, this.onEventMainLevelGiveUp, this);
+        director.off(Constants.eventNames.EventWinNextLevel, this.onEventWinNextLevel, this);
         director.off(Constants.eventNames.EventFavoriteRewardClaimed, this.onEventFavoriteRewardClaimed, this);
         game.off(Game.EVENT_HIDE, this.onAppHide, this);
+        this.destroyGameEvaluate();
+    }
+
+    private preloadGameEvaluate(): Promise<void> {
+        if (this.gameEvaluateLoadPromise) return this.gameEvaluateLoadPromise;
+        if (sys.platform !== sys.Platform.WECHAT_GAME || typeof wx === 'undefined') {
+            return Promise.resolve();
+        }
+
+        const wxApi = wx as GameEvaluateWx;
+        if (typeof wxApi.createPageManager !== 'function') {
+            const sdkVersion = wxApi.getSystemInfoSync?.().SDKVersion ?? 'unknown';
+            console.warn(`GameCtrl: 当前微信基础库版本(${sdkVersion})暂不支持游戏推荐组件`);
+            return Promise.resolve();
+        }
+
+        try {
+            this.gameEvaluatePageManager = wxApi.createPageManager();
+            this.bindGameEvaluateEvents(this.gameEvaluatePageManager);
+            this.gameEvaluateLoadPromise = Promise.resolve(this.gameEvaluatePageManager.load({
+                openlink: GAME_EVALUATE_OPENLINK,
+            })).then(() => undefined).catch((err) => {
+                console.warn('GameCtrl: 游戏推荐组件预加载失败', err);
+                this.gameEvaluateLoadPromise = null;
+            });
+        } catch (err) {
+            console.warn('GameCtrl: 游戏推荐组件初始化失败', err);
+            this.gameEvaluatePageManager = null;
+            return Promise.resolve();
+        }
+
+        return this.gameEvaluateLoadPromise;
+    }
+
+    private bindGameEvaluateEvents(pageManager: GameEvaluatePageManager): void {
+        if (!pageManager.on) return;
+
+        pageManager.on('ready', () => console.log('GameCtrl: 游戏推荐组件加载完成'));
+        pageManager.on('show', () => console.log('GameCtrl: 游戏推荐组件已展示'));
+        pageManager.on('destroy', (res) => console.log('GameCtrl: 游戏推荐组件已关闭', res?.isRecommended));
+        pageManager.on('error', (err) => console.warn('GameCtrl: 游戏推荐组件发生错误', err));
+    }
+
+    private async showGameEvaluateAfterFirstLevel(): Promise<void> {
+        if (this.gameEvaluateShowRequested) return;
+        this.gameEvaluateShowRequested = true;
+
+        await this.preloadGameEvaluate();
+        if (!this.gameEvaluatePageManager) return;
+
+        try {
+            await this.gameEvaluatePageManager.show();
+        } catch (err) {
+            console.warn('GameCtrl: 游戏推荐组件展示失败', err);
+        }
+    }
+
+    private destroyGameEvaluate(): void {
+        try {
+            this.gameEvaluatePageManager?.destroy?.();
+        } catch (err) {
+            console.warn('GameCtrl: 游戏推荐组件销毁失败', err);
+        } finally {
+            this.gameEvaluatePageManager = null;
+            this.gameEvaluateLoadPromise = null;
+        }
     }
 
     // Fetch AB experiment for the daily share-prop entry.
@@ -417,8 +515,8 @@ export class GameCtrl extends Component {
             releaseActivityOutsideWindow(boardId, 10);
             return;
         }
-        // 连胜分档 + 难度池：≤10 用基础盘面；11+ 按连胜摇难度档并抽没玩过的盘面。
-        // 内部已含每日清零、同关盘面复用(快照命中)、失败重开重摇难度。
+        // config_levels_base 中存在的同号关优先用基础盘面，其余按 level_hard 顺序出题。
+        // 连胜仍控制难度档，同关盘面会复用，失败重开会按清零后的连胜重新降档。
         const plan = await StreakManager.resolveLevelPlanForStart(level, { forceReroll });
         const json = await ensureLevelJson(plan.boardId, plan.tier);
         if (requestSeq !== this.levelRequestSeq) return;
@@ -2214,11 +2312,11 @@ export class GameCtrl extends Component {
             ProgressManager.saveActivityLevel(this.nowLevel + 1);
             ProgressManager.clearActivitySnapshot();
             ArchiveManager.instance.scheduleUpload();
-            LayerManager.instance.showUI('win', this.getWinLayerData());
+            this.showWinFlow(this.getWinLayerData(null));
             return;
         }
-        // 通关结算：记该盘面为已玩(去重) + 干净通关(本关未失败)则连胜 +1（须在 saveLevel 推进关号前结算本关）
-        StreakManager.commitClear(this.nowLevel);
+        // 主线通关结算：复活后的胜利同样累计；引导关由 StreakManager 自动排除。
+        const winStreakSettlement = StreakManager.commitClear(this.nowLevel);
         // 不论是引导关自动跳关还是普通关弹胜利 UI,通关瞬间就把"下一关"号写入存储,
         // 之后玩家点"下一关"或"回主页"都会让下次进入直接落在下一关
         ProgressManager.saveLevel(this.nowLevel + 1);
@@ -2231,13 +2329,15 @@ export class GameCtrl extends Component {
             }, 0.8)
             return;
         }
-        this.showWinFlow(this.getWinLayerData());
+        this.showWinFlow(this.getWinLayerData(winStreakSettlement));
     }
 
     private showWinFlow(data: WinLayerData) {
-        if (ProgressManager.shouldShowWinSignToday()) {
+        const showUIWinLayer = () => this.showUIWinLayerBeforeWin(data);
+
+        if (!data.isActivity && ProgressManager.shouldShowWinSignToday()) {
             const winSignNode = LayerManager.instance.showUI('winSign', () => {
-                LayerManager.instance.showUI('win', data);
+                showUIWinLayer();
             });
             if (winSignNode) {
                 ProgressManager.markWinSignShownToday();
@@ -2245,23 +2345,81 @@ export class GameCtrl extends Component {
             }
         }
 
-        LayerManager.instance.showUI('win', data);
+        showUIWinLayer();
     }
 
-    private getWinLayerData(): WinLayerData {
+    private showUIWinLayerBeforeWin(data: WinLayerData) {
+        let finalWinShown = false;
+        const showFinalWin = () => {
+            if (finalWinShown) return;
+            finalWinShown = true;
+            const settlement = data.winStreakSettlement;
+            let finalWinContinued = false;
+            const continueAfterFinalWin = () => {
+                if (finalWinContinued) return;
+                finalWinContinued = true;
+                if (settlement && settlement.claimableRewards.length > 0) {
+                    this.showWinStreakRewardBeforeNextLevel(settlement);
+                    return;
+                }
+                director.emit(Constants.eventNames.EventWinNextLevel);
+            };
+
+            const finalWinNode = LayerManager.instance.showUI('win', data, continueAfterFinalWin);
+            if (!finalWinNode) {
+                continueAfterFinalWin();
+            }
+        };
+
+        const uiWinLayerNode = LayerManager.instance.showUI('UIWinLayer', data, showFinalWin);
+        if (!uiWinLayerNode) {
+            showFinalWin();
+        }
+    }
+
+    private showWinStreakRewardBeforeNextLevel(settlement: WinStreakSettlement) {
+        let nextLevelRequested = false;
+        const continueToNextLevel = () => {
+            if (nextLevelRequested) return;
+            nextLevelRequested = true;
+            director.emit(Constants.eventNames.EventWinNextLevel);
+        };
+
+        const winStreakNode = LayerManager.instance.showUI('winStreak', {
+            settlement,
+            autoClaimRewards: settlement.claimableRewards,
+            onContinue: continueToNextLevel,
+        });
+
+        // 资源异常时仍保证奖励到账并进入下一关，避免结算流程卡死。
+        if (!winStreakNode) {
+            const claimed = StreakManager.claimRewards(settlement.claimableRewards);
+            if (claimed.length > 0) {
+                LayerManager.instance.showToast(`已领取${StreakManager.getRewardDescription(claimed[0])}`);
+            }
+            continueToNextLevel();
+        }
+    }
+
+    private getWinLayerData(winStreakSettlement: WinStreakSettlement | null): WinLayerData {
         return {
             time: this.elapsedTime,
             iq: this.iqValue,
             nextLevel: this.nowLevel + 1,
             comboTimes: this.comboTimes,
+            winStreakSettlement,
+            isActivity: this.gameMode === 'activity',
         };
     }
 
     private failLevel(reason: string) {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
-        // 进入失败状态即清零连胜并标记本关 failed（含"槽位满"弹窗；之后复活/重开通关也不 +1）
-        if (this.gameMode === 'main') StreakManager.markFailed(this.nowLevel);
+        // 每次真正进入失败状态只累计一次；原地复活不换盘面，下一次重开/进关再应用降档。
+        if (this.gameMode === 'main') {
+            ProgressManager.addLevelRetryCount(this.nowLevel, 1);
+            ArchiveManager.instance.scheduleUpload();
+        }
         director.emit(Constants.eventNames.EventClearComboBoxEffects);
         this.clearIdleTips();
         this.autoFinishing = false;
@@ -2284,18 +2442,38 @@ export class GameCtrl extends Component {
         }
 
         this.showToast(`${reason}，重开本关`);
+        this.commitMainLevelLoss();
         this.recordRetryAndClearSnapshot();
         this.scheduleOnce(() => void this.requestStartLevel(this.nowLevel, null, true), 1.5);
     }
 
     private onEventFailureRestart() {
+        this.commitMainLevelLoss();
         this.recordRetryAndClearSnapshot();
-        // 失败后重开：强制重摇难度档（此时连胜已清零，多半落到一档=更简单；failed 保留 → 通关不 +1）
+        // 确认重开后断连并重算难度；失败达到阈值时优先切换同号 easy。
         void this.requestStartLevel(this.nowLevel, null, true);
     }
 
     private onEventWinNextLevel() {
-        void this.requestStartLevel(this.nowLevel + 1);
+        const previousLevel = this.nowLevel;
+        const mode = this.gameMode;
+        void this.requestStartLevel(previousLevel + 1).then(() => {
+            // 关卡 0 是引导关；仅在主线第一关成功进入第二关后展示微信推荐组件。
+            if (mode === 'main' && previousLevel === 1 && this.gameMode === 'main' && this.nowLevel === 2) {
+                void this.showGameEvaluateAfterFirstLevel();
+            }
+        });
+    }
+
+    private onEventMainLevelGiveUp() {
+        this.commitMainLevelLoss();
+    }
+
+    private commitMainLevelLoss() {
+        if (this.gameMode !== 'main' || this.nowLevel < 1) return;
+        StreakManager.commitLoss(this.nowLevel);
+        SDKManager.instance.uploadWechatRankScores(ProgressManager.loadLevel(), StreakManager.getStreak());
+        ArchiveManager.instance.scheduleUpload();
     }
 
     private recordRetryAndClearSnapshot() {
@@ -2303,7 +2481,6 @@ export class GameCtrl extends Component {
             ProgressManager.addActivityRetryCount(this.nowLevel, 1);
             ProgressManager.clearActivitySnapshot();
         } else {
-            ProgressManager.addLevelRetryCount(this.nowLevel, 1);
             ProgressManager.clearSnapshot();
         }
         ArchiveManager.instance.scheduleUpload();

@@ -4,6 +4,7 @@ import { SDKManager } from '../../loading/SDKManager';
 import type { JHRankBoard, JHRankEntry } from '../../loading/SDKManager';
 import { ProgressManager } from './manager/ProgressManager';
 import { StreakManager } from './manager/StreakManager';
+import { Constants } from './config/Constants';
 const { ccclass, property } = _decorator;
 
 interface RankItemData {
@@ -34,6 +35,8 @@ export class UIRankLayer extends Component {
     tabNode3: Node = null!;
     @property(Node)
     scrollViewNode: Node = null!;
+    @property({ type: [SpriteFrame] })
+    public tierSpriteArr: SpriteFrame[] = [];
 
     private openedByInit = false;
     private isClosing = false;
@@ -308,7 +311,7 @@ export class UIRankLayer extends Component {
     }
 
     private prepareRankItemNode(item: Node) {
-        const labelNames = ['num', 'name', 'count'];
+        const labelNames = ['num', 'name', 'count', 'tierLabel'];
         for (const name of labelNames) {
             const label = item.getChildByName(name)?.getComponent(Label);
             if (label) label.cacheMode = Label.CacheMode.BITMAP;
@@ -479,6 +482,9 @@ export class UIRankLayer extends Component {
             title: '好友排行',
             scoreLabel: '通过关卡',
             emptyText: '暂无好友排行',
+            rankNames: Constants.rankNames.slice(),
+            rankStartLevels: Constants.rankStartLevels.slice(),
+            tierIconPaths: Constants.rankNames.map((_, index) => `openDataContext/tier${index + 1}.png`),
             fallbackSelf: {
                 nickname: this.getCachedWechatRankProfile()?.nickname || '\u6211',
                 avatarUrl: this.getCachedWechatRankProfile()?.avatarUrl || '',
@@ -601,7 +607,8 @@ export class UIRankLayer extends Component {
         if (this.friendRankNode?.isValid && this.friendRankView?.isValid) return true;
 
         const scrollView = this.getScrollViewComponent();
-        const host = scrollView?.node || this.findChildByName(this.scrollViewNode, 'scrollView');
+        const scrollHost = scrollView?.node || this.findChildByName(this.scrollViewNode, 'scrollView');
+        const host = scrollView?.view?.node || this.findChildByName(scrollHost, 'view') || scrollHost;
         const hostTransform = host?.getComponent(UITransform);
         if (!host || !hostTransform) return false;
 
@@ -710,6 +717,59 @@ export class UIRankLayer extends Component {
         this.setLabelString(item.getChildByName('num'), `${data.rank}`);
         this.setLabelString(item.getChildByName('name'), data.name);
         this.setLabelString(item.getChildByName('count'), `${data.count}`);
+        this.setTier(item, data.count);
+    }
+
+    private setTier(item: Node, level: number) {
+        const tierLabelNode = item.getChildByName('tierLabel');
+        const tierIconNode = item.getChildByName('tierIcon');
+        const tierIndex = this.getRankTierIndex(level);
+        // 连胜榜的 count 是连胜次数，不是关卡，不能用于计算段位。
+        const shouldShowTier = this.nowIndex !== 2 && tierIndex >= 0;
+
+        if (tierLabelNode) tierLabelNode.active = shouldShowTier;
+        if (tierIconNode) tierIconNode.active = shouldShowTier;
+        if (!shouldShowTier) return;
+
+        this.setLabelString(tierLabelNode, Constants.rankNames[tierIndex] || '');
+
+        const tierSprite = tierIconNode?.getComponent(Sprite);
+        const tierTransform = tierIconNode?.getComponent(UITransform);
+        const tierSpriteFrame = this.tierSpriteArr[tierIndex];
+        if (!tierSprite || !tierTransform || !tierSpriteFrame) {
+            if (tierIconNode) tierIconNode.active = false;
+            return;
+        }
+
+        let maxSize = (tierIconNode as any).__rankTierIconMaxSize as { width: number; height: number } | undefined;
+        if (!maxSize) {
+            maxSize = {
+                width: tierTransform.contentSize.width,
+                height: tierTransform.contentSize.height,
+            };
+            (tierIconNode as any).__rankTierIconMaxSize = maxSize;
+        }
+
+        const sourceSize = tierSpriteFrame.originalSize;
+        const sourceWidth = Math.max(1, sourceSize.width);
+        const sourceHeight = Math.max(1, sourceSize.height);
+        const fitScale = Math.min(maxSize.width / sourceWidth, maxSize.height / sourceHeight);
+
+        tierSprite.spriteFrame = tierSpriteFrame;
+        tierSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        tierTransform.setContentSize(sourceWidth * fitScale, sourceHeight * fitScale);
+    }
+
+    private getRankTierIndex(level: number): number {
+        const rankCount = Math.min(Constants.rankNames.length, Constants.rankStartLevels.length);
+        if (rankCount <= 0) return -1;
+
+        const normalizedLevel = Math.max(1, Math.floor(Number(level) || 1));
+        for (let i = rankCount - 1; i >= 0; i--) {
+            if (normalizedLevel >= Constants.rankStartLevels[i]) return i;
+        }
+
+        return 0;
     }
 
     private setRankBackground(item: Node, isSelf: boolean) {
@@ -726,7 +786,7 @@ export class UIRankLayer extends Component {
         }
 
         const numNode = item.getChildByName('num');
-        if (numNode) numNode.active = rank > 3;
+        if (numNode) numNode.active = true;
     }
 
     private setLabelString(labelNode: Node | null, value: string) {

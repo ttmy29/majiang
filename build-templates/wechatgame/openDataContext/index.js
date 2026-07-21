@@ -7,6 +7,20 @@ var currentTitle = '好友排行';
 var currentScoreLabel = '通过关卡';
 var currentEmptyText = '暂无好友排行';
 var currentFallbackSelf = null;
+var currentRankNames = ['青铜', '白银', '黄金', '铂金', '钻石', '星耀', '王者', '无双', '荣耀', '至尊'];
+var currentRankStartLevels = [1, 7, 19, 31, 43, 55, 67, 79, 91, 103];
+var currentTierIconPaths = [
+    'openDataContext/tier1.png',
+    'openDataContext/tier2.png',
+    'openDataContext/tier3.png',
+    'openDataContext/tier4.png',
+    'openDataContext/tier5.png',
+    'openDataContext/tier6.png',
+    'openDataContext/tier7.png',
+    'openDataContext/tier8.png',
+    'openDataContext/tier9.png',
+    'openDataContext/tier10.png',
+];
 var imageCache = {};
 var rankBgPaths = {
     self: ['openDataContext/bg1.png'],
@@ -16,19 +30,28 @@ var rankMedalPaths = ['openDataContext/1.png', 'openDataContext/2.png', 'openDat
 var headBgPath = 'openDataContext/headBg.png';
 var defaultHeadPath = 'openDataContext/defaultHead.png';
 var rankItemBase = {
+    viewportWidth: 640,
+    left: 25.6,
     width: 576,
     height: 80.064,
-    gap: 8,
-    top: 12,
-    rankX: 62.58,
-    avatarX: 168.83,
-    nameX: 293.5,
-    scoreX: 490.77,
-    medalWidth: 100.48,
-    medalHeight: 65.92,
+    gap: 1.92,
+    top: 0,
+    rankX: 49.18976,
+    medalX: 49.89184,
+    avatarX: 128.048,
+    nameX: 221.43296,
+    tierIconX: 328.78016,
+    tierNameX: 387.74912,
+    scoreX: 490.77312,
+    medalWidth: 80.384,
+    medalHeights: [52.736, 53.248, 52.736],
     avatarSize: 64.64,
-    rankFontSize: 35,
-    textFontSize: 23,
+    avatarInset: 5.12,
+    tierIconWidth: 51.2,
+    tierIconHeight: 49.152,
+    rankFontSize: 35.2,
+    textFontSize: 23.04,
+    textOutlineWidth: 1.28,
 };
 
 function clearCanvas() {
@@ -57,6 +80,49 @@ function parseScore(item, key) {
     } catch (e) {
         return 0;
     }
+}
+
+function syncRankTierConfig(data) {
+    if (Array.isArray(data.rankNames) && data.rankNames.length) {
+        currentRankNames = data.rankNames.map(function(name) {
+            return String(name || '');
+        });
+    }
+
+    if (Array.isArray(data.rankStartLevels) && data.rankStartLevels.length) {
+        currentRankStartLevels = data.rankStartLevels.map(function(level) {
+            var value = Number(level);
+            return isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
+        });
+    }
+
+    if (Array.isArray(data.tierIconPaths) && data.tierIconPaths.length) {
+        currentTierIconPaths = data.tierIconPaths.map(function(path) {
+            return String(path || '');
+        });
+    }
+}
+
+function getRankTier(level) {
+    var rankCount = Math.min(currentRankNames.length, currentRankStartLevels.length);
+    if (rankCount <= 0) return null;
+
+    var normalizedLevel = Number(level);
+    if (!isFinite(normalizedLevel)) normalizedLevel = 1;
+    normalizedLevel = Math.max(1, Math.floor(normalizedLevel));
+
+    var rankIndex = 0;
+    for (var i = rankCount - 1; i >= 0; i--) {
+        if (normalizedLevel >= currentRankStartLevels[i]) {
+            rankIndex = i;
+            break;
+        }
+    }
+
+    return {
+        name: currentRankNames[rankIndex] || '',
+        iconPath: currentTierIconPaths[rankIndex] || '',
+    };
 }
 
 function normalizeRankData(rawData, key) {
@@ -210,6 +276,18 @@ function drawText(text, x, y, size, color, align, bold) {
     ctx.fillText(text, x, y);
 }
 
+function drawRankText(text, x, y, size, outlineWidth) {
+    ctx.font = size + 'px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#8b3a1a';
+    ctx.lineWidth = outlineWidth * 2;
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, x, y);
+}
+
 function drawImageAsset(src, x, y, width, height) {
     var image = getCachedImage(src);
     if (!image) return false;
@@ -250,22 +328,6 @@ function drawImageCover(image, x, y, width, height) {
     return drawImageInBox(image, x, y, width, height, 'cover');
 }
 
-function drawImageCoverRounded(image, x, y, width, height, radius) {
-    try {
-        ctx.save();
-        traceRoundRect(x, y, width, height, radius);
-        ctx.clip();
-        var ok = drawImageCover(image, x, y, width, height);
-        ctx.restore();
-        return ok;
-    } catch (e) {
-        try {
-            ctx.restore();
-        } catch (restoreError) {}
-        return false;
-    }
-}
-
 function clipText(text, maxChars) {
     text = text || '好友';
     if (text.length <= maxChars) return text;
@@ -278,15 +340,14 @@ function drawAvatar(url, x, y, size, fallbackText) {
         drawRoundRect(x, y, size, size, radius, '#f2d29b');
     }
 
-    var inset = Math.max(4, size * 0.12);
+    var inset = rankItemBase.avatarInset * (size / rankItemBase.avatarSize);
     var innerX = x + inset;
     var innerY = y + inset;
     var innerSize = Math.max(0, size - inset * 2);
-    var innerRadius = Math.max(6, innerSize * 0.16);
 
     var cached = imageCache[url];
     if (cached && cached._rankLoaded) {
-        drawImageCoverRounded(cached, innerX, innerY, innerSize, innerSize, innerRadius);
+        drawImageCover(cached, innerX, innerY, innerSize, innerSize);
         return;
     }
 
@@ -329,43 +390,50 @@ function drawRankList(data) {
     }
 
     var width = sharedCanvas.width;
-    var horizontalPadding = Math.max(32, width * 0.05);
-    var rowWidth = Math.max(0, width - horizontalPadding * 2);
-    var rowScale = rowWidth / rankItemBase.width;
+    var rowScale = width / rankItemBase.viewportWidth;
+    var rowWidth = rankItemBase.width * rowScale;
     var rowHeight = rankItemBase.height * rowScale;
     var rowGap = rankItemBase.gap * rowScale;
     var startY = rankItemBase.top * rowScale;
-    var rowX = (width - rowWidth) / 2;
+    var rowX = rankItemBase.left * rowScale;
     var avatarSize = rankItemBase.avatarSize * rowScale;
     var medalWidth = rankItemBase.medalWidth * rowScale;
-    var medalHeight = rankItemBase.medalHeight * rowScale;
+    var tierIconWidth = rankItemBase.tierIconWidth * rowScale;
+    var tierIconHeight = rankItemBase.tierIconHeight * rowScale;
     var rankFontSize = rankItemBase.rankFontSize * rowScale;
     var textFontSize = rankItemBase.textFontSize * rowScale;
+    var textOutlineWidth = rankItemBase.textOutlineWidth * rowScale;
 
     for (var i = 0; i < lastRankData.length; i++) {
         var item = lastRankData[i];
         var y = startY + i * (rowHeight + rowGap);
         var centerY = y + rowHeight / 2;
         var rankX = rowX + rankItemBase.rankX * rowScale;
+        var medalX = rowX + rankItemBase.medalX * rowScale;
         var avatarX = rowX + rankItemBase.avatarX * rowScale - avatarSize / 2;
         var nameX = rowX + rankItemBase.nameX * rowScale;
+        var tierIconX = rowX + rankItemBase.tierIconX * rowScale;
+        var tierNameX = rowX + rankItemBase.tierNameX * rowScale;
         var scoreX = rowX + rankItemBase.scoreX * rowScale;
+        var rankTier = getRankTier(item.rankScore);
         drawRankBackground(isSelfRankItem(item), rowX, y, rowWidth, rowHeight);
 
-        var rankColor = i < 3 ? '#ffffff' : '#9b4e27';
         var medalColor = i === 0 ? '#ffb52e' : (i === 1 ? '#a9d3e8' : (i === 2 ? '#e27f3d' : ''));
         if (i < 3) {
-            if (!drawImageFit(rankMedalPaths[i], rankX - medalWidth / 2, centerY - medalHeight / 2, medalWidth, medalHeight)) {
-                drawRoundRect(rankX - 27 * rowScale, centerY - 24 * rowScale, 54 * rowScale, 48 * rowScale, 14 * rowScale, medalColor);
-                drawText(String(i + 1), rankX, centerY + rowScale, rankFontSize, rankColor, 'center', true);
+            var medalHeight = rankItemBase.medalHeights[i] * rowScale;
+            if (!drawImageFit(rankMedalPaths[i], medalX - medalWidth / 2, centerY - medalHeight / 2, medalWidth, medalHeight)) {
+                drawRoundRect(medalX - 27 * rowScale, centerY - 24 * rowScale, 54 * rowScale, 48 * rowScale, 14 * rowScale, medalColor);
             }
-        } else {
-            drawText(String(i + 1), rankX, centerY + rowScale, rankFontSize, rankColor, 'center', true);
         }
+        drawRankText(String(i + 1), rankX, centerY, rankFontSize, textOutlineWidth);
 
         drawAvatar(item.avatarUrl, avatarX, centerY - avatarSize / 2, avatarSize, item.nickname);
-        drawText(clipText(item.nickname, 8), nameX, centerY, textFontSize, '#8d3f25', 'center', true);
-        drawText(String(item.rankScore), scoreX, centerY, textFontSize, '#8d3f25', 'center', true);
+        drawRankText(clipText(item.nickname, 8), nameX, centerY, textFontSize, textOutlineWidth);
+        if (rankTier) {
+            drawImageFit(rankTier.iconPath, tierIconX - tierIconWidth / 2, centerY - tierIconHeight / 2, tierIconWidth, tierIconHeight);
+            drawRankText(rankTier.name, tierNameX, centerY, textFontSize, textOutlineWidth);
+        }
+        drawRankText(String(item.rankScore), scoreX, centerY, textFontSize, textOutlineWidth);
     }
 }
 
@@ -405,6 +473,7 @@ function handleMessage(data) {
         currentScoreLabel = data.scoreLabel || currentScoreLabel;
         currentEmptyText = data.emptyText || currentEmptyText;
         currentFallbackSelf = data.fallbackSelf || null;
+        syncRankTierConfig(data);
         requestFriendRank(currentKey);
     }
 }
