@@ -324,11 +324,13 @@ export class ProgressManager {
         const days = this.loadSignMonthDays(now);
         days.push(missingDay);
         days.sort((a, b) => a - b);
+        const streak = this.calculateCurrentMonthSignStreak(now, days);
         StorageManager.instance.setItem(StorageKey.SignMonthDays, JSON.stringify({ month, days }));
+        StorageManager.instance.setItem(StorageKey.SignStreak, streak);
         ArchiveManager.instance.scheduleUpload();
         director.emit(Constants.eventNames.EventSignInUpdate, {
             date: this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), missingDay)),
-            streak: this.loadSignStreak(now),
+            streak,
             days,
         });
         return missingDay;
@@ -530,6 +532,15 @@ export class ProgressManager {
             }
         }
         return Array.from(set).sort((a, b) => a - b);
+    }
+
+    private static calculateCurrentMonthSignStreak(now: Date, days: number[]): number {
+        const signedDays = new Set(this.normalizeSignDays(days, this.getDaysInMonth(now)));
+        let streak = 0;
+        for (let day = now.getDate(); day >= 1 && signedDays.has(day); day--) {
+            streak++;
+        }
+        return streak;
     }
 
     private static formatSignDate(date: Date): string {
