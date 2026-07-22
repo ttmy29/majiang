@@ -54,7 +54,7 @@ const BASE_BUNDLE = 'config_levels_base';
 const ADVANCED_BUNDLE = 'config_levels_advanced';
 const ACTIVITY_BUNDLE = 'config_levels_activity';
 const BASE_MAX_LEVEL = 11;
-const ACTIVITY_MAX_LEVEL = 129;
+const ACTIVITY_MAX_LEVEL = 93;
 
 const variantIndexes: Record<LevelVariant, VariantIndex> = {
     base: createVariantIndex(BASE_BUNDLE, ''),

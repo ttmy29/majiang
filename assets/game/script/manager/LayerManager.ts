@@ -1,5 +1,6 @@
 import { Component, director, find, instantiate, Label, Node, Prefab, Tween, tween, UIOpacity, Vec3 } from 'cc';
 import { AudioManager, AudioClipNames } from './AudioManager';
+import { Constants } from '../config/Constants';
 
 export enum LayerType {
     Start = 'startLayer',
@@ -132,9 +133,10 @@ export class LayerManager {
         this.getLayer(type).removeAllChildren();
     }
 
-    public showStartLayer(): void {
+    public showStartLayer(isReturnHome = true): void {
         this._layers.get(LayerType.Start)!.active = true;
         this._layers.get(LayerType.Game)!.active = false;
+        if (isReturnHome) director.emit(Constants.eventNames.EventReturnHome);
     }
 
     public showGameLayer(): void {

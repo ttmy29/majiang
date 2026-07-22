@@ -1,6 +1,6 @@
 import { _decorator, Component, director, EventTouch, Label, Node, sp, Sprite, SpriteFrame, sys, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { Constants } from './config/Constants';
-import { GameMode, setCurrentGameMode } from './config/GameMode';
+import { ActivitySignMode, GameMode, setCurrentActivitySignMode, setCurrentGameMode } from './config/GameMode';
 import { ensureActivityLevelJson, ensureLevelJson, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
 import { ArchiveManager } from './manager/ArchiveManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
@@ -31,7 +31,7 @@ const HOME_RETURN_APPEAR_ANIMATION = 'Appear2';
 const HOME_DISAPPEAR_ANIMATION = 'Disappear';
 const HOME_IDLE_ANIMATION = 'Idle';
 const LEAF_LOOP_ANIMATION = 'Loop';
-const ACTIVITY_UNLOCK_MAIN_LEVEL = 5;
+const DAILY_SIGN_HOME_RETURN_DELAY = 1.8;
 const FAVORITE_REWARD_QUERY_KEY = 'favoriteReward';
 const FAVORITE_REWARD_SCENES = new Set([1103, 1104]);
 const FAVORITE_REWARD_TOAST_RETRY_LIMIT = 10;
@@ -72,12 +72,13 @@ export class UIStartLayer extends Component {
     private uiNodeTargetOpacity: Map<Node, number> = new Map();
     private wxGameClubBtn: any = null;
     private favoriteRewardToastRetryCount = 0;
-    private dailySignPopupOpening = false;
+    private dailySignPendingForHomeReturn = false;
+    private dailySignHomeReturnDelayElapsed = false;
 
     protected onLoad(): void {
         ProgressManager.initSignUserState();
-        this.refreshSignNodeAnimationMembership();
-        this.refreshSignNodeVisible();
+        //this.refreshSignNodeAnimationMembership();
+        //this.refreshSignNodeVisible();
         this.fitBackgroundToView();
         this.captureStartAnimationState();
         this.hideStartAnimationNodes();
@@ -95,10 +96,12 @@ export class UIStartLayer extends Component {
         director.on(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
         director.off(Constants.eventNames.EventUIPrefabsReady, this.onUIPrefabsReady, this);
         director.on(Constants.eventNames.EventUIPrefabsReady, this.onUIPrefabsReady, this);
+        director.off(Constants.eventNames.EventReturnHome, this.onReturnHome, this);
+        director.on(Constants.eventNames.EventReturnHome, this.onReturnHome, this);
         director.off(Constants.eventNames.EventWinStreakStartGame, this.onEventWinStreakStartGame, this);
         director.on(Constants.eventNames.EventWinStreakStartGame, this.onEventWinStreakStartGame, this);
         this.enteringGame = false;
-        this.refreshSignNodeVisible();
+        //this.refreshSignNodeVisible();
         this.refreshStartNodeState();
         this.refreshWarmupWindow();
         this.refreshActivityButtonVisible();
@@ -110,7 +113,6 @@ export class UIStartLayer extends Component {
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.show();
         if (this.hasStarted) this.scheduleFavoriteRewardCheck();
-        this.tryShowDailySignPopup();
     }
 
     protected onDisable(): void {
@@ -118,9 +120,13 @@ export class UIStartLayer extends Component {
         this.clearHomeSkeletonListener();
         this.unschedule(this.tryGrantFavoriteRewardFromFavoriteEnter);
         this.unschedule(this.showFavoriteRewardToast);
+        this.unschedule(this.onDailySignHomeReturnDelayElapsed);
+        this.dailySignPendingForHomeReturn = false;
+        this.dailySignHomeReturnDelayElapsed = false;
         director.off("gameBack", this.onGameBack, this);
         director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
         director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
+        director.off(Constants.eventNames.EventReturnHome, this.onReturnHome, this);
         director.off(Constants.eventNames.EventWinStreakStartGame, this.onEventWinStreakStartGame, this);
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.hide();
@@ -131,10 +137,12 @@ export class UIStartLayer extends Component {
         this.clearHomeSkeletonListener();
         this.unschedule(this.tryGrantFavoriteRewardFromFavoriteEnter);
         this.unschedule(this.showFavoriteRewardToast);
+        this.unschedule(this.onDailySignHomeReturnDelayElapsed);
         director.off("gameBack", this.onGameBack, this);
         director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
         director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
         director.off(Constants.eventNames.EventUIPrefabsReady, this.onUIPrefabsReady, this);
+        director.off(Constants.eventNames.EventReturnHome, this.onReturnHome, this);
         director.off(Constants.eventNames.EventWinStreakStartGame, this.onEventWinStreakStartGame, this);
 
         if (this.wxGameClubBtn) this.wxGameClubBtn.destroy();
@@ -149,10 +157,22 @@ export class UIStartLayer extends Component {
     };
 
     private onSignInUpdate = () => {
-        this.refreshSignNodeVisible();
+        //this.refreshSignNodeVisible();
     };
 
     private onUIPrefabsReady = () => {
+        this.tryShowDailySignPopup();
+    };
+
+    private onReturnHome = () => {
+        this.dailySignPendingForHomeReturn = true;
+        this.dailySignHomeReturnDelayElapsed = false;
+        this.unschedule(this.onDailySignHomeReturnDelayElapsed);
+        this.scheduleOnce(this.onDailySignHomeReturnDelayElapsed, DAILY_SIGN_HOME_RETURN_DELAY);
+    };
+
+    private onDailySignHomeReturnDelayElapsed = () => {
+        this.dailySignHomeReturnDelayElapsed = true;
         this.tryShowDailySignPopup();
     };
 
@@ -163,7 +183,7 @@ export class UIStartLayer extends Component {
 
     start() {
         this.hasStarted = true;
-        this.refreshSignNodeVisible();
+        //this.refreshSignNodeVisible();
         this.refreshStartNodeState();
         this.refreshWarmupWindow();
         this.refreshActivityButtonVisible();
@@ -179,7 +199,6 @@ export class UIStartLayer extends Component {
         }
 
         this.scheduleFavoriteRewardCheck();
-        this.tryShowDailySignPopup();
     }
 
     update(deltaTime: number) {
@@ -326,18 +345,25 @@ export class UIStartLayer extends Component {
 
     async onClickActivityButton(event: EventTouch, data: any) {
         if (this.enteringGame) return;
-        //if (!this.isActivityUnlocked()) return;
-        await this.enterGame('activity');
+        if (LayerManager.instance.getOpenUI("sign")) return;
+        AudioManager.instance.playClick();
+        LayerManager.instance.showUI(
+            "sign",
+            () => this.enterActivityFromSign('daily'),
+            () => this.enterActivityFromSign('makeup'),
+        );
     }
 
-    private async enterGame(mode: GameMode) {
-        AudioManager.instance.playClick();
-        if (!this.isActivityUnlocked() && mode === 'activity') {
-            LayerManager.instance.showToast('通过第五关后解锁!');
-            return;
-        }
+    private enterActivityFromSign(signMode: ActivitySignMode) {
+        if (this.enteringGame) return;
+        void this.enterGame('activity', false, signMode);
+    }
+
+    private async enterGame(mode: GameMode, playClick = true, activitySignMode: ActivitySignMode = 'daily') {
+        if (playClick) AudioManager.instance.playClick();
         this.enteringGame = true;
         setCurrentGameMode(mode);
+        if (mode === 'activity') setCurrentActivitySignMode(activitySignMode);
 
         try {
             const exitAnimation = this.playExitAnimation();
@@ -371,18 +397,25 @@ export class UIStartLayer extends Component {
                 return;
             }
             LayerManager.instance.showGameLayer();
-            this.tryShowDailySignPopup();
         } finally {
             this.enteringGame = false;
         }
     }
 
     private tryShowDailySignPopup() {
-        if (this.dailySignPopupOpening) return;
-        if (!ProgressManager.shouldAutoShowDailySignToday()) return;
+        if (!this.dailySignPendingForHomeReturn) return;
+        if (!this.dailySignHomeReturnDelayElapsed) return;
+        if (!ProgressManager.shouldAutoShowDailySignToday()) {
+            this.dailySignPendingForHomeReturn = false;
+            this.dailySignHomeReturnDelayElapsed = false;
+            return;
+        }
         if (!LayerManager.instance.hasUI("signDaily")) return;
 
-        this.dailySignPopupOpening = !!this.openSignDailyPopup();
+        if (this.openSignDailyPopup()) {
+            this.dailySignPendingForHomeReturn = false;
+            this.dailySignHomeReturnDelayElapsed = false;
+        }
     }
 
     private openSignDailyPopup(): Node | null {
@@ -578,15 +611,9 @@ export class UIStartLayer extends Component {
         if (label) label.string = value;
     }
 
-    private isActivityUnlocked(): boolean {
-
-        //return true;
-        return ProgressManager.loadLevel() >= ACTIVITY_UNLOCK_MAIN_LEVEL;
-    }
-
     private refreshActivityButtonVisible() {
         if (!this.activityBtn?.isValid) return;
-        this.activityBtn.active = false;
+        //this.activityBtn.active = false;
     }
 
     private fitBackgroundToView() {
@@ -780,10 +807,10 @@ export class UIStartLayer extends Component {
 
         for (const node of this.UINodeArray) {
             if (!node?.isValid) continue;
-            if (node === this.activityBtn) {
-                node.active = false;
-                continue;
-            }
+            // if (node === this.activityBtn) {
+            //     node.active = false;
+            //     continue;
+            // }
 
             node.active = true;
             const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
@@ -804,10 +831,10 @@ export class UIStartLayer extends Component {
         for (let i = 0; i < this.UINodeArray.length; i++) {
             const node = this.UINodeArray[i];
             if (!node?.isValid) continue;
-            if (node === this.activityBtn) {
-                node.active = false;
-                continue;
-            }
+            // if (node === this.activityBtn) {
+            //     node.active = false;
+            //     continue;
+            // }
 
             const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
             const targetOpacity = this.uiNodeTargetOpacity.get(node) ?? 255;

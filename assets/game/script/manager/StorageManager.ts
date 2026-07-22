@@ -40,6 +40,8 @@ export enum StorageKey {
     WinStreakDate = 'mahjong_match_win_streak_date',
     /** 独立的 72 小时连胜奖励轨道；与排行榜连续胜场分开保存。 */
     WinStreakRewardState = 'mahjong_match_win_streak_reward_state',
+    /** 每天首次手动打开连胜界面时，是否已经播放过从起点滚到当前进度的引导。 */
+    WinStreakManualIntroShownDate = 'mahjong_match_win_streak_manual_intro_shown_date',
     /** 结算排行榜的当前段位、段位内进度和排名。 */
     SettlementRankState = 'mahjong_match_settlement_rank_state',
     // 当前关已分配的难度状态 JSON {level, tier, failed}：重进/重开保持盘面一致 + 支撑 failed 标记

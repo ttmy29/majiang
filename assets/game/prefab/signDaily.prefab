@@ -38,7 +38,7 @@
       }
     ],
     "_prefab": {
-      "__id__": 418
+      "__id__": 423
     },
     "_lpos": {
       "__type__": "cc.Vec3",
@@ -91,6 +91,9 @@
       },
       {
         "__id__": 9
+      },
+      {
+        "__id__": 418
       }
     ],
     "_prefab": {
@@ -366,6 +369,9 @@
       },
       {
         "__id__": 404
+      },
+      {
+        "__id__": 421
       }
     ],
     "_prefab": {
@@ -9937,6 +9943,94 @@
   {
     "__type__": "cc.CompPrefabInfo",
     "fileId": "e5zDDWuGBPWKAmDE8gBrgi"
+  },
+  {
+    "__type__": "cc.Button",
+    "_name": "",
+    "_objFlags": 0,
+    "__editorExtras__": {},
+    "node": {
+      "__id__": 2
+    },
+    "_enabled": true,
+    "__prefab": {
+      "__id__": 419
+    },
+    "clickEvents": [
+      {
+        "__id__": 420
+      }
+    ],
+    "_interactable": true,
+    "_transition": 0,
+    "_normalColor": {
+      "__type__": "cc.Color",
+      "r": 255,
+      "g": 255,
+      "b": 255,
+      "a": 255
+    },
+    "_hoverColor": {
+      "__type__": "cc.Color",
+      "r": 211,
+      "g": 211,
+      "b": 211,
+      "a": 255
+    },
+    "_pressedColor": {
+      "__type__": "cc.Color",
+      "r": 255,
+      "g": 255,
+      "b": 255,
+      "a": 255
+    },
+    "_disabledColor": {
+      "__type__": "cc.Color",
+      "r": 124,
+      "g": 124,
+      "b": 124,
+      "a": 255
+    },
+    "_normalSprite": null,
+    "_hoverSprite": null,
+    "_pressedSprite": null,
+    "_disabledSprite": null,
+    "_duration": 0.1,
+    "_zoomScale": 0.9,
+    "_target": null,
+    "_id": ""
+  },
+  {
+    "__type__": "cc.CompPrefabInfo",
+    "fileId": "UmxXYjM6PkxxR7iIc5kCDg"
+  },
+  {
+    "__type__": "cc.ClickEvent",
+    "target": {
+      "__id__": 1
+    },
+    "component": "",
+    "_componentId": "d15a4bKQQ1P24YSSxOuKlZR",
+    "handler": "onButonCloseClick",
+    "customEventData": ""
+  },
+  {
+    "__type__": "cc.BlockInputEvents",
+    "_name": "",
+    "_objFlags": 0,
+    "__editorExtras__": {},
+    "node": {
+      "__id__": 13
+    },
+    "_enabled": true,
+    "__prefab": {
+      "__id__": 422
+    },
+    "_id": ""
+  },
+  {
+    "__type__": "cc.CompPrefabInfo",
+    "fileId": "GEs4ca9CMo9ZLEoHqNJnBg"
   },
   {
     "__type__": "cc.PrefabInfo",

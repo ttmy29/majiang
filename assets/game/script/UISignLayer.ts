@@ -3,6 +3,7 @@ import { Constants } from './config/Constants';
 import { AudioManager } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
+import { SDKManager } from '../../loading/SDKManager';
 const { ccclass, property } = _decorator;
 
 type SignRewardType = 'undo' | 'switch' | 'unlock';
@@ -41,12 +42,18 @@ export class UISignLayer extends Component {
     private leaf1Node: Node | null = null;
     private leaf2Node: Node | null = null;
     private closeButtonNode: Node | null = null;
+    private startButtonNode: Node | null = null;
+    private makeupButtonNode: Node | null = null;
+    private onStartActivity: (() => void) | null = null;
+    private onStartMakeupActivity: (() => void) | null = null;
+    private isMakeupAdPending = false;
     private rewardBoxClickHandlers: Map<Node, () => void> = new Map();
 
     protected onLoad(): void {
         this.initNodeRefs();
         this.fitBgToViewTop();
         this.bindCloseButton();
+        this.bindActionButtons();
         this.bindRewardBoxes();
         this.refreshSignState();
     }
@@ -68,10 +75,15 @@ export class UISignLayer extends Component {
         }
     }
 
-    init() {
+    init(onStartActivity?: () => void, onStartMakeupActivity?: () => void) {
         this.openedByInit = true;
+        this.onStartActivity = typeof onStartActivity === 'function' ? onStartActivity : null;
+        this.onStartMakeupActivity = typeof onStartMakeupActivity === 'function'
+            ? onStartMakeupActivity
+            : null;
         this.initNodeRefs();
         this.fitBgToViewTop();
+        this.bindActionButtons();
         this.bindRewardBoxes();
         this.refreshSignState();
         this.playOpenAnimation();
@@ -85,6 +97,14 @@ export class UISignLayer extends Component {
         if (this.closeButtonNode?.isValid) {
             this.closeButtonNode.off(Button.EventType.CLICK, this.onButonCloseClick, this);
         }
+        if (this.startButtonNode?.isValid) {
+            this.startButtonNode.off(Button.EventType.CLICK, this.onStartButtonClick, this);
+        }
+        if (this.makeupButtonNode?.isValid) {
+            this.makeupButtonNode.off(Button.EventType.CLICK, this.onMakeupButtonClick, this);
+        }
+        this.onStartActivity = null;
+        this.onStartMakeupActivity = null;
         this.unbindRewardBoxes();
         director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
         this.stopPopupTweens();
@@ -111,6 +131,36 @@ export class UISignLayer extends Component {
     onButtonBackClick() {
         this.onButonCloseClick();
     }
+
+    private onStartButtonClick = () => {
+        if (this.isClosing || !this.onStartActivity) return;
+        AudioManager.instance.playClick();
+        const onStartActivity = this.onStartActivity;
+        this.onStartActivity = null;
+        this.playCloseAnimation(onStartActivity);
+    };
+
+    private onMakeupButtonClick = () => {
+        if (this.isClosing || this.isMakeupAdPending || !this.onStartMakeupActivity) return;
+        if (ProgressManager.loadMissingSignDaysBeforeToday().length <= 0) {
+            this.refreshActionButtons();
+            return;
+        }
+
+        AudioManager.instance.playClick();
+        this.isMakeupAdPending = true;
+        this.setMakeupButtonInteractable(false);
+        SDKManager.instance.showVideoAd(() => {
+            this.isMakeupAdPending = false;
+            const onStartMakeupActivity = this.onStartMakeupActivity;
+            this.onStartMakeupActivity = null;
+            this.playCloseAnimation(onStartMakeupActivity);
+        }, () => {
+            this.isMakeupAdPending = false;
+            this.setMakeupButtonInteractable(true);
+            LayerManager.instance.showToast('视频播放未完成！');
+        }, 'sign_makeup');
+    };
 
     private initNodeRefs() {
         this.bgNode = this.bgNode || this.node.getChildByName('bg');
@@ -168,6 +218,7 @@ export class UISignLayer extends Component {
         this.refreshProgressBar();
         this.refreshRewardDayLabels();
         this.refreshRewardBoxes();
+        this.refreshActionButtons();
     }
 
     private refreshCountLabel() {
@@ -331,6 +382,45 @@ export class UISignLayer extends Component {
         button.interactable = true;
     }
 
+    private bindActionButtons() {
+        const startButton = this.findChildByName(this.node, 'start');
+        if (startButton) {
+            this.startButtonNode = startButton;
+            const button = startButton.getComponent(Button) || startButton.addComponent(Button);
+            startButton.off(Button.EventType.CLICK, this.onStartButtonClick, this);
+            startButton.on(Button.EventType.CLICK, this.onStartButtonClick, this);
+            button.interactable = true;
+        }
+
+        const makeupButton = this.findChildByName(this.node, 'button');
+        if (makeupButton) {
+            this.makeupButtonNode = makeupButton;
+            const button = makeupButton.getComponent(Button) || makeupButton.addComponent(Button);
+            makeupButton.off(Button.EventType.CLICK, this.onMakeupButtonClick, this);
+            makeupButton.on(Button.EventType.CLICK, this.onMakeupButtonClick, this);
+            button.interactable = true;
+        }
+        this.refreshActionButtons();
+    }
+
+    private refreshActionButtons() {
+        const hasSignedToday = ProgressManager.hasSignedToday();
+        const hasMissingDays = ProgressManager.loadMissingSignDaysBeforeToday().length > 0;
+        if (this.startButtonNode?.isValid) {
+            this.startButtonNode.active = !hasSignedToday && !!this.onStartActivity;
+        }
+        if (this.makeupButtonNode?.isValid) {
+            this.makeupButtonNode.active = hasSignedToday
+                && hasMissingDays
+                && !!this.onStartMakeupActivity;
+        }
+    }
+
+    private setMakeupButtonInteractable(interactable: boolean) {
+        const button = this.makeupButtonNode?.getComponent(Button);
+        if (button?.isValid) button.interactable = interactable;
+    }
+
     private bindRewardBoxes() {
         for (let i = 1; i <= 5; i++) {
             const box = this.findChildByName(this.node, `box${i}`);
@@ -359,40 +449,53 @@ export class UISignLayer extends Component {
         if (!this.node || this.isClosing) return;
 
         const target = this.getViewNode();
+        const targetOpacity = this.getViewOpacity(true);
         const maskOpacity = this.getMaskOpacity(true);
 
         this.stopPopupTweens();
 
+        target.setScale(new Vec3(1, 1, 1));
+        if (targetOpacity) targetOpacity.opacity = 0;
         if (maskOpacity) maskOpacity.opacity = 0;
-        target.setScale(new Vec3(0.3, 0.3, 1));
 
-        tween(target)
-            .to(0.35, { scale: new Vec3(1.05, 1.05, 1) }, { easing: 'sineOut' })
-            .to(0.15, { scale: new Vec3(1, 1, 1) }, { easing: 'sineInOut' })
-            .start();
+        if (targetOpacity) {
+            tween(targetOpacity)
+                .to(0.25, { opacity: 255 }, { easing: 'sineOut' })
+                .start();
+        }
 
         if (maskOpacity) {
             tween(maskOpacity)
-                .to(0.5, { opacity: 255 }, { easing: 'sineOut' })
+                .to(0.25, { opacity: 255 }, { easing: 'sineOut' })
                 .start();
         }
     }
 
-    private playCloseAnimation() {
+    private playCloseAnimation(onClosed?: () => void) {
         if (!this.node || this.isClosing) return;
         this.isClosing = true;
 
         const target = this.getViewNode();
+        const targetOpacity = this.getViewOpacity(true);
         const maskOpacity = this.getMaskOpacity(true);
 
         this.stopPopupTweens();
+        target.setScale(new Vec3(1, 1, 1));
 
-        tween(target)
-            .to(0.18, { scale: new Vec3(0.3, 0.3, 1) }, { easing: 'quadIn' })
-            .call(() => {
+        if (targetOpacity) {
+            tween(targetOpacity)
+                .to(0.18, { opacity: 0 }, { easing: 'quadIn' })
+                .call(() => {
+                    this.node.destroy();
+                    onClosed?.();
+                })
+                .start();
+        } else {
+            this.scheduleOnce(() => {
                 this.node.destroy();
-            })
-            .start();
+                onClosed?.();
+            });
+        }
 
         if (maskOpacity) {
             tween(maskOpacity)
@@ -405,6 +508,11 @@ export class UISignLayer extends Component {
         return this.viewNode || this.node.getChildByName('view') || this.node;
     }
 
+    private getViewOpacity(createIfMissing: boolean): UIOpacity | null {
+        const target = this.getViewNode();
+        return target.getComponent(UIOpacity) || (createIfMissing ? target.addComponent(UIOpacity) : null);
+    }
+
     private getMaskOpacity(createIfMissing: boolean): UIOpacity | null {
         const mask = this.maskNode || this.node.getChildByName('mask');
         if (!mask) return null;
@@ -415,6 +523,9 @@ export class UISignLayer extends Component {
     private stopPopupTweens() {
         const target = this.getViewNode();
         if (target?.isValid) Tween.stopAllByTarget(target);
+
+        const targetOpacity = target?.isValid ? target.getComponent(UIOpacity) : null;
+        if (targetOpacity) Tween.stopAllByTarget(targetOpacity);
 
         const mask = this.maskNode || this.node.getChildByName('mask');
         const maskOpacity = mask?.isValid ? mask.getComponent(UIOpacity) : null;

@@ -1,7 +1,7 @@
 import { _decorator, assetManager, AssetManager, Component, director, find, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, sys, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
-import { GameMode, getCurrentGameMode } from './config/GameMode';
+import { ActivitySignMode, GameMode, getCurrentActivitySignMode, getCurrentGameMode } from './config/GameMode';
 import { ensureActivityLevelJson, ensureLevelJson, LevelJson, LevelJsonPosition, releaseActivityOutsideWindow, releaseOutsideWindow, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { ironItem } from './ironItem';
@@ -26,6 +26,7 @@ interface WinLayerData {
     comboTimes: number;
     winStreakSettlement: WinStreakSettlement | null;
     isActivity: boolean;
+    activitySignMode?: ActivitySignMode;
 }
 
 type GameEvaluateEventName = 'ready' | 'show' | 'destroy' | 'error';
@@ -127,6 +128,7 @@ export class GameCtrl extends Component {
 
     nowLevel = 0;
     private gameMode: GameMode = 'main';
+    private activitySignMode: ActivitySignMode = 'daily';
     private currentBoardId = 0;
     private levelDisplayName = '';
 
@@ -257,6 +259,7 @@ export class GameCtrl extends Component {
                     });
                     this.scheduleOnce(() => {
                         this.gameMode = getCurrentGameMode();
+                        this.activitySignMode = getCurrentActivitySignMode();
                         const { level, snapshot } = this.loadSavedProgress();
                         void this.requestStartLevel(level, snapshot);
                     }, 0);
@@ -294,6 +297,7 @@ export class GameCtrl extends Component {
 
     private restartFromEnable = () => {
         this.gameMode = getCurrentGameMode();
+        this.activitySignMode = getCurrentActivitySignMode();
         // 必须每次重读 — 胜利后玩家回主页再进入,内存里的 nowLevel 还是旧值
         const { level, snapshot } = this.loadSavedProgress();
         void this.requestStartLevel(level, snapshot);
@@ -2309,6 +2313,10 @@ export class GameCtrl extends Component {
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
         window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         if (this.gameMode === 'activity') {
+            if (this.activitySignMode === 'makeup') {
+                const makeupDay = ProgressManager.makeUpLatestMissingSignDay();
+                if (makeupDay) ProgressManager.addLeafConut(1);
+            }
             ProgressManager.saveActivityLevel(this.nowLevel + 1);
             ProgressManager.clearActivitySnapshot();
             ArchiveManager.instance.scheduleUpload();
@@ -2333,19 +2341,31 @@ export class GameCtrl extends Component {
     }
 
     private showWinFlow(data: WinLayerData) {
-        const showUIWinLayer = () => this.showUIWinLayerBeforeWin(data);
-
-        if (!data.isActivity && ProgressManager.shouldShowWinSignToday()) {
-            const winSignNode = LayerManager.instance.showUI('winSign', () => {
-                showUIWinLayer();
-            });
-            if (winSignNode) {
-                ProgressManager.markWinSignShownToday();
+        if (data.isActivity) {
+            const showActivityWin = () => this.showActivityFinalWin(data);
+            if (data.activitySignMode === 'makeup') {
+                showActivityWin();
                 return;
             }
+
+            const winSignNode = LayerManager.instance.showUI('winSign', showActivityWin);
+            if (!winSignNode) showActivityWin();
+            return;
         }
 
-        showUIWinLayer();
+        this.showUIWinLayerBeforeWin(data);
+    }
+
+    private showActivityFinalWin(data: WinLayerData) {
+        let returnedHome = false;
+        const returnHome = () => {
+            if (returnedHome) return;
+            returnedHome = true;
+            LayerManager.instance.showStartLayer();
+        };
+
+        const finalWinNode = LayerManager.instance.showUI('win', data, returnHome);
+        if (!finalWinNode) returnHome();
     }
 
     private showUIWinLayerBeforeWin(data: WinLayerData) {
@@ -2409,6 +2429,7 @@ export class GameCtrl extends Component {
             comboTimes: this.comboTimes,
             winStreakSettlement,
             isActivity: this.gameMode === 'activity',
+            activitySignMode: this.gameMode === 'activity' ? this.activitySignMode : undefined,
         };
     }
 

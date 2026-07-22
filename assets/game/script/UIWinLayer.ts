@@ -86,7 +86,7 @@ export class UIWinLayer extends Component {
         this.playOpenAnimation();
         this.setLabelString(this.rankLabel, this.getSettlementCopyText());
         this.setLabelString(this.iqLabel, iqText);
-        this.setLabelString(this.levleNexLabel, `关卡 ${nextLevel}`);
+        this.setLabelString(this.levleNexLabel, this.isActivity ? '挑战成功' : `关卡 ${nextLevel}`);
         this.setLabelString(this.gridLabel1, this.formatTime(time));
         this.setLabelString(this.gridLabel2, iqText);
         this.setLabelString(this.gridLabel3, `${comboTimes}`);
@@ -369,7 +369,9 @@ export class UIWinLayer extends Component {
         AudioManager.instance.playClick();
         this.requestSystemSubscriptionAfterSecondLevel();
         const onContinue = this.onContinue
-            ?? (() => director.emit(Constants.eventNames.EventWinNextLevel));
+            ?? (this.isActivity
+                ? () => LayerManager.instance.showStartLayer()
+                : () => director.emit(Constants.eventNames.EventWinNextLevel));
         this.onContinue = null;
         this.playCloseAnimation(onContinue);
     }

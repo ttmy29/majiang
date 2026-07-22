@@ -2,6 +2,7 @@ import { _decorator, Button, Component, director, DirectorEvent, EventTouch, Lab
 import { AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { ProgressManager } from './manager/ProgressManager';
+import { StorageKey, StorageManager } from './manager/StorageManager';
 import { StreakManager, WinStreakRewardConfig, WinStreakRewardType, WinStreakSettlement, WinStreakViewState } from './manager/StreakManager';
 const { ccclass, property } = _decorator;
 
@@ -9,6 +10,9 @@ const REWARD_ICON_SIZE = 76;
 const REWARD_ICON_X = -105;
 const REWARD_LABEL_X = 30;
 const PROGRESS_ANIMATION_SECONDS = 0.8;
+const DAILY_MANUAL_INTRO_HOLD_SECONDS = 1;
+const DAILY_MANUAL_INTRO_SCROLL_SECONDS = 1.2;
+const DAILY_MANUAL_INTRO_VERSION = 'top-v2';
 
 interface UIWinStreakInitOptions {
     settlement?: WinStreakSettlement | null;
@@ -77,8 +81,13 @@ export class UIWinStreakLayer extends Component {
     private displayedProgressOverride: number | null = null;
     private progressAnimationProxy: { progress: number } | null = null;
     private onContinue: (() => void) | null = null;
+    private isManualEntry = true;
+    private shouldPlayDailyManualIntro = false;
+    private dailyManualIntroHolding = false;
+    private dailyManualIntroScrollWasEnabled = true;
 
     public init(options?: UIWinStreakInitOptions): void {
+        this.isManualEntry = !options?.settlement && !options?.onContinue;
         this.autoClaimSettlement = options?.settlement ?? null;
         this.pendingAutoClaimRewards = (options?.autoClaimRewards ?? []).map((reward) => ({ ...reward }));
         this.onContinue = typeof options?.onContinue === 'function' ? options.onContinue : null;
@@ -109,6 +118,7 @@ export class UIWinStreakLayer extends Component {
 
     protected onDisable(): void {
         this.unschedule(this.refreshCountdown);
+        this.restoreDailyManualIntroScrollState();
     }
 
     protected start(): void {
@@ -117,6 +127,7 @@ export class UIWinStreakLayer extends Component {
             this.pendingAutoClaimRewards = StreakManager.getClaimableRewards();
         }
         this.setStartButtonReady(this.pendingAutoClaimRewards.length <= 0);
+        this.shouldPlayDailyManualIntro = this.shouldPlayDailyManualIntroToday();
         director.once(DirectorEvent.AFTER_DRAW, this.onFirstFrameDrawn, this);
     }
 
@@ -133,6 +144,7 @@ export class UIWinStreakLayer extends Component {
         }
         this.unschedule(this.refreshCountdown);
         this.unscheduleAllCallbacks();
+        this.restoreDailyManualIntroScrollState();
         this.stopPopupTweens();
         this.stopProgressAnimation();
         this.stopRewardTweens();
@@ -514,9 +526,86 @@ export class UIWinStreakLayer extends Component {
         if (this.rootOpacity?.isValid) {
             this.rootOpacity.opacity = this.rootTargetOpacity;
         }
+
+        if (this.shouldPlayDailyManualIntro && this.playDailyManualIntro()) return;
+
         this.refreshRewardView(true);
         this.scheduleOnce(() => this.refreshRewardView(true), 0);
         this.scheduleOnce(this.startAutoClaimFlow, 0.5);
+    }
+
+    private playDailyManualIntro(): boolean {
+        const scrollView = this.scrollView;
+        if (!scrollView?.isValid || !this.contentNode?.isValid) return false;
+
+        this.refreshRewardView(false);
+        scrollView.stopAutoScroll();
+        this.dailyManualIntroScrollWasEnabled = scrollView.enabled;
+        this.dailyManualIntroHolding = true;
+
+        if (!this.positionScrollViewAtTop()) {
+            this.restoreDailyManualIntroScrollState();
+            return false;
+        }
+        scrollView.enabled = false;
+        this.markDailyManualIntroShown();
+
+        // Widget 可能在下一帧更新可视区域，再调用一次引擎的顶部定位避免边界误差。
+        this.scheduleOnce(() => {
+            if (this.dailyManualIntroHolding) this.positionScrollViewAtTop();
+        }, 0);
+        this.scheduleOnce(this.startDailyManualIntroScroll, DAILY_MANUAL_INTRO_HOLD_SECONDS);
+        return true;
+    }
+
+    private startDailyManualIntroScroll = (): void => {
+        if (!this.node?.isValid || this.isClosing) return;
+
+        this.restoreDailyManualIntroScrollState();
+        const currentProgress = this.displayedProgressOverride
+            ?? this.rewardViewState?.progress
+            ?? StreakManager.getRewardViewState().progress;
+        this.positionAndScrollToProgress(currentProgress, DAILY_MANUAL_INTRO_SCROLL_SECONDS);
+        this.scheduleOnce(this.startAutoClaimFlow, DAILY_MANUAL_INTRO_SCROLL_SECONDS);
+    };
+
+    private positionScrollViewAtTop(): boolean {
+        const scrollView = this.scrollView;
+        const content = this.contentNode;
+        if (!scrollView?.isValid || !content?.isValid || !scrollView.view) return false;
+
+        content.getComponent(Layout)?.updateLayout();
+        scrollView.stopAutoScroll();
+        scrollView.scrollToTop(0, false);
+        return true;
+    }
+
+    private restoreDailyManualIntroScrollState(): void {
+        if (!this.dailyManualIntroHolding) return;
+        if (this.scrollView?.isValid) this.scrollView.enabled = this.dailyManualIntroScrollWasEnabled;
+        this.dailyManualIntroHolding = false;
+    }
+
+    private shouldPlayDailyManualIntroToday(): boolean {
+        if (!this.isManualEntry) return false;
+        return StorageManager.instance.getItem(StorageKey.WinStreakManualIntroShownDate) !== this.getDailyManualIntroFlag();
+    }
+
+    private markDailyManualIntroShown(): void {
+        StorageManager.instance.setItem(StorageKey.WinStreakManualIntroShownDate, this.getDailyManualIntroFlag());
+    }
+
+    private getDailyManualIntroFlag(): string {
+        return `${this.getTodayDateKey()}:${DAILY_MANUAL_INTRO_VERSION}`;
+    }
+
+    private getTodayDateKey(): string {
+        const now = new Date();
+        return `${now.getFullYear()}-${this.padDatePart(now.getMonth() + 1)}-${this.padDatePart(now.getDate())}`;
+    }
+
+    private padDatePart(value: number): string {
+        return value < 10 ? `0${value}` : `${value}`;
     }
 
     private startAutoClaimFlow = (): void => {
@@ -681,7 +770,7 @@ export class UIWinStreakLayer extends Component {
         this.setMarkerProgressLabel(Math.floor(state.progress));
     }
 
-    private positionAndScrollToProgress(progress: number): void {
+    private positionAndScrollToProgress(progress: number, duration = 0): void {
         const scrollView = this.scrollView;
         const content = this.contentNode;
         if (!scrollView?.isValid || !content?.isValid) return;
@@ -702,7 +791,11 @@ export class UIWinStreakLayer extends Component {
         const maxProgress = configs[configs.length - 1]?.threshold ?? 45;
         const safeProgress = Math.max(0, Math.min(maxProgress, progress));
         scrollView.stopAutoScroll();
-        scrollView.scrollToPercentVertical(safeProgress / Math.max(1, maxProgress), 0);
+        scrollView.scrollToPercentVertical(
+            safeProgress / Math.max(1, maxProgress),
+            Math.max(0, duration),
+            duration > 0,
+        );
     }
 
     private getProgressContentPosition(progress: number, contentTransform: UITransform): Vec3 | null {

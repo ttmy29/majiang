@@ -62,10 +62,9 @@ export class UIwinSignLayer extends Component {
         this.onCloseComplete = typeof onClose === 'function' ? onClose : null;
         this.initNodeRefs();
         this.refreshTipsText();
-        this.refreshTodayFinish();
         this.fitBgToViewTop();
         this.fitEffectToViewRightTop();
-        this.grantOpenLeaf();
+        this.refreshTodayFinish(this.grantOpenLeaf() || new Date());
         this.playOpenAnimation();
     }
 
@@ -104,11 +103,14 @@ export class UIwinSignLayer extends Component {
         label.string = Constants.winSign[index] || Constants.winSign[1] || Constants.winSign[0] || '';
     }
 
-    private grantOpenLeaf() {
-        if (this.hasGrantedOpenLeaf) return;
+    private grantOpenLeaf(): Date | null {
+        if (this.hasGrantedOpenLeaf) return null;
         this.hasGrantedOpenLeaf = true;
-        ProgressManager.signToday();
+
+        const now = new Date();
+        if (!ProgressManager.signToday(now)) return null;
         ProgressManager.addLeafConut(1);
+        return now;
     }
 
     private fitBgToViewTop() {
@@ -154,13 +156,13 @@ export class UIwinSignLayer extends Component {
         return new Vec3(x, y, z);
     }
 
-    private refreshTodayFinish() {
+    private refreshTodayFinish(date = new Date()) {
         const finishSlots = this.getWeekFinishSlots();
         if (finishSlots.length <= 0) return;
 
         finishSlots.sort((a, b) => a.slot.position.x - b.slot.position.x);
 
-        const jsDay = new Date().getDay();
+        const jsDay = date.getDay();
         const todayIndex = jsDay === 0 ? 6 : jsDay - 1;
 
         finishSlots.forEach(({ finish }, index) => {

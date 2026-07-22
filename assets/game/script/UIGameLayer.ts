@@ -286,6 +286,7 @@ export class UIGameLayer extends Component {
             director.on(Constants.eventNames.EventComboUpdate, this.onEventComboUpdate, this);
             director.on(Constants.eventNames.EventShowToast, this.onEventShowToast, this);
             director.on(Constants.eventNames.EventGameUiInit, this.onEventGameUiInit, this);
+            director.on(Constants.eventNames.EventUIPrefabsReady, this.onUIPrefabsReady, this);
             director.on(Constants.eventNames.EventLevelStart, this.onEventLevelStart, this);
             director.on(Constants.eventNames.EventRenderSlot, this.onEventRenderSlot, this);
             director.on(Constants.eventNames.EventClearSlot, this.onEventClearSlot, this);
@@ -310,6 +311,7 @@ export class UIGameLayer extends Component {
             director.off(Constants.eventNames.EventComboUpdate, this.onEventComboUpdate, this);
             director.off(Constants.eventNames.EventShowToast, this.onEventShowToast, this);
             director.off(Constants.eventNames.EventGameUiInit, this.onEventGameUiInit, this);
+            director.off(Constants.eventNames.EventUIPrefabsReady, this.onUIPrefabsReady, this);
             director.off(Constants.eventNames.EventLevelStart, this.onEventLevelStart, this);
             director.off(Constants.eventNames.EventRenderSlot, this.onEventRenderSlot, this);
             director.off(Constants.eventNames.EventClearSlot, this.onEventClearSlot, this);
@@ -331,6 +333,10 @@ export class UIGameLayer extends Component {
     onEventGameUiInit(payload: GameUiInitPayload) {
         this.mahjongItem = payload.mahjongItem;
         this.iconFrames = payload.iconFrames;
+    }
+
+    private onUIPrefabsReady() {
+        if (this.isGuideLevel) this.setGuideVisible(true, 0);
     }
 
     onEventLevelStart(payloadOrLevel: LevelStartPayload | number, difficultyLevel = 0) {

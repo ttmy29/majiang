@@ -66,17 +66,17 @@ const MAIN_LEVEL_START = 1;
 
 const REWARD_CONFIGS: ReadonlyArray<Readonly<WinStreakRewardConfig>> = [
     { threshold: 3, type: 'switch', amount: 1, boxType: 1 },
-    { threshold: 6, type: 'leaf', amount: 20, boxType: 1 },
+    { threshold: 6, type: 'undo', amount: 1, boxType: 1 },
     { threshold: 10, type: 'undo', amount: 2, boxType: 2 },
     { threshold: 13, type: 'undo', amount: 2, boxType: 2 },
-    { threshold: 16, type: 'leaf', amount: 20, boxType: 2 },
+    { threshold: 16, type: 'switch', amount: 1, boxType: 2 },
     { threshold: 20, type: 'switch', amount: 2, boxType: 2 },
     { threshold: 25, type: 'unlock', amount: 1, boxType: 3 },
     { threshold: 28, type: 'switch', amount: 1, boxType: 1 },
-    { threshold: 32, type: 'leaf', amount: 50, boxType: 2 },
+    { threshold: 32, type: 'switch', amount: 2, boxType: 2 },
     { threshold: 35, type: 'switch', amount: 2, boxType: 2 },
     { threshold: 40, type: 'switch', amount: 2, boxType: 2 },
-    { threshold: 45, type: 'leaf', amount: 100, boxType: 4 },
+    { threshold: 45, type: 'unlock', amount: 2, boxType: 4 },
 ];
 
 function isLevelTier(value: unknown): value is LevelTier {

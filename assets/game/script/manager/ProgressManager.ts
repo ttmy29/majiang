@@ -54,7 +54,7 @@ interface SignRewardRecord {
 
 const SNAPSHOT_VERSION = 1;
 const ACTIVITY_FIRST_BOARD = 1;
-const ACTIVITY_FALLBACK_BOARD = 150;
+const ACTIVITY_FALLBACK_BOARD = 93;
 
 export class ProgressManager {
     static loadLevel(): number {
@@ -304,6 +304,34 @@ export class ProgressManager {
 
     static loadSignMonthCount(now = new Date()): number {
         return this.loadSignMonthDays(now).length;
+    }
+
+    static loadMissingSignDaysBeforeToday(now = new Date()): number[] {
+        const signedDays = new Set(this.loadSignMonthDays(now));
+        const missingDays: number[] = [];
+        for (let day = 1; day < now.getDate(); day++) {
+            if (!signedDays.has(day)) missingDays.push(day);
+        }
+        return missingDays;
+    }
+
+    static makeUpLatestMissingSignDay(now = new Date()): number | null {
+        const missingDays = this.loadMissingSignDaysBeforeToday(now);
+        const missingDay = missingDays[missingDays.length - 1];
+        if (!missingDay) return null;
+
+        const month = this.formatSignMonth(now);
+        const days = this.loadSignMonthDays(now);
+        days.push(missingDay);
+        days.sort((a, b) => a - b);
+        StorageManager.instance.setItem(StorageKey.SignMonthDays, JSON.stringify({ month, days }));
+        ArchiveManager.instance.scheduleUpload();
+        director.emit(Constants.eventNames.EventSignInUpdate, {
+            date: this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), missingDay)),
+            streak: this.loadSignStreak(now),
+            days,
+        });
+        return missingDay;
     }
 
     static getSignRewardRequiredDays(index: number, now = new Date()): number {

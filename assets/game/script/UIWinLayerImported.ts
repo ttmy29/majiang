@@ -66,6 +66,7 @@ export class UIWinLayerImported extends Component {
     private static readonly SELF_RANK_SETTLE_OVERSHOOT_SECONDS = 0.08;
     private static readonly SELF_RANK_SETTLE_RESTORE_SECONDS = 0.06;
     private static readonly PROMOTION_RESOURCE_DIR = 'resources/win/UIWinLayer/settlementRank';
+    private static readonly PROMOTION_DIGIT_SPACING = -6;
     private static readonly PROMOTION_TIER_ASSETS = [
         'tier_1_bronze',
         'tier_2_silver',
@@ -114,6 +115,7 @@ export class UIWinLayerImported extends Component {
     private _rankMoveProxy: RankMoveProxy | null = null;
     private _activeRankFloatItem: Node | null = null;
     private _rankScrollView: ScrollView | null = null;
+    private _promotionCountRequestId = 0;
     private _rankSettlement: SettlementRankResult = {
         tierIndex: 0,
         progress: 0,
@@ -153,6 +155,7 @@ export class UIWinLayerImported extends Component {
 
     protected onDestroy(): void {
         if (UIWinLayerImported._current === this) UIWinLayerImported._current = null;
+        this._promotionCountRequestId += 1;
         this.stopRankUpRuntimeTweens();
         for (const { node, handler } of this._bound) {
             if (node?.isValid) node.off(Node.EventType.TOUCH_END, handler, this);
@@ -170,8 +173,8 @@ export class UIWinLayerImported extends Component {
         const view = this.node.getChildByName('view');
         const hint = view?.getChildByName('promotionHint');
         const tierNode = view?.getChildByName('promotionTier');
-        const countLabel = hint?.getChildByName('promotionCount')?.getComponent(Label);
-        if (!hint || !tierNode || !countLabel) return;
+        const countNode = hint?.getChildByName('promotionCount');
+        if (!hint || !tierNode || !countNode) return;
 
         const rankCount = Math.min(
             Constants.rankNames.length,
@@ -186,11 +189,86 @@ export class UIWinLayerImported extends Component {
 
         hint.active = true;
         tierNode.active = true;
-        countLabel.string = `${Math.max(
+        const promotionCount = Math.max(
             0,
             SettlementRankManager.PROGRESS_COUNT - this._rankSettlement.progress,
-        )}`;
+        );
+        this.loadPromotionCountSprites(countNode, promotionCount);
         this.loadPromotionTierSprite(tierNode, targetTierIndex);
+    }
+
+    private loadPromotionCountSprites(countNode: Node, count: number): void {
+        const legacyLabel = countNode.getComponent(Label);
+        const countText = `${Math.max(0, Math.floor(count))}`;
+        if (legacyLabel) {
+            legacyLabel.string = '';
+            legacyLabel.enabled = false;
+        }
+        this.clearPromotionDigitNodes(countNode);
+
+        const bundle = assetManager.getBundle(Constants.GameBundleName);
+        if (!bundle) {
+            console.warn('[UIWinLayerImported] 游戏资源包未加载，无法显示晋级图片数字');
+            return;
+        }
+
+        const requestId = ++this._promotionCountRequestId;
+        const frames: Array<SpriteFrame | null> = countText.split('').map(() => null);
+        let remaining = frames.length;
+        let failed = false;
+
+        countText.split('').forEach((digit, index) => {
+            const path = `${UIWinLayerImported.PROMOTION_RESOURCE_DIR}/digit_${digit}/spriteFrame`;
+            bundle.load(path, SpriteFrame, (err, frame) => {
+                if (requestId !== this._promotionCountRequestId) return;
+                if (err || !frame) {
+                    failed = true;
+                    console.warn(`[UIWinLayerImported] 晋级数字素材加载失败: ${path}`, err);
+                } else {
+                    frames[index] = frame;
+                }
+
+                remaining -= 1;
+                if (remaining > 0 || !this.node.isValid || !countNode.isValid) return;
+                if (failed || frames.some((item) => !item)) return;
+                this.renderPromotionDigitSprites(countNode, frames as SpriteFrame[]);
+            });
+        });
+    }
+
+    private renderPromotionDigitSprites(countNode: Node, frames: SpriteFrame[]): void {
+        this.clearPromotionDigitNodes(countNode);
+        const sizes = frames.map((frame) => frame.originalSize);
+        const spacing = UIWinLayerImported.PROMOTION_DIGIT_SPACING;
+        const totalWidth = sizes.reduce((sum, size) => sum + size.width, 0)
+            + Math.max(0, sizes.length - 1) * spacing;
+        const maxHeight = sizes.reduce((height, size) => Math.max(height, size.height), 0);
+        const countTransform = countNode.getComponent(UITransform) || countNode.addComponent(UITransform);
+        countTransform.setContentSize(totalWidth, maxHeight);
+
+        let cursorX = -totalWidth / 2;
+        frames.forEach((frame, index) => {
+            const size = sizes[index];
+            const digitNode = new Node(`promotionDigit_${index}`);
+            digitNode.layer = countNode.layer;
+            countNode.addChild(digitNode);
+
+            const transform = digitNode.addComponent(UITransform);
+            transform.setContentSize(size.width, size.height);
+            const sprite = digitNode.addComponent(Sprite);
+            sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+            sprite.spriteFrame = frame;
+            digitNode.setPosition(cursorX + size.width / 2, 0, 0);
+            cursorX += size.width + spacing;
+        });
+    }
+
+    private clearPromotionDigitNodes(countNode: Node): void {
+        for (const child of [...countNode.children]) {
+            if (!child.name.startsWith('promotionDigit_')) continue;
+            child.removeFromParent();
+            child.destroy();
+        }
     }
 
     private loadPromotionTierSprite(tierNode: Node, tierIndex: number): void {

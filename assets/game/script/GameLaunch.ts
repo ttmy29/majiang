@@ -12,7 +12,11 @@ export class GameLaunch extends Component {
     
     start() {
         LayerManager.instance.init();
-        LayerManager.instance.showStartLayer();
+        if (ProgressManager.loadLevel() === 0) {
+            LayerManager.instance.showGameLayer();
+        } else {
+            LayerManager.instance.showStartLayer(false);
+        }
         this.initAudioManager();
         this.initPrefabResources();
         this.initAudioResources();
@@ -89,17 +93,9 @@ export class GameLaunch extends Component {
                 //@ts-ignore
                 LayerManager.instance.initUIPrefab(prefabs);
                 director.emit(Constants.eventNames.EventUIPrefabsReady);
-                this.scheduleOnce(this.ensureDailySignPopupOpened, 0);
             });
         }
     }
-
-    private ensureDailySignPopupOpened = () => {
-        if (!ProgressManager.shouldAutoShowDailySignToday()) return;
-        if (LayerManager.instance.getOpenUI('signDaily')) return;
-
-        LayerManager.instance.showUI('signDaily');
-    };
 
     initAudioResources() {
         // assetManager.loadBundle(Constants.AudioBundleName, (err, bundle) => {

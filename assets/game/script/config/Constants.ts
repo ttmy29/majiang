@@ -56,6 +56,7 @@ const Constants = {
         EventLeafConutUpdate: 'LeafConutUpdate',
         EventSignInUpdate: 'SignInUpdate',
         EventUIPrefabsReady: 'UIPrefabsReady',
+        EventReturnHome: 'ReturnHome',
     },
     // UIGameLayer.slotNodeArr 中节点的固定索引约定：
     // [0] = 底部存牌槽 (slot)，[1..4] = 顶部 4 个目标槽 (slot1~slot4)
