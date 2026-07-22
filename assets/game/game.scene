@@ -12305,7 +12305,7 @@
         "__id__": 460
       }
     ],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 463
@@ -15933,7 +15933,7 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": -280,
+      "x": 280,
       "y": 772.521,
       "z": 0
     },
