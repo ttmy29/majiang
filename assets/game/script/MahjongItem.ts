@@ -98,6 +98,11 @@ export class MahjongItem extends Component {
         this.node.off(Node.EventType.TRANSFORM_CHANGED, this.syncShadowTransform, this);
         this.node.off(Node.EventType.PARENT_CHANGED, this.onTileParentChanged, this);
         this.stopTouchTween();
+        // 牌节点自身被隐藏时，抽到 layer 容器里的阴影不会继承 inactive 状态。
+        // 这里只改 active，不动层级；父级整体反激活时 node.active 仍为 true，无需处理。
+        if (!this.node.active && this.shadowNode?.isValid && this.shadowNode.parent !== this.node) {
+            this.shadowNode.active = false;
+        }
         // 父节点正在反激活时，任何 setParent / addChild / setSiblingIndex 都会抛
         // "Cannot change hierarchy while activating or deactivating the parent."
         // 这里只做属性瞬时还原，层级相关的恢复留到下次 start / onTileParentChanged
