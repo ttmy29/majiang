@@ -163,6 +163,8 @@ export class UIFailureLayer extends Component {
             && StreakManager.getStreak() > 0
             && restartConfirmNode
             && !restartConfirmNode.active) {
+            if (this.iconNode1) this.iconNode1.active = false;
+            if (this.iconNode2) this.iconNode2.active = false;
             restartConfirmNode.active = true;
             return;
         }

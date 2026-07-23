@@ -15,7 +15,7 @@ export class GameLaunch extends Component {
         if (ProgressManager.loadLevel() === 0) {
             LayerManager.instance.showGameLayer();
         } else {
-            LayerManager.instance.showStartLayer(false);
+            LayerManager.instance.showStartLayer();
         }
         this.initAudioManager();
         this.initPrefabResources();
