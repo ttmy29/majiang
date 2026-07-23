@@ -54,7 +54,15 @@ interface SignRewardRecord {
 
 const SNAPSHOT_VERSION = 1;
 const ACTIVITY_FIRST_BOARD = 1;
-const ACTIVITY_FALLBACK_BOARD = 93;
+const ACTIVITY_MAX_BOARD = 93;
+// v2 marks randomized post-cap boards. Legacy records pinned to board 93 must be rerolled.
+const ACTIVITY_BOARD_RECORD_VERSION = 2;
+
+interface ActivityBoardRecord {
+    version?: number;
+    level?: number;
+    boardId?: number;
+}
 
 export class ProgressManager {
     static loadLevel(): number {
@@ -81,28 +89,63 @@ export class ProgressManager {
 
     static loadActivityBoardId(level: number): number {
         const normalizedLevel = Math.max(0, Math.floor(level));
-        const boardId = Math.min(ACTIVITY_FALLBACK_BOARD, ACTIVITY_FIRST_BOARD + normalizedLevel);
+        const sequentialBoardId = ACTIVITY_FIRST_BOARD + normalizedLevel;
         const raw = StorageManager.instance.getItem(StorageKey.ActivityBoardId);
+        let stored: ActivityBoardRecord | null = null;
         if (raw) {
             try {
-                const obj = JSON.parse(raw) as { level?: number; boardId?: number };
-                if (obj && obj.level === normalizedLevel && obj.boardId !== boardId) {
-                    this.clearActivitySnapshot();
-                }
+                stored = JSON.parse(raw) as ActivityBoardRecord;
             } catch (e) {
                 console.warn('ProgressManager: activity board parse failed', e);
             }
         }
 
+        if (sequentialBoardId <= ACTIVITY_MAX_BOARD) {
+            if (stored?.level === normalizedLevel && stored.boardId !== sequentialBoardId) {
+                this.clearActivitySnapshot();
+            }
+            this.saveActivityBoardId(normalizedLevel, sequentialBoardId);
+            return sequentialBoardId;
+        }
+
+        const candidateStoredBoardId = stored?.boardId;
+        const storedBoardId = typeof candidateStoredBoardId === 'number'
+            && Number.isInteger(candidateStoredBoardId)
+            && candidateStoredBoardId >= ACTIVITY_FIRST_BOARD
+            && candidateStoredBoardId <= ACTIVITY_MAX_BOARD
+            ? candidateStoredBoardId
+            : null;
+        if (stored?.version === ACTIVITY_BOARD_RECORD_VERSION
+            && stored.level === normalizedLevel
+            && storedBoardId !== null) {
+            return storedBoardId;
+        }
+
+        if (stored?.level === normalizedLevel) this.clearActivitySnapshot();
+        const boardId = this.pickRandomActivityBoardId(storedBoardId);
         this.saveActivityBoardId(normalizedLevel, boardId);
         return boardId;
     }
 
     static saveActivityBoardId(level: number, boardId: number): void {
         StorageManager.instance.setItem(StorageKey.ActivityBoardId, JSON.stringify({
+            version: ACTIVITY_BOARD_RECORD_VERSION,
             level: Math.max(0, Math.floor(level)),
             boardId: Math.max(0, Math.floor(boardId)),
         }));
+    }
+
+    private static pickRandomActivityBoardId(excludedBoardId: number | null): number {
+        const boardCount = ACTIVITY_MAX_BOARD - ACTIVITY_FIRST_BOARD + 1;
+        if (boardCount <= 1) return ACTIVITY_FIRST_BOARD;
+
+        const canExclude = excludedBoardId !== null
+            && excludedBoardId >= ACTIVITY_FIRST_BOARD
+            && excludedBoardId <= ACTIVITY_MAX_BOARD;
+        const candidateCount = canExclude ? boardCount - 1 : boardCount;
+        let boardId = ACTIVITY_FIRST_BOARD + Math.floor(Math.random() * candidateCount);
+        if (canExclude && excludedBoardId !== null && boardId >= excludedBoardId) boardId += 1;
+        return boardId;
     }
 
     // —— 道具剩余次数,永久保存:撤回/换牌首次默认 1,解锁首次默认 0 ——
