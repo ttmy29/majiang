@@ -1,4 +1,4 @@
-import { _decorator, assetManager, Component, director, instantiate, Label, Layout, Node, ScrollView, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, v3 } from 'cc';
+import { _decorator, assetManager, Component, director, Director, instantiate, Label, Layout, Node, ScrollView, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, v3 } from 'cc';
 import { Constants } from './config/Constants';
 import { AudioManager } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
@@ -55,9 +55,16 @@ interface RankMoveProxy {
     ratio: number;
 }
 
+type VirtualRankNode = Node & {
+    __virtualRank?: number;
+};
+
 @ccclass('UIWinLayerImported')
 export class UIWinLayerImported extends Component {
     private static _current: UIWinLayerImported | null = null;
+    private static _rankTimingSequence = 0;
+    private static readonly VIRTUAL_RANK_BUFFER_ROWS = 2;
+    private static readonly RANK_SCROLLING_EVENT = 'scrolling';
     private static readonly SELF_RANK_ANIM_DELAY = 0.25;
     private static readonly SELF_RANK_LIFT_SECONDS = 0.1;
     private static readonly SELF_RANK_MIN_MOVE_SECONDS = 0.32;
@@ -92,6 +99,11 @@ export class UIWinLayerImported extends Component {
         'tier9',
         'tier10',
     ];
+    private static readonly RANK_TIER_FRAME_CACHE = new Map<number, SpriteFrame>();
+    private static readonly RANK_TIER_FRAME_WAITERS = new Map<
+        number,
+        Array<(frame: SpriteFrame | null) => void>
+    >();
     private static readonly RANK_NAME_PREFIXES = [
         '糖豆', '小羊', '云朵', '西瓜', '晴天',
         '星星', '阿布', '小猪', '风车', '猫爪',
@@ -115,6 +127,26 @@ export class UIWinLayerImported extends Component {
     private _rankMoveProxy: RankMoveProxy | null = null;
     private _activeRankFloatItem: Node | null = null;
     private _rankScrollView: ScrollView | null = null;
+    private _rankLayout: Node | null = null;
+    private _rankSelfTemplate: Node | null = null;
+    private _rankNormalTemplate: Node | null = null;
+    private _rankRows: RankRow[] = [];
+    private _rankVirtualNormalNodes: VirtualRankNode[] = [];
+    private _rankVirtualSelfNode: VirtualRankNode | null = null;
+    private _rankVirtualWindowStart = -1;
+    private _rankVirtualWindowEnd = -1;
+    private _rankVirtualEnabled = false;
+    private _rankItemHeight = 1;
+    private _rankItemSpacingY = 0;
+    private _rankRowHeight = 1;
+    private _rankPaddingTop = 0;
+    private _rankPaddingBottom = 0;
+    private _rankItemX = 0;
+    private _rankItemZ = 0;
+    private _rankTimingLabel = '';
+    private _rankTimingStartedAt = 0;
+    private _rankTimingActive = false;
+    private _rankDisplayLogScheduled = false;
     private _promotionCountRequestId = 0;
     private _rankSettlement: SettlementRankResult = {
         tierIndex: 0,
@@ -156,6 +188,11 @@ export class UIWinLayerImported extends Component {
     protected onDestroy(): void {
         if (UIWinLayerImported._current === this) UIWinLayerImported._current = null;
         this._promotionCountRequestId += 1;
+        if (this._rankTimingActive) {
+            this.logRankTiming('排行榜销毁，计时提前结束');
+            this.endRankTiming();
+        }
+        this.stopVirtualRankList();
         this.stopRankUpRuntimeTweens();
         for (const { node, handler } of this._bound) {
             if (node?.isValid) node.off(Node.EventType.TOUCH_END, handler, this);
@@ -289,20 +326,26 @@ export class UIWinLayerImported extends Component {
     }
 
     private setupRankList(): void {
+        this.beginRankTiming();
         this.setContinueAvailable(false);
         this.unscheduleAllCallbacks();
+        this.stopVirtualRankList();
         this.stopRankUpRuntimeTweens();
 
         const view = this.node.getChildByName('view');
         const layout = this.findChildDeep(view, 'Layout');
         if (!layout) {
             this.setContinueAvailable(true);
+            this.logRankTiming('排行榜未显示：找不到 Layout');
+            this.endRankTiming();
             return;
         }
 
         const templateItems = layout.children.filter((child) => child.name === 'item');
         if (templateItems.length === 0) {
             this.setContinueAvailable(true);
+            this.logRankTiming('排行榜未显示：找不到 item 模板');
+            this.endRankTiming();
             return;
         }
 
@@ -321,56 +364,54 @@ export class UIWinLayerImported extends Component {
             finalRows,
             this._rankSettlement.startRank,
         );
-        const selfTemplate = instantiate(templateItems[0]);
-        const normalTemplate = instantiate(templateItems[1] ?? templateItems[0]);
-
         for (const item of templateItems) item.active = false;
-        let finalRankPositions: Map<number, Vec3> | null = null;
-        let rankNodes: Map<number, Node>;
-        if (animationData) {
-            const finalRankNodes = this.renderRankRows(layout, layoutComp, selfTemplate, normalTemplate, finalRows);
-            const capturedFinalRankPositions = new Map<number, Vec3>();
-            finalRankNodes.forEach((node, rank) => {
-                capturedFinalRankPositions.set(rank, node.position.clone());
-            });
-            finalRankPositions = capturedFinalRankPositions;
-            rankNodes = this.renderRankRows(
-                layout,
-                layoutComp,
-                selfTemplate,
-                normalTemplate,
-                animationData.startRows,
-            );
-        } else {
-            rankNodes = this.renderRankRows(layout, layoutComp, selfTemplate, normalTemplate, finalRows);
-        }
+        this._rankLayout = layout;
+        this._rankSelfTemplate = templateItems[0];
+        this._rankNormalTemplate = templateItems[1] ?? templateItems[0];
+        this._rankRows = finalRows;
+        this.prepareVirtualRankLayout(layout, layoutComp, templateItems[0], finalRows.length);
         const scrollView = this.configureRankScrollView(layout);
 
-        if (!animationData || !scrollView) {
-            if (animationData) {
-                rankNodes = this.renderRankRows(layout, layoutComp, selfTemplate, normalTemplate, finalRows);
-            }
-            const selfRank = finalRows.find((row) => row.isSelf)?.rank ?? 1;
-            if (scrollView) {
-                this.scrollToRank(scrollView, selfRank, rankNodes, 0);
-                scrollView.enabled = true;
-            }
+        if (!scrollView) {
             this.setContinueAvailable(true);
+            this.logRankTiming('排行榜未显示：找不到 ScrollView');
+            this.endRankTiming();
             return;
         }
 
-        const selfSourceItem = rankNodes.get(animationData.selfStartRank);
-        const targetItem = rankNodes.get(animationData.selfFinalRank);
-        const finalTargetPosition = finalRankPositions?.get(animationData.selfFinalRank);
-        if (!selfSourceItem || !targetItem || !finalRankPositions || !finalTargetPosition) {
-            rankNodes = this.renderRankRows(layout, layoutComp, selfTemplate, normalTemplate, finalRows);
-            this.scrollToRank(scrollView, animationData.selfFinalRank, rankNodes, 0);
+        if (!animationData) {
+            const selfRank = finalRows.find((row) => row.isSelf)?.rank ?? 1;
+            this.activateVirtualRankList(scrollView, selfRank);
             scrollView.enabled = true;
             this.setContinueAvailable(true);
+            this.logRankDisplayedAfterDraw(false);
             return;
         }
 
-        this.scrollToRank(scrollView, animationData.selfStartRank, rankNodes, 0);
+        const rankNodes = this.renderRankAnimationWindow(
+            layout,
+            scrollView,
+            animationData.startRows,
+            animationData.selfFinalRank,
+            animationData.selfStartRank,
+        );
+        const finalRankPositions = new Map<number, Vec3>();
+        for (let rank = animationData.selfFinalRank; rank <= animationData.selfStartRank + 1; rank++) {
+            finalRankPositions.set(rank, this.getRankItemPosition(rank));
+        }
+        const selfSourceItem = rankNodes.get(animationData.selfStartRank);
+        const targetItem = rankNodes.get(animationData.selfFinalRank);
+        const finalTargetPosition = finalRankPositions.get(animationData.selfFinalRank);
+        if (!selfSourceItem || !targetItem || !finalTargetPosition) {
+            this.activateVirtualRankList(scrollView, animationData.selfFinalRank);
+            scrollView.enabled = true;
+            this.setContinueAvailable(true);
+            this.logRankDisplayedAfterDraw(false);
+            return;
+        }
+
+        this.scrollToRankPosition(scrollView, animationData.selfStartRank, 0);
+        this.logRankDisplayedAfterDraw(true);
         this.scheduleOnce(() => {
             this.playSelfRankUpAnimation(
                 layout,
@@ -381,6 +422,45 @@ export class UIWinLayerImported extends Component {
                 finalRankPositions,
             );
         }, UIWinLayerImported.SELF_RANK_ANIM_DELAY);
+    }
+
+    private beginRankTiming(): void {
+        if (this._rankTimingActive) this.endRankTiming();
+        const sequence = ++UIWinLayerImported._rankTimingSequence;
+        this._rankTimingLabel = `[UIWinLayerImported][排行榜][关卡${this._info.level}][#${sequence}]`;
+        this._rankTimingStartedAt = Date.now();
+        this._rankTimingActive = true;
+        this._rankDisplayLogScheduled = false;
+        console.log(this._rankTimingLabel, '0ms', '排行榜开始加载');
+    }
+
+    private logRankTiming(message: string): void {
+        if (!this._rankTimingActive) return;
+        console.log(this._rankTimingLabel, `${Date.now() - this._rankTimingStartedAt}ms`, message);
+    }
+
+    private logRankDisplayedAfterDraw(hasAnimation: boolean): void {
+        if (!this._rankTimingActive || this._rankDisplayLogScheduled) return;
+        this._rankDisplayLogScheduled = true;
+        director.once(Director.EVENT_AFTER_DRAW, () => {
+            if (!this._rankTimingActive || !this.node.isValid || !this.node.activeInHierarchy) return;
+            this.logRankTiming('排行榜已显示（首帧绘制完成）');
+            if (!hasAnimation) {
+                this.logRankTiming('排行榜动画结束（本次无动画）');
+                this.endRankTiming();
+            }
+        });
+    }
+
+    private endRankTiming(): void {
+        if (!this._rankTimingActive) return;
+        console.log(
+            this._rankTimingLabel,
+            `${Date.now() - this._rankTimingStartedAt}ms`,
+            '排行榜计时结束',
+        );
+        this._rankTimingActive = false;
+        this._rankDisplayLogScheduled = false;
     }
 
     private findChildDeep(root: Node | null | undefined, name: string): Node | null {
@@ -409,35 +489,222 @@ export class UIWinLayerImported extends Component {
         }
     }
 
-    private renderRankRows(
+    private prepareVirtualRankLayout(
         layout: Node,
         layoutComp: Layout | null,
-        selfTemplate: Node,
-        normalTemplate: Node,
+        sampleItem: Node,
+        rowCount: number,
+    ): void {
+        const sampleTransform = sampleItem.getComponent(UITransform);
+        const layoutTransform = layout.getComponent(UITransform);
+        this._rankItemHeight = Math.max(1, sampleTransform?.contentSize.height ?? 1);
+        this._rankItemSpacingY = layoutComp?.spacingY ?? 0;
+        this._rankRowHeight = Math.max(1, this._rankItemHeight + this._rankItemSpacingY);
+        this._rankPaddingTop = layoutComp?.paddingTop ?? 0;
+        this._rankPaddingBottom = layoutComp?.paddingBottom ?? 0;
+        this._rankItemX = sampleItem.position.x;
+        this._rankItemZ = sampleItem.position.z;
+
+        if (layoutComp) layoutComp.enabled = false;
+        if (!layoutTransform) return;
+        const contentHeight = this._rankPaddingTop
+            + this._rankPaddingBottom
+            + rowCount * this._rankItemHeight
+            + Math.max(0, rowCount - 1) * this._rankItemSpacingY;
+        layoutTransform.setContentSize(layoutTransform.contentSize.width, contentHeight);
+    }
+
+    private getRankItemPosition(rank: number): Vec3 {
+        const normalizedRank = Math.max(1, Math.floor(rank));
+        return v3(
+            this._rankItemX,
+            -this._rankPaddingTop
+                - this._rankItemHeight * 0.5
+                - (normalizedRank - 1) * this._rankRowHeight,
+            this._rankItemZ,
+        );
+    }
+
+    private prepareRankItemNode(item: Node): void {
+        item.name = 'rankItem';
+        item.setScale(1, 1, 1);
+        this.setNodeOpacity(item, 255);
+        for (const name of ['count', 'label1', 'label2', 'tierLabel']) {
+            const label = item.getChildByName(name)?.getComponent(Label);
+            if (label) label.cacheMode = Label.CacheMode.BITMAP;
+        }
+    }
+
+    private createRankItem(template: Node, parent: Node): VirtualRankNode {
+        const item = instantiate(template) as VirtualRankNode;
+        this.prepareRankItemNode(item);
+        item.parent = parent;
+        item.setSiblingIndex(parent.children.length - 1);
+        item.active = true;
+        return item;
+    }
+
+    private renderRankAnimationWindow(
+        layout: Node,
+        scrollView: ScrollView,
         rows: RankRow[],
+        firstPathRank: number,
+        lastPathRank: number,
     ): Map<number, Node> {
         this.clearRenderedRankItems(layout);
-        if (layoutComp) layoutComp.enabled = true;
-
+        const viewHeight = this.getRankViewHeight(scrollView);
+        const halfVisibleRows = Math.ceil(viewHeight / this._rankRowHeight / 2);
+        const firstRank = Math.max(1, firstPathRank - halfVisibleRows);
+        const lastRank = Math.min(rows.length, lastPathRank + halfVisibleRows);
+        const rowsByRank = new Map(rows.map((row) => [row.rank, row]));
         const rankNodes = new Map<number, Node>();
-        for (const row of [...rows].sort((a, b) => a.rank - b.rank)) {
-            const item = instantiate(row.isSelf ? selfTemplate : normalTemplate);
-            item.name = 'rankItem';
-            item.parent = layout;
-            item.setSiblingIndex(layout.children.length - 1);
-            item.active = true;
-            item.setScale(1, 1, 1);
-            this.setNodeOpacity(item, 255);
-            this.applyRankRowData(item, row);
-            rankNodes.set(row.rank, item);
-        }
 
-        this.resizeRankContent(layout, layoutComp);
-        if (layoutComp) {
-            layoutComp.updateLayout(true);
-            layoutComp.enabled = false;
+        for (let rank = firstRank; rank <= lastRank; rank++) {
+            const row = rowsByRank.get(rank);
+            if (!row || !this._rankSelfTemplate || !this._rankNormalTemplate) continue;
+            const item = this.createRankItem(
+                row.isSelf ? this._rankSelfTemplate : this._rankNormalTemplate,
+                layout,
+            );
+            item.__virtualRank = rank;
+            item.setPosition(this.getRankItemPosition(rank));
+            this.applyRankRowData(item, row);
+            rankNodes.set(rank, item);
         }
         return rankNodes;
+    }
+
+    private activateVirtualRankList(scrollView: ScrollView, focusRank: number): void {
+        const layout = this._rankLayout;
+        const selfTemplate = this._rankSelfTemplate;
+        const normalTemplate = this._rankNormalTemplate;
+        if (!layout || !selfTemplate || !normalTemplate || this._rankRows.length === 0) return;
+
+        this.stopVirtualRankList();
+        this.clearRenderedRankItems(layout);
+        this.scrollToRankPosition(scrollView, focusRank, 0);
+
+        const poolSize = this.getVirtualRankPoolSize(scrollView, this._rankRows.length);
+        this._rankVirtualSelfNode = this.createRankItem(selfTemplate, layout);
+        this._rankVirtualSelfNode.active = false;
+        this._rankVirtualNormalNodes = [];
+        for (let index = 0; index < poolSize; index++) {
+            const item = this.createRankItem(normalTemplate, layout);
+            item.active = false;
+            this._rankVirtualNormalNodes.push(item);
+        }
+
+        this._rankVirtualEnabled = true;
+        scrollView.node.on(UIWinLayerImported.RANK_SCROLLING_EVENT, this.onVirtualRankScroll, this);
+        this.refreshVirtualRankRows(true, focusRank);
+        this.scheduleOnce(() => this.refreshVirtualRankRows(true), 0);
+    }
+
+    private stopVirtualRankList(): void {
+        if (this._rankScrollView?.node?.isValid) {
+            this._rankScrollView.node.off(
+                UIWinLayerImported.RANK_SCROLLING_EVENT,
+                this.onVirtualRankScroll,
+                this,
+            );
+        }
+        this._rankVirtualEnabled = false;
+        this._rankVirtualWindowStart = -1;
+        this._rankVirtualWindowEnd = -1;
+        this._rankVirtualNormalNodes = [];
+        this._rankVirtualSelfNode = null;
+    }
+
+    private onVirtualRankScroll = (): void => {
+        this.refreshVirtualRankRows(false);
+    };
+
+    private refreshVirtualRankRows(force = false, focusRank?: number): void {
+        const scrollView = this._rankScrollView;
+        const total = this._rankRows.length;
+        if (!this._rankVirtualEnabled || !scrollView || total === 0) return;
+
+        const viewHeight = this.getRankViewHeight(scrollView);
+        let startRank: number;
+        let endRank: number;
+        if (focusRank != null) {
+            const poolSize = this.getVirtualRankPoolSize(scrollView, total);
+            startRank = Math.floor(focusRank) - Math.floor(poolSize / 2);
+            startRank = Math.max(1, Math.min(startRank, Math.max(1, total - poolSize + 1)));
+            endRank = Math.min(total, startRank + poolSize - 1);
+        } else {
+            const offsetY = this.getRankScrollOffsetY(scrollView);
+            startRank = Math.max(
+                1,
+                Math.floor(offsetY / this._rankRowHeight) + 1
+                    - UIWinLayerImported.VIRTUAL_RANK_BUFFER_ROWS,
+            );
+            endRank = Math.min(
+                total,
+                Math.ceil((offsetY + viewHeight) / this._rankRowHeight)
+                    + UIWinLayerImported.VIRTUAL_RANK_BUFFER_ROWS,
+            );
+        }
+
+        if (
+            !force
+            && startRank === this._rankVirtualWindowStart
+            && endRank === this._rankVirtualWindowEnd
+        ) return;
+
+        this._rankVirtualWindowStart = startRank;
+        this._rankVirtualWindowEnd = endRank;
+        const selfNode = this._rankVirtualSelfNode;
+        const normalNodes = this._rankVirtualNormalNodes;
+        let normalIndex = 0;
+        let selfVisible = false;
+
+        for (let rank = startRank; rank <= endRank; rank++) {
+            const row = this._rankRows[rank - 1];
+            if (!row) continue;
+            const item = row.isSelf ? selfNode : normalNodes[normalIndex++];
+            if (!item?.isValid) continue;
+
+            item.active = true;
+            item.setPosition(this.getRankItemPosition(rank));
+            if (force || item.__virtualRank !== rank) {
+                item.__virtualRank = rank;
+                this.applyRankRowData(item, row);
+            }
+            if (row.isSelf) selfVisible = true;
+        }
+
+        for (; normalIndex < normalNodes.length; normalIndex++) {
+            const item = normalNodes[normalIndex];
+            if (!item?.isValid) continue;
+            item.active = false;
+            item.__virtualRank = -1;
+        }
+        if (selfNode?.isValid && !selfVisible) {
+            selfNode.active = false;
+            selfNode.__virtualRank = -1;
+        }
+    }
+
+    private getVirtualRankPoolSize(scrollView: ScrollView, total: number): number {
+        const visibleRows = Math.ceil(this.getRankViewHeight(scrollView) / this._rankRowHeight);
+        return Math.min(
+            total,
+            visibleRows + UIWinLayerImported.VIRTUAL_RANK_BUFFER_ROWS * 2 + 1,
+        );
+    }
+
+    private getRankViewHeight(scrollView: ScrollView): number {
+        return scrollView.view?.contentSize.height
+            ?? scrollView.node.getComponent(UITransform)?.contentSize.height
+            ?? this._rankLayout?.parent?.getComponent(UITransform)?.contentSize.height
+            ?? 0;
+    }
+
+    private getRankScrollOffsetY(scrollView: ScrollView): number {
+        const offsetY = scrollView.getScrollOffset().y;
+        const maxOffsetY = scrollView.getMaxScrollOffset().y;
+        return Math.max(0, Math.min(offsetY, Math.max(0, maxOffsetY)));
     }
 
     private applyRankRowData(item: Node, row: RankRow): void {
@@ -464,8 +731,7 @@ export class UIWinLayerImported extends Component {
         if (tierLabel) tierLabel.active = true;
         this.setChildLabel(item, 'tierLabel', Constants.rankNames[tierIndex] || '');
         const assetName = UIWinLayerImported.RANK_TIER_ASSETS[tierIndex];
-        const bundle = assetManager.getBundle(Constants.GameBundleName);
-        if (!tierIcon || !tierSprite || !tierTransform || !assetName || !bundle) {
+        if (!tierIcon || !tierSprite || !tierTransform || !assetName) {
             if (tierIcon) tierIcon.active = false;
             return;
         }
@@ -485,10 +751,8 @@ export class UIWinLayerImported extends Component {
         };
         tierSprite.spriteFrame = null;
 
-        const path = `${UIWinLayerImported.RANK_TIER_RESOURCE_DIR}/${assetName}/spriteFrame`;
-        bundle.load(path, SpriteFrame, (err, frame) => {
-            if (err || !frame) {
-                console.warn(`[UIWinLayerImported] 排行段位素材加载失败: ${path}`, err);
+        this.loadRankTierFrame(tierIndex, assetName, (frame) => {
+            if (!frame) {
                 if (tierIcon.isValid) tierIcon.active = false;
                 return;
             }
@@ -509,6 +773,48 @@ export class UIWinLayerImported extends Component {
             tierSprite.sizeMode = Sprite.SizeMode.CUSTOM;
             tierTransform.setContentSize(sourceWidth * fitScale, sourceHeight * fitScale);
         });
+    }
+
+    private loadRankTierFrame(
+        tierIndex: number,
+        assetName: string,
+        callback: (frame: SpriteFrame | null) => void,
+    ): void {
+        const cached = UIWinLayerImported.RANK_TIER_FRAME_CACHE.get(tierIndex);
+        if (cached?.isValid) {
+            callback(cached);
+            return;
+        }
+
+        const waiting = UIWinLayerImported.RANK_TIER_FRAME_WAITERS.get(tierIndex);
+        if (waiting) {
+            waiting.push(callback);
+            return;
+        }
+
+        UIWinLayerImported.RANK_TIER_FRAME_WAITERS.set(tierIndex, [callback]);
+        const path = `${UIWinLayerImported.RANK_TIER_RESOURCE_DIR}/${assetName}/spriteFrame`;
+        const bundle = assetManager.getBundle(Constants.GameBundleName);
+        if (!bundle) {
+            this.finishRankTierFrameLoad(tierIndex, null);
+            return;
+        }
+
+        bundle.load(path, SpriteFrame, (err, frame) => {
+            if (err || !frame) {
+                console.warn(`[UIWinLayerImported] 排行段位素材加载失败: ${path}`, err);
+                this.finishRankTierFrameLoad(tierIndex, null);
+                return;
+            }
+            UIWinLayerImported.RANK_TIER_FRAME_CACHE.set(tierIndex, frame);
+            this.finishRankTierFrameLoad(tierIndex, frame);
+        });
+    }
+
+    private finishRankTierFrameLoad(tierIndex: number, frame: SpriteFrame | null): void {
+        const callbacks = UIWinLayerImported.RANK_TIER_FRAME_WAITERS.get(tierIndex) ?? [];
+        UIWinLayerImported.RANK_TIER_FRAME_WAITERS.delete(tierIndex);
+        for (const callback of callbacks) callback(frame);
     }
 
     private createRankRows(): RankRow[] {
@@ -622,6 +928,8 @@ export class UIWinLayerImported extends Component {
         ) {
             if (scrollView.isValid) scrollView.enabled = true;
             this.setContinueAvailable(true);
+            this.logRankTiming('排行榜动画结束（未满足播放条件）');
+            this.endRankTiming();
             return;
         }
 
@@ -630,6 +938,8 @@ export class UIWinLayerImported extends Component {
         if (!finalTargetPosition || !selfFinalRow) {
             scrollView.enabled = true;
             this.setContinueAvailable(true);
+            this.logRankTiming('排行榜动画结束（动画数据不完整）');
+            this.endRankTiming();
             return;
         }
 
@@ -838,8 +1148,11 @@ export class UIWinLayerImported extends Component {
         if (targetScrollInfo) {
             scrollView.scrollToPercentVertical(targetScrollInfo.targetPercent, 0, false);
         }
+        this.activateVirtualRankList(scrollView, animationData.selfFinalRank);
         scrollView.enabled = true;
         this.setContinueAvailable(true);
+        this.logRankTiming('排行榜动画结束（晋级动画播放完成）');
+        this.endRankTiming();
     }
 
     private stopRankUpRuntimeTweens(): void {
@@ -858,27 +1171,6 @@ export class UIWinLayerImported extends Component {
             this._rankScrollView.enabled = true;
         }
         this._rankScrollView = null;
-    }
-
-    private resizeRankContent(layout: Node, layoutComp: Layout | null): void {
-        const layoutTransform = layout.getComponent(UITransform);
-        if (!layoutTransform) return;
-
-        const rankItems = layout.children.filter((child) => child.name === 'rankItem');
-        const rowsHeight = rankItems.reduce((height, item) => {
-            return height + (item.getComponent(UITransform)?.contentSize.height ?? 0);
-        }, 0);
-        const spacingY = layoutComp?.spacingY ?? 0;
-        const paddingTop = layoutComp?.paddingTop ?? 0;
-        const paddingBottom = layoutComp?.paddingBottom ?? 0;
-        const contentHeight = paddingTop
-            + paddingBottom
-            + rowsHeight
-            + Math.max(0, rankItems.length - 1) * spacingY;
-        layoutTransform.setContentSize(
-            layoutTransform.contentSize.width,
-            Math.max(layoutTransform.contentSize.height, contentHeight),
-        );
     }
 
     private findScrollViewForContent(content: Node): ScrollView | null {
@@ -909,24 +1201,24 @@ export class UIWinLayerImported extends Component {
     private getRankScrollTargetInfo(
         scrollView: ScrollView,
         rank: number,
-        rankNodes: Map<number, Node>,
+        rankNodes: Map<number, Node> | null,
         rankPosition?: Vec3,
         rankItemHeight?: number,
     ): RankScrollTargetInfo | null {
         const content = scrollView.content;
-        const rankNode = rankNodes.get(rank);
+        const rankNode = rankNodes?.get(rank);
         const contentTransform = content?.getComponent(UITransform);
-        if (!content || !contentTransform || !rankNode?.isValid) return null;
+        if (!content || !contentTransform || (!rankNode?.isValid && !rankPosition)) return null;
 
-        const viewHeight = scrollView.view?.contentSize.height
-            ?? scrollView.node.getComponent(UITransform)?.contentSize.height
-            ?? 0;
+        const viewHeight = this.getRankViewHeight(scrollView);
         const contentHeight = contentTransform.contentSize.height;
         const maxOffset = Math.max(0, contentHeight - viewHeight);
         if (maxOffset <= 0) return { targetPercent: 1, maxOffset };
 
-        const itemHeight = rankItemHeight ?? rankNode.getComponent(UITransform)?.contentSize.height ?? 0;
-        const itemY = rankPosition?.y ?? rankNode.position.y;
+        const itemHeight = rankItemHeight
+            ?? rankNode?.getComponent(UITransform)?.contentSize.height
+            ?? this._rankItemHeight;
+        const itemY = rankPosition?.y ?? rankNode!.position.y;
         const desiredOffset = contentHeight * (1 - contentTransform.anchorPoint.y)
             - itemY
             - (viewHeight - itemHeight) / 2;
@@ -943,13 +1235,14 @@ export class UIWinLayerImported extends Component {
         return this.clamp01(1 - offset / maxOffset);
     }
 
-    private scrollToRank(
-        scrollView: ScrollView,
-        rank: number,
-        rankNodes: Map<number, Node>,
-        duration: number,
-    ): void {
-        const targetInfo = this.getRankScrollTargetInfo(scrollView, rank, rankNodes);
+    private scrollToRankPosition(scrollView: ScrollView, rank: number, duration: number): void {
+        const targetInfo = this.getRankScrollTargetInfo(
+            scrollView,
+            rank,
+            null,
+            this.getRankItemPosition(rank),
+            this._rankItemHeight,
+        );
         if (!targetInfo) return;
         scrollView.stopAutoScroll();
         scrollView.scrollToPercentVertical(targetInfo.targetPercent, duration, true);
