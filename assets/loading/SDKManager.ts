@@ -85,6 +85,7 @@ export class SDKManager {
     private static jhRankUploadProfile: JHRankUploadProfile | null = null;
     private static readonly jhRankProfileStorageKey: string = 'mahjong_match_rank_profile';
     private static readonly jhFallbackNicknameStorageKey: string = 'mahjong_match_rank_fallback_nickname';
+    private static readonly wechatFriendRankOpenedStorageKey: string = 'mahjong_match_wechat_friend_rank_opened';
     private static readonly jhDefaultAvatarUrl: string = 'https://sziaa-cdn.jinkezhexin.top/mahjong_share/1.jpg';
     private static jhRankNames: { level: string; winStreak: string } = {
         level: "level",
@@ -321,8 +322,14 @@ export class SDKManager {
         });
     }
 
+    public markWechatFriendRankOpened(): void {
+        if (sys.platform !== sys.Platform.WECHAT_GAME) return;
+        sys.localStorage.setItem(SDKManager.wechatFriendRankOpenedStorageKey, '1');
+    }
+
     public setWechatCloudScore(key: string, score: number): void {
         if (sys.platform !== sys.Platform.WECHAT_GAME) return;
+        if (sys.localStorage.getItem(SDKManager.wechatFriendRankOpenedStorageKey) !== '1') return;
         if (typeof wx === 'undefined' || typeof wx.setUserCloudStorage !== 'function') return;
 
         const normalizedScore = Math.max(0, Math.floor(Number(score) || 0));
