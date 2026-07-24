@@ -223,7 +223,7 @@ export class SDKManager {
                 };
             });
             wx.onShow(() => {
-               director.emit("gameBack") 
+                director.emit("gameBack")
             });
             wx.onHide(() => {
                 this.lastHideTime = Date.now();
@@ -310,6 +310,7 @@ export class SDKManager {
     }
 
     public uploadWechatRankScores(levelScore: number, winStreakScore: number): void {
+        if (sys.localStorage.getItem(SDKManager.wechatFriendRankOpenedStorageKey) !== '1') return;
         this.setWechatCloudScore('level', levelScore);
         this.setWechatCloudScore('winsk', winStreakScore);
         if (sys.platform !== sys.Platform.WECHAT_GAME) return;
@@ -329,7 +330,6 @@ export class SDKManager {
 
     public setWechatCloudScore(key: string, score: number): void {
         if (sys.platform !== sys.Platform.WECHAT_GAME) return;
-        if (sys.localStorage.getItem(SDKManager.wechatFriendRankOpenedStorageKey) !== '1') return;
         if (typeof wx === 'undefined' || typeof wx.setUserCloudStorage !== 'function') return;
 
         const normalizedScore = Math.max(0, Math.floor(Number(score) || 0));
@@ -657,10 +657,10 @@ export class SDKManager {
                     }
                     window.dnSDK?.setOpenId(userId);
                     let a = sys.localStorage.getItem("mahjong_match_first");
-                    if (!a  || a == '') {
+                    if (!a || a == '') {
                         window.dnSDK?.onRegister();
                         sys.localStorage.setItem("mahjong_match_first", "true");
-                    } else  {
+                    } else {
                         window.dnSDK?.track('RE_ACTIVE', { backFlowDay: 7 });
                     }
                     // console.log("***********")

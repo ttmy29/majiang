@@ -477,8 +477,7 @@ export class UIRankLayer extends Component {
         if (this.friendRankNode) this.friendRankNode.active = true;
 
         SDKManager.instance.markWechatFriendRankOpened();
-        SDKManager.instance.setWechatCloudScore('level', ProgressManager.loadLevel());
-        SDKManager.instance.setWechatCloudScore('winsk', StreakManager.getStreak());
+        SDKManager.instance.uploadWechatRankScores(ProgressManager.loadLevel(), StreakManager.getStreak());
 
         const rankMessage = {
             type: 'rankData',
