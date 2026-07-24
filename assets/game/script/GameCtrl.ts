@@ -32,7 +32,6 @@ interface WinLayerData {
 type GameEvaluateEventName = 'ready' | 'show' | 'destroy' | 'error';
 
 interface GameEvaluatePageManager {
-    load(options: { openlink: string }): Promise<unknown> | unknown;
     show(options?: { openlink: string }): Promise<unknown> | unknown;
     destroy?(): void;
     on?(eventName: GameEvaluateEventName, callback: (res?: {
@@ -45,9 +44,18 @@ interface GameEvaluatePageManager {
 interface GameEvaluateWx {
     createPageManager?: () => GameEvaluatePageManager;
     getSystemInfoSync?: () => { SDKVersion?: string };
+    requestSubscribeSystemMessage?: (options: {
+        msgTypeList: string[];
+        success?: (res: Record<string, string>) => void;
+        fail?: (err: { errCode?: number; errMsg?: string }) => void;
+    }) => void;
 }
 
 const GAME_EVALUATE_OPENLINK = 'TWFRCqV5WeM2AkMXhKwJ03MhfPOieJfAsvXKUbWvQFQtLyyA5etMPabBehga950uzfZcH3Vi3QeEh41xRGEVFw';
+const SYSTEM_SUBSCRIBE_MESSAGE_TYPES = [
+    'SYS_MSG_TYPE_RANK',
+    'SYS_MSG_TYPE_WHATS_NEW',
+];
 
 const { ccclass, property } = _decorator;
 
@@ -228,11 +236,9 @@ export class GameCtrl extends Component {
     private randomPropButtonConsumedThisLevel = false;
     private randomPropLevelContextReady = false;
     private gameEvaluatePageManager: GameEvaluatePageManager | null = null;
-    private gameEvaluateLoadPromise: Promise<void> | null = null;
     private gameEvaluateShowRequested = false;
 
     start() {
-        void this.preloadGameEvaluate();
         //this.requestSharePropExperimentInfo();
         director.on(Constants.eventNames.EventTipsAnimatorEnd, this.onTipsAnimatorEnd, this);
         director.on(Constants.eventNames.EventFailureContinue, this.onEventFailureContinue, this);
@@ -324,37 +330,6 @@ export class GameCtrl extends Component {
         this.destroyGameEvaluate();
     }
 
-    private preloadGameEvaluate(): Promise<void> {
-        if (this.gameEvaluateLoadPromise) return this.gameEvaluateLoadPromise;
-        if (sys.platform !== sys.Platform.WECHAT_GAME || typeof wx === 'undefined') {
-            return Promise.resolve();
-        }
-
-        const wxApi = wx as GameEvaluateWx;
-        if (typeof wxApi.createPageManager !== 'function') {
-            const sdkVersion = wxApi.getSystemInfoSync?.().SDKVersion ?? 'unknown';
-            console.warn(`GameCtrl: 当前微信基础库版本(${sdkVersion})暂不支持游戏推荐组件`);
-            return Promise.resolve();
-        }
-
-        try {
-            this.gameEvaluatePageManager = wxApi.createPageManager();
-            this.bindGameEvaluateEvents(this.gameEvaluatePageManager);
-            this.gameEvaluateLoadPromise = Promise.resolve(this.gameEvaluatePageManager.load({
-                openlink: GAME_EVALUATE_OPENLINK,
-            })).then(() => undefined).catch((err) => {
-                console.warn('GameCtrl: 游戏推荐组件预加载失败', err);
-                this.gameEvaluateLoadPromise = null;
-            });
-        } catch (err) {
-            console.warn('GameCtrl: 游戏推荐组件初始化失败', err);
-            this.gameEvaluatePageManager = null;
-            return Promise.resolve();
-        }
-
-        return this.gameEvaluateLoadPromise;
-    }
-
     private bindGameEvaluateEvents(pageManager: GameEvaluatePageManager): void {
         if (!pageManager.on) return;
 
@@ -366,15 +341,52 @@ export class GameCtrl extends Component {
 
     private async showGameEvaluateAfterFirstLevel(): Promise<void> {
         if (this.gameEvaluateShowRequested) return;
+        if (sys.platform !== sys.Platform.WECHAT_GAME || typeof wx === 'undefined') return;
+
+        const wxApi = wx as GameEvaluateWx;
+        if (typeof wxApi.createPageManager !== 'function') {
+            const sdkVersion = wxApi.getSystemInfoSync?.().SDKVersion ?? 'unknown';
+            console.warn(`GameCtrl: 当前微信基础库版本(${sdkVersion})暂不支持游戏推荐组件`);
+            return;
+        }
+
         this.gameEvaluateShowRequested = true;
-
-        await this.preloadGameEvaluate();
-        if (!this.gameEvaluatePageManager) return;
-
         try {
-            await this.gameEvaluatePageManager.show();
+            const pageManager = this.gameEvaluatePageManager ?? wxApi.createPageManager();
+            if (!this.gameEvaluatePageManager) {
+                this.gameEvaluatePageManager = pageManager;
+                this.bindGameEvaluateEvents(pageManager);
+            }
+            await pageManager.show({ openlink: GAME_EVALUATE_OPENLINK });
         } catch (err) {
             console.warn('GameCtrl: 游戏推荐组件展示失败', err);
+            this.gameEvaluateShowRequested = false;
+        }
+    }
+
+    private requestSystemSubscriptionAfterSecondLevel(): void {
+        if (ProgressManager.hasPromptedSystemSubscription()) return;
+        if (sys.platform !== sys.Platform.WECHAT_GAME || typeof wx === 'undefined') return;
+
+        const wxApi = wx as GameEvaluateWx;
+        if (typeof wxApi.requestSubscribeSystemMessage !== 'function') {
+            console.warn('GameCtrl: 当前环境不支持微信系统订阅消息');
+            return;
+        }
+
+        try {
+            wxApi.requestSubscribeSystemMessage({
+                msgTypeList: SYSTEM_SUBSCRIBE_MESSAGE_TYPES,
+                success: (res) => {
+                    ProgressManager.markSystemSubscriptionPrompted();
+                    console.log('GameCtrl: 微信系统订阅消息请求完成', res);
+                },
+                fail: (err) => {
+                    console.warn('GameCtrl: 微信系统订阅消息自动请求失败', err);
+                },
+            });
+        } catch (err) {
+            console.warn('GameCtrl: 调用微信系统订阅消息接口失败', err);
         }
     }
 
@@ -385,7 +397,6 @@ export class GameCtrl extends Component {
             console.warn('GameCtrl: 游戏推荐组件销毁失败', err);
         } finally {
             this.gameEvaluatePageManager = null;
-            this.gameEvaluateLoadPromise = null;
         }
     }
 
@@ -2331,6 +2342,11 @@ export class GameCtrl extends Component {
         ProgressManager.clearSnapshot();
         SDKManager.instance.uploadWechatRankScores(ProgressManager.loadLevel(), StreakManager.getStreak());
         ArchiveManager.instance.scheduleUpload();
+        if (this.nowLevel === 1) {
+            void this.showGameEvaluateAfterFirstLevel();
+        } else if (this.nowLevel === 2) {
+            this.requestSystemSubscriptionAfterSecondLevel();
+        }
         if (this.nowLevel == 0) {//引导关卡直接下一关
             this.scheduleOnce(() => {
                 this.onEventWinNextLevel();
@@ -2476,14 +2492,7 @@ export class GameCtrl extends Component {
     }
 
     private onEventWinNextLevel() {
-        const previousLevel = this.nowLevel;
-        const mode = this.gameMode;
-        void this.requestStartLevel(previousLevel + 1).then(() => {
-            // 关卡 0 是引导关；仅在主线第一关成功进入第二关后展示微信推荐组件。
-            if (mode === 'main' && previousLevel === 1 && this.gameMode === 'main' && this.nowLevel === 2) {
-                void this.showGameEvaluateAfterFirstLevel();
-            }
-        });
+        void this.requestStartLevel(this.nowLevel + 1);
     }
 
     private onEventMainLevelGiveUp() {

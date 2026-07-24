@@ -4,13 +4,7 @@ import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { SDKManager } from '../../loading/SDKManager';
 import { StreakManager, WinStreakRewardConfig, WinStreakSettlement } from './manager/StreakManager';
-import { ProgressManager } from './manager/ProgressManager';
 const { ccclass, property } = _decorator;
-
-const SYSTEM_SUBSCRIBE_MESSAGE_TYPES = [
-    'SYS_MSG_TYPE_RANK',
-    'SYS_MSG_TYPE_WHATS_NEW',
-];
 
 interface WinLayerData {
     time?: number;
@@ -367,40 +361,12 @@ export class UIWinLayer extends Component {
     onButtonNextLevelClick() {
         if (this.isClosing) return;
         AudioManager.instance.playClick();
-        this.requestSystemSubscriptionAfterSecondLevel();
         const onContinue = this.onContinue
             ?? (this.isActivity
                 ? () => LayerManager.instance.showStartLayer()
                 : () => director.emit(Constants.eventNames.EventWinNextLevel));
         this.onContinue = null;
         this.playCloseAnimation(onContinue);
-    }
-
-    private requestSystemSubscriptionAfterSecondLevel(): void {
-        // nextLevel === 3 表示当前结算的是第二关；活动关不触发主线订阅引导。
-        if (this.isActivity || this.nextLevel !== 3 || ProgressManager.hasPromptedSystemSubscription()) return;
-        if (sys.platform !== sys.Platform.WECHAT_GAME
-            || typeof wx === 'undefined'
-            || typeof wx.requestSubscribeSystemMessage !== 'function') {
-            console.warn('UIWinLayer: 当前环境不支持微信系统订阅消息');
-            return;
-        }
-
-        try {
-            // 必须在玩家点击回调内直接调用，否则微信不会展示订阅面板。
-            wx.requestSubscribeSystemMessage({
-                msgTypeList: SYSTEM_SUBSCRIBE_MESSAGE_TYPES,
-                success: (res: Record<string, string>) => {
-                    console.log('UIWinLayer: 微信系统订阅消息请求完成', res);
-                },
-                fail: (err: { errCode?: number; errMsg?: string }) => {
-                    console.warn('UIWinLayer: 微信系统订阅消息请求失败', err);
-                },
-            });
-            ProgressManager.markSystemSubscriptionPrompted();
-        } catch (err) {
-            console.warn('UIWinLayer: 调用微信系统订阅消息接口失败', err);
-        }
     }
 
     OnBtoonGoHomeClick() {
