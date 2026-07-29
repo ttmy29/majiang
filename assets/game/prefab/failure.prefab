@@ -2343,7 +2343,7 @@
     },
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 154,
+      "width": 304,
       "height": 98.5
     },
     "_anchorPoint": {
@@ -2379,7 +2379,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "设置",
+    "_string": "继续游戏",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 75,
