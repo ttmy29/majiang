@@ -843,25 +843,15 @@ export class GameCtrl extends Component {
         this.updateBoardTileShadows();
     }
 
-    // 以 layer 0 实际出现的半格坐标 bbox 中心为基准做平移
+    // 使用全部层的坐标边界居中，避免高层牌超出底层范围时偏向屏幕一侧。
     private computeBoardCenter(positions: LevelJsonPosition[]): { cx: number; cy: number } {
         let minRow = Infinity, maxRow = -Infinity;
         let minCol = Infinity, maxCol = -Infinity;
         for (const p of positions) {
-            if (p.z_layer !== 0) continue;
             if (p.y_row < minRow) minRow = p.y_row;
             if (p.y_row > maxRow) maxRow = p.y_row;
             if (p.x_col < minCol) minCol = p.x_col;
             if (p.x_col > maxCol) maxCol = p.x_col;
-        }
-        // layer 0 为空时退回到全部位置
-        if (minRow === Infinity) {
-            for (const p of positions) {
-                if (p.y_row < minRow) minRow = p.y_row;
-                if (p.y_row > maxRow) maxRow = p.y_row;
-                if (p.x_col < minCol) minCol = p.x_col;
-                if (p.x_col > maxCol) maxCol = p.x_col;
-            }
         }
         return { cx: (minCol + maxCol) / 2, cy: (minRow + maxRow) / 2 };
     }
