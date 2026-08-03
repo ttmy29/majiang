@@ -275,8 +275,8 @@ export class ProgressManager {
         const lastDate = StorageManager.instance.getItem(StorageKey.DailySignLastDate);
         if (lastDate === today) return false;
 
-        const yesterday = this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
-        const nextStreak = lastDate === yesterday ? this.loadStoredDailySignStreak() + 1 : 1;
+        // 登录签到按实际签到次数累计，断签不会重置；每累计 7 次后进入下一轮。
+        const nextStreak = this.loadStoredDailySignStreak() + 1;
 
         StorageManager.instance.setItem(StorageKey.DailySignLastDate, today);
         StorageManager.instance.setItem(StorageKey.DailySignStreak, nextStreak);
@@ -287,10 +287,6 @@ export class ProgressManager {
     static loadDailySignStreak(now = new Date()): number {
         const lastDate = StorageManager.instance.getItem(StorageKey.DailySignLastDate);
         if (!lastDate) return 0;
-
-        const today = this.formatSignDate(now);
-        const yesterday = this.formatSignDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
-        if (lastDate !== today && lastDate !== yesterday) return 0;
 
         return this.loadStoredDailySignStreak();
     }
