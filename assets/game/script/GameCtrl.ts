@@ -2312,7 +2312,7 @@ export class GameCtrl extends Component {
         SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel, time: Math.ceil(this.elapsedTime) });
         //
         const duration = Math.max(0, Math.ceil(this.elapsedTime));
-        window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_PASS', { duration: duration, level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         if (this.gameMode === 'activity') {
             if (this.activitySignMode === 'makeup') {
                 const makeupDay = ProgressManager.makeUpLatestMissingSignDay();
