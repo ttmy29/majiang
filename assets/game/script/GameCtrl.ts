@@ -13,6 +13,7 @@ import { ArchiveManager } from './manager/ArchiveManager';
 import { StreakManager, WinStreakSettlement } from './manager/StreakManager';
 import { Utils } from './util/Utils';
 import { SDKEvent, SDKManager } from '../../loading/SDKManager';
+import { GameExperiment } from '../../loading/GameExperiment';
 
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
@@ -1611,7 +1612,9 @@ export class GameCtrl extends Component {
         const targetBoxPosition = targetCell ? targetCell.position.clone() : Vec3.ZERO.clone();
 
         // 牌起飞时就触发抖动:把飞行时长传给 UI,让挤压峰值精准落在落位时刻
-        const flyToBoxDuration = 0.18 + 0.1;
+        const flyToBoxDuration = GameExperiment.isBottomUiEnabled()
+            ? Constants.slotAnim.BottomUiTileToTargetDuration
+            : 0.18 + 0.1;
         director.emit(Constants.eventNames.EventShowSlotShake, this.getTargetBoxSlotID(box), flyToBoxDuration);
         tween(tile.node)
             .to(flyToBoxDuration, { position: targetFlyPosition, scale: new Vec3(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1) })
@@ -1676,7 +1679,10 @@ export class GameCtrl extends Component {
         this.moveTileNodeToFlyLayer(tile, flyLayer, wasBoardTile);
         tile.item.setPlayable(true);
 
-        this.arrangeSlotTiles(0.16 + 0.1, tile);
+        const flyToBottomDuration = GameExperiment.isBottomUiEnabled()
+            ? Constants.slotAnim.BottomUiTileToBottomDuration
+            : 0.16 + 0.1;
+        this.arrangeSlotTiles(flyToBottomDuration, tile);
         this.updatePlayableStates();
         this.updateHud();
 
@@ -1685,7 +1691,7 @@ export class GameCtrl extends Component {
         this.scheduleOnce(() => {
             this.checkEndState();
             this.saveProgressDeferred();
-        }, isSlotFull ? 0.16 + 0.1 + 0.05 : 0.18);
+        }, isSlotFull ? flyToBottomDuration + 0.05 : 0.18);
     }
 
     private moveTilesToSlotBatch(tiles: TileRecord[], recordHistory: boolean): boolean {
@@ -1713,13 +1719,16 @@ export class GameCtrl extends Component {
         this.revealAvailableCoveredTiles(true);
         const isSlotFull = this.isBottomSlotFull();
         if (isSlotFull) this.lockBoardInputForFullSlot();
-        this.arrangeSlotTiles(0.16 + 0.1, tiles[0] || null);
+        const flyToBottomDuration = GameExperiment.isBottomUiEnabled()
+            ? Constants.slotAnim.BottomUiTileToBottomDuration
+            : 0.16 + 0.1;
+        this.arrangeSlotTiles(flyToBottomDuration, tiles[0] || null);
         this.updatePlayableStates();
         this.updateHud();
         this.scheduleOnce(() => {
             this.checkEndState();
             this.saveProgressDeferred();
-        }, isSlotFull ? 0.16 + 0.1 + 0.05 : 0.18);
+        }, isSlotFull ? flyToBottomDuration + 0.05 : 0.18);
         return true;
     }
 

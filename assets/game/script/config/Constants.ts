@@ -67,6 +67,9 @@ const Constants = {
     // 槽位动画的等待时长，与 UIGameLayer 里的 tween 段累加值保持一致。
     // 改动 UIGameLayer 的动画节奏时记得同步这里，否则会出现动画还没演完业务状态就刷新的衔接 bug。
     slotAnim: {
+        // “牌盒在下”实验组使用更紧凑的飞牌节奏；对照组继续使用原来的 0.28/0.26s。
+        BottomUiTileToTargetDuration: 0.14,
+        BottomUiTileToBottomDuration: 0.14,
         // MoveOut: 0.1833 延迟 + 三段挤压 0.05*3 + 0.3 飞出 = 0.6333s，留少量余量到 0.65s
         MoveOutWait: 0.65,
         // MoveIn: 实际飞回动画 0.45s(见 UIGameLayer.onEventShowSlotMoveIn 的 .to(0.45)),留余量到 0.5s。

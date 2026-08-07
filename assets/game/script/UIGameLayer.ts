@@ -5,6 +5,7 @@ import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { boxEffect } from './boxEffect';
+import { GameExperiment } from '../../loading/GameExperiment';
 const { ccclass, property } = _decorator;
 
 interface HudPayload {
@@ -69,6 +70,15 @@ interface IQUpdatePayload {
 
 @ccclass('UIGameLayer')
 export class UIGameLayer extends Component {
+    private static readonly BOTTOM_UI_SLOT_ROOT_TOP = 933.632;
+    private static readonly BOTTOM_UI_SLOT_ROOT_BOTTOM = 220.368;
+    private static readonly BOTTOM_UI_STORED_SLOT_Y = 196.97;
+    private static readonly BOTTOM_UI_RIGHT_TARGET_X = 151;
+    // 在暂存布局基础上整体上移 30px，高度仍保持 641px。
+    private static readonly BOTTOM_UI_BOARD_TOP = 93.9;
+    private static readonly BOTTOM_UI_BOARD_BOTTOM = 599.1;
+    private static readonly BOTTOM_UI_COMBO_TOP = 120;
+
     @property(Node)
     slotNodeArr: Node[] = []!;
     //撤回按钮
@@ -157,17 +167,58 @@ export class UIGameLayer extends Component {
     private hasLevelUiMode = false;
     private slotRootTop = 0;
     private guideNode: Node | null = null;
+    private bottomUiExperimentEnabled = false;
 
     protected onLoad() {
         //背景适配
         this.adaptBackground();
 
+        this.bottomUiExperimentEnabled = GameExperiment.isBottomUiEnabled();
+        if (this.bottomUiExperimentEnabled) this.applyBottomUiExperimentLayout();
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
         this.slotRootTop = this.getSlotRootWidget()?.top ?? 0;
         this.propButtonOriginPositions = [this.undoButton, this.switchButton, this.unlockButton].map(btn => btn ? btn.position.clone() : new Vec3());
         //this.setupHudLabels();
         this.setupComboNode();
         this.preloadShuffleEffectClip();
+    }
+
+    /** 应用“牌盒在下”暂存方案中的场景坐标；对照组完全沿用 scene 原值。 */
+    private applyBottomUiExperimentLayout() {
+        const slotRoot = this.slotNodeArr[0]?.parent || null;
+        const slotRootWidget = slotRoot?.getComponent(Widget) || null;
+        if (slotRootWidget) {
+            slotRootWidget.isAlignTop = false;
+            slotRootWidget.isAlignBottom = true;
+            slotRootWidget.top = UIGameLayer.BOTTOM_UI_SLOT_ROOT_TOP;
+            slotRootWidget.bottom = UIGameLayer.BOTTOM_UI_SLOT_ROOT_BOTTOM;
+            slotRootWidget.updateAlignment();
+        }
+
+        const storedSlot = this.slotNodeArr[0];
+        if (storedSlot) {
+            storedSlot.setPosition(storedSlot.position.x, UIGameLayer.BOTTOM_UI_STORED_SLOT_Y, storedSlot.position.z);
+        }
+        for (const index of [2, 4]) {
+            const target = this.slotNodeArr[index];
+            if (target) target.setPosition(UIGameLayer.BOTTOM_UI_RIGHT_TARGET_X, target.position.y, target.position.z);
+        }
+
+        const boardNode = this.node.getChildByName('pNode');
+        const boardWidget = boardNode?.getComponent(Widget) || null;
+        if (boardWidget) {
+            boardWidget.isAlignTop = true;
+            boardWidget.isAlignBottom = true;
+            boardWidget.top = UIGameLayer.BOTTOM_UI_BOARD_TOP;
+            boardWidget.bottom = UIGameLayer.BOTTOM_UI_BOARD_BOTTOM;
+            boardWidget.updateAlignment();
+        }
+
+        const comboWidget = this.comboNode?.getComponent(Widget) || null;
+        if (comboWidget) {
+            comboWidget.top = UIGameLayer.BOTTOM_UI_COMBO_TOP;
+            comboWidget.updateAlignment();
+        }
     }
 
     adaptBackground() {
@@ -527,7 +578,13 @@ export class UIGameLayer extends Component {
 
         const widget = this.getSlotRootWidget();
         if (widget) {
-            widget.top = this.isGuideLevel ? 300 : this.slotRootTop;
+            if (this.bottomUiExperimentEnabled) {
+                widget.isAlignTop = false;
+                widget.isAlignBottom = true;
+                widget.bottom = UIGameLayer.BOTTOM_UI_SLOT_ROOT_BOTTOM;
+            } else {
+                widget.top = this.isGuideLevel ? 300 : this.slotRootTop;
+            }
             widget.updateAlignment();
         }
 
@@ -1187,6 +1244,12 @@ export class UIGameLayer extends Component {
 
         // 1. 停止当前节点的所有动画
         Tween.stopAllByTarget(targetNode);
+        const originPos = this.slotOriginPositions[slotID] ?? targetNode.position.clone();
+        if (this.bottomUiExperimentEnabled) {
+            // 横向退场始终从记录的实验布局原点开始，避免多轮刷新后位移累计。
+            targetNode.setPosition(originPos.clone());
+            targetNode.setScale(new Vec3(1, 1, 1));
+        }
 
         // ==========================================
         // 盖子下压动画 (task_gaiziNew)
@@ -1230,15 +1293,26 @@ export class UIGameLayer extends Component {
             .to(0.05, { scale: new Vec3(0.98, 1.02, 1) }) // 横向回缩，纵向拉长
             .to(0.05, { scale: new Vec3(1, 1, 1) })       // 回正
             .start();
-        const targetPosY = targetNode.y + 1500;
-
-        tween(targetNode)
-            .delay(0.3333)
-            .to(0.4500, { position: new Vec3(targetNode.x, targetPosY, 0) }) // 大幅度向上退场，飞出屏幕顶部（速度对齐原左右挪动）
-            .call(() => {
-                if (motionStreakNode) motionStreakNode.active = false;
-            })
-            .start();
+        if (this.bottomUiExperimentEnabled) {
+            const moveDirection = originPos.x < 0 || (originPos.x === 0 && slotID <= 2) ? -1 : 1;
+            const exitPosition = new Vec3(originPos.x + moveDirection * 1500, originPos.y, originPos.z);
+            tween(targetNode)
+                .delay(0.3333)
+                .to(0.3000, { position: exitPosition }, { easing: 'quadIn' })
+                .call(() => {
+                    if (motionStreakNode) motionStreakNode.active = false;
+                })
+                .start();
+        } else {
+            const targetPosY = targetNode.y + 1500;
+            tween(targetNode)
+                .delay(0.3333)
+                .to(0.4500, { position: new Vec3(targetNode.x, targetPosY, 0) })
+                .call(() => {
+                    if (motionStreakNode) motionStreakNode.active = false;
+                })
+                .start();
+        }
     }
 
     onEventShowSlotMoveIn(slotID: number) {
@@ -1261,17 +1335,37 @@ export class UIGameLayer extends Component {
         AudioManager.instance.playOneShot(AudioClipNames.taskBoxMove);
         // 2. 回到该槽位在场景里的原始位置（不再写死 ±200, 0）
         const originPos = this.slotOriginPositions[slotID] ?? targetNode.position.clone();
-        // 从顶部上方落入：先把节点放到原始位置正上方，再下落归位
-        targetNode.setPosition(new Vec3(originPos.x, originPos.y + 1500, 0));
-        tween(targetNode)
-            // 时长 0.45s:若调整,必须同步 Constants.slotAnim.MoveInWait(需 >= 此值),
-            // 否则 movingIn 提前解除,挂起的牌会飞向盒子还没归位的"半路(偏上)"坐标。
-            .to(0.45, { position: originPos.clone() }, { easing: 'quadOut' })
-            .call(() => {
-                targetNode.setPosition(originPos.clone());
-                if (motionStreakNode) motionStreakNode.active = false;
-            })
-            .start();
+        if (this.bottomUiExperimentEnabled) {
+            const moveDirection = originPos.x < 0 || (originPos.x === 0 && slotID <= 2) ? -1 : 1;
+            const impactPos = new Vec3(originPos.x - moveDirection * 14, originPos.y, originPos.z);
+            targetNode.setPosition(new Vec3(originPos.x + moveDirection * 1500, originPos.y, originPos.z));
+            targetNode.setScale(new Vec3(1.02, 0.98, 1));
+            tween(targetNode)
+                .to(0.36, {
+                    position: impactPos,
+                    scale: new Vec3(0.97, 1.03, 1),
+                }, { easing: 'quadOut' })
+                .to(0.09, {
+                    position: originPos.clone(),
+                    scale: new Vec3(1, 1, 1),
+                }, { easing: 'backOut' })
+                .call(() => {
+                    targetNode.setPosition(originPos.clone());
+                    targetNode.setScale(new Vec3(1, 1, 1));
+                    if (motionStreakNode) motionStreakNode.active = false;
+                })
+                .start();
+        } else {
+            // 对照组继续从顶部落入。
+            targetNode.setPosition(new Vec3(originPos.x, originPos.y + 1500, 0));
+            tween(targetNode)
+                .to(0.45, { position: originPos.clone() }, { easing: 'quadOut' })
+                .call(() => {
+                    targetNode.setPosition(originPos.clone());
+                    if (motionStreakNode) motionStreakNode.active = false;
+                })
+                .start();
+        }
     }
 
     onSetUndoButtonStatus(status: boolean) {

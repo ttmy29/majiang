@@ -1,4 +1,5 @@
 import { _decorator, director, game, math, sys } from 'cc';
+import { GameExperiment } from './GameExperiment';
 
 const { ccclass } = _decorator;
 
@@ -793,7 +794,8 @@ export class SDKManager {
             timestamp: Math.floor(Date.now() / 1000),
             platform: SDKManager.platform,
             source: SDKManager.source,
-            node: SDKManager.node,
+            // “牌盒在下”实验组使用区服 2；对照组继续使用后台默认区服 1。
+            node: GameExperiment.isBottomUiEnabled() ? 2 : SDKManager.node,
         };
 
         // 根据事件类型构建URL和参数

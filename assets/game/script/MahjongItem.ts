@@ -481,7 +481,8 @@ export class MahjongItem extends Component {
         this.stopTouchTween();
 
         // 选中麻将的"抬起"音效,跟放大动画同时触发
-        AudioManager.instance.playOneShot(AudioClipNames.mahjongClick);
+        // 点击音量全局提高，实验组与对照组保持一致。
+        AudioManager.instance.playOneShot(AudioClipNames.mahjongClick, 1.25);
 
         // 按下时把阴影临时移回 tile 内部，跟着 tile 一起 bringToTop，
         // 这样阴影会盖在相邻牌身上而不被遮住（松开后由 resetScale 挂回共享层）
