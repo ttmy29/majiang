@@ -688,6 +688,7 @@ export class GameCtrl extends Component {
                 ? snapshot.boardId === this.currentBoardId
                 : this.nowLevel < Constants.WinStreak.StartLevel)
             && snapshot.tiles.length === this.tiles.length
+            && this.isSnapshotStateConsistent(snapshot)
             && !this.snapshotHasNoProgress(snapshot);
         if (useSnapshot) {
             this.applySnapshot(snapshot!);
@@ -1288,6 +1289,105 @@ export class GameCtrl extends Component {
         if (!Array.isArray(snap.ironLockedKeys) || snap.ironLockedKeys.length > 0) return false;
         if (this.ironLocks.length === 0) return false;
         return this.snapshotHasNoProgress(snap);
+    }
+
+    private isSnapshotStateConsistent(snap: ProgressSnapshot): boolean {
+        const reject = (reason: string): false => {
+            console.warn('GameCtrl: ignored inconsistent progress snapshot', {
+                mode: this.gameMode,
+                level: this.nowLevel,
+                boardId: this.currentBoardId,
+                reason,
+            });
+            return false;
+        };
+        if (!Array.isArray(snap.tiles)
+            || !Array.isArray(snap.boxes)
+            || !Array.isArray(snap.taskQueue)
+            || !Array.isArray(snap.slotKeys)
+            || !Array.isArray(snap.discardedKeys)
+            || !Array.isArray(snap.actionHistoryKeys)) {
+            return reject('missing snapshot arrays');
+        }
+        if (snap.boxes.length !== this.targetBoxes.length) return reject('target box count mismatch');
+
+        const coordinateKey = (value: TileKey): string => `${value.layer}|${value.row}|${value.col}`;
+        const boardKeys = new Set(this.tiles.map((tile) => coordinateKey(this.tileKey(tile))));
+        const snapByKey = new Map<string, TileSnap>();
+        const supply = new Map<string, number>();
+        const demand = new Map<string, number>();
+        const addCount = (counts: Map<string, number>, type: string, count: number) => {
+            if (count <= 0) return;
+            counts.set(type, (counts.get(type) || 0) + count);
+        };
+
+        for (const tile of snap.tiles) {
+            const key = coordinateKey(tile);
+            const type = String(tile.type ?? '');
+            if (!boardKeys.has(key)) return reject(`snapshot tile is not on this board: ${key}`);
+            if (snapByKey.has(key)) return reject(`duplicate snapshot tile: ${key}`);
+            if (!type) return reject(`snapshot tile has no type: ${key}`);
+            if (tile.location !== 'board' && tile.location !== 'slot' && tile.location !== 'target' && tile.location !== 'discarded') {
+                return reject(`invalid tile location: ${key}`);
+            }
+            snapByKey.set(key, tile);
+            if (!tile.removed) addCount(supply, type, 1);
+        }
+        if (snapByKey.size !== boardKeys.size) return reject('snapshot tile coordinates are incomplete');
+
+        const validateLocationKeys = (keys: TileKey[], location: TileSnap['location']): boolean => {
+            const used = new Set<string>();
+            for (const value of keys) {
+                const key = coordinateKey(value);
+                const tile = snapByKey.get(key);
+                if (!tile || tile.location !== location || tile.removed || used.has(key)) return false;
+                used.add(key);
+            }
+            return snap.tiles.filter((tile) => tile.location === location && !tile.removed).length === used.size;
+        };
+        if (!validateLocationKeys(snap.slotKeys, 'slot')) return reject('bottom slot keys do not match tile locations');
+        if (!validateLocationKeys(snap.discardedKeys, 'discarded')) return reject('discarded keys do not match tile locations');
+
+        const targetKeys = new Set<string>();
+        for (const box of snap.boxes) {
+            if (!box || !Array.isArray(box.tileKeys)) return reject('invalid target box data');
+            const required = Number(box.required);
+            const progress = Number(box.progress);
+            if (!Number.isInteger(required) || required <= 0 || !Number.isInteger(progress) || progress < 0 || progress > required) {
+                return reject('invalid target box progress');
+            }
+            if (progress !== box.tileKeys.length) return reject('target box progress does not match its tiles');
+
+            const type = String(box.type ?? '');
+            if (!type && progress > 0) return reject('empty target box contains progress');
+            if (type && !box.unlocked) return reject('locked target box contains a target');
+            for (const value of box.tileKeys) {
+                const key = coordinateKey(value);
+                const tile = snapByKey.get(key);
+                if (!tile || tile.location !== 'target' || !tile.removed || String(tile.type) !== type || targetKeys.has(key)) {
+                    return reject(`target box tile mismatch: ${key}`);
+                }
+                targetKeys.add(key);
+            }
+            if (type) addCount(demand, type, required - progress);
+        }
+        if (snap.tiles.filter((tile) => tile.location === 'target' && tile.removed).length !== targetKeys.size) {
+            return reject('target tile locations are not referenced by target boxes');
+        }
+
+        for (const rawType of snap.taskQueue) {
+            const type = String(rawType ?? '');
+            if (!type) return reject('task queue contains an empty type');
+            addCount(demand, type, 3);
+        }
+
+        const types = new Set([...supply.keys(), ...demand.keys()]);
+        for (const type of types) {
+            if ((supply.get(type) || 0) !== (demand.get(type) || 0)) {
+                return reject(`remaining supply/demand mismatch for ${type}`);
+            }
+        }
+        return true;
     }
 
     // 快照里没有任何玩家进度:所有牌都还在棋盘上、底部存牌槽/回收站/撤回栈都空、目标槽一张没收。
@@ -1945,6 +2045,11 @@ export class GameCtrl extends Component {
     private checkEndState() {
         if (this.gameState !== 'playing') return;
         this.scheduleCompletedTargetBoxRefreshes(0);
+        // 极端异常恢复：目标队列和目标盒都已耗尽、棋盘也确实没有牌，但底槽/后备栏还留着
+        // 完整三张组时，旧逻辑会因为这些牌 removed=false 永远无法进入胜利分支。
+        // 这里只处理“所有未移除牌都在存牌区，且每种牌均可完整三消”的终局状态，
+        // 不会替玩家消除普通残局，也不会掩盖仍有目标或棋盘牌的配置错误。
+        this.recoverEmptyBoardStoredTriplets();
         if (this.tiles.every((t) => t.removed)) {
             // removed 是在牌"起飞飞向目标槽"那一刻就置 true 的(见 moveTileToTarget),
             // 并非等落位、等这一组三消真正收满移出。若此刻还有牌在飞 / 目标槽还停着没满,
@@ -1999,6 +2104,60 @@ export class GameCtrl extends Component {
         // if (!this.canStillCompleteTasks()) {
         //     this.failLevel('死局，目标牌不足');
         // }
+    }
+
+    private recoverEmptyBoardStoredTriplets(): boolean {
+        if (this.taskQueue.length > 0) return false;
+        if (this.resolvingMatch || this.dealingTiles || this.shuffleAnimating || this.hasUnlockingIron()) return false;
+        if (this.flyLayer?.isValid && this.tiles.some((tile) => tile.node?.parent === this.flyLayer)) return false;
+        if (this.targetBoxes.some((box) =>
+            !!box.type
+            || box.progress > 0
+            || box.pending > 0
+            || box.refreshQueued
+            || box.refreshing
+            || box.movingIn
+        )) return false;
+        if (this.tiles.some((tile) => !tile.removed && this.isBoardTileOnBoard(tile))) return false;
+
+        const storedTiles = [...this.slots, ...this.discardedTiles]
+            .filter((tile) => !tile.removed && !!tile.node?.isValid);
+        if (storedTiles.length === 0) return false;
+
+        const storedSet = new Set(storedTiles);
+        const remainingTiles = this.tiles.filter((tile) => !tile.removed);
+        if (storedSet.size !== storedTiles.length
+            || remainingTiles.length !== storedTiles.length
+            || remainingTiles.some((tile) => !storedSet.has(tile))) return false;
+
+        const counts = new Map<string, number>();
+        for (const tile of storedTiles) counts.set(tile.type, (counts.get(tile.type) || 0) + 1);
+        if (Array.from(counts.values()).some((count) => count % 3 !== 0)) return false;
+
+        const countSummary: Record<string, number> = {};
+        counts.forEach((count, type) => { countSummary[type] = count; });
+        console.warn('GameCtrl: recovered empty-board stored triplets', {
+            level: this.nowLevel,
+            boardId: this.currentBoardId,
+            counts: countSummary,
+        });
+        for (const tile of storedTiles) {
+            Tween.stopAllByTarget(tile.node);
+            tile.collected = true;
+            tile.removed = true;
+            tile.covered = false;
+            tile.item.setCovered(false, this.flipFrame);
+            tile.item.disableTileTouch();
+            tile.node.removeFromParent();
+            tile.node.destroy();
+        }
+        this.slots = [];
+        this.discardedTiles = [];
+        this.actionHistory = [];
+        this.slotFullInputLocked = false;
+        this.refreshUndoButtonStatus();
+        this.updateHud();
+        return true;
     }
 
     // ==========================================

@@ -67,7 +67,7 @@ assets/config_levels_1350_1399/
 - 分段大小由 `Constants.LevelConfigSegmentSize = 50` 控制。
 - bundle 前缀由 `Constants.LevelConfigBundlePrefix = 'config_levels_'` 控制。
 - `ensureLevelJson(boardId, tier)` 先在对应难度档目录找该盘面，缺档回退到 `level_json`。
-- 难度档与盘面由 [StreakManager](assets/game/script/manager/StreakManager.ts) 决定（见 `Constants.WinStreak`）：`config_levels_base` 中存在的同号关卡优先使用基础盘面，其余按普通档 `level_hard` 的实际资源顺序出题；连胜负责升降简单/普通/困难版本，缺少同号变体时回退普通版。顺序盘面全部走完后才随机抽取未重复盘面，全玩过再循环。
+- 难度档与盘面由 [StreakManager](assets/game/script/manager/StreakManager.ts) 决定（见 `Constants.WinStreak`）：`config_levels_base` 中存在的同号关卡优先使用基础盘面，其余按普通档 `level_hard` 的实际资源顺序出题；连胜负责升降简单/普通/困难版本，缺少同号变体时回退普通版。顺序盘面全部走完后才随机续关，随机池包含高级普通档的 7 号起全部可用盘面（7-11 只加入随机池，不改变第 12 关起的顺序映射）；随机池仍维持通关盘面单轮不重复，并额外排除最近 100 个实际选中过的布局。近期历史在选中盘面时立即记录（失败也算），以忽略牌型、平移和水平/垂直镜像的布局指纹去重。
 - 同一主线关进入失败状态达到 5 次后，如果当前实际盘面存在同号 `level_easy` 配置，后续重开或重新进关会固定切换到该简单盘面；没有同号简单配置时继续使用原难度分配逻辑。
 - 当前盘面会预热后续 10 关，并释放窗口外资源。
 - 请求超过现有默认关卡范围时，会回落到已存在的最高默认关卡。

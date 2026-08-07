@@ -46,8 +46,10 @@ export enum StorageKey {
     SettlementRankState = 'mahjong_match_settlement_rank_state',
     // 当前关已分配的难度状态 JSON {level, tier, failed}：重进/重开保持盘面一致 + 支撑 failed 标记
     LevelDiffState = 'mahjong_match_level_diff_state',
-    // 玩家已玩过的关卡 id 集合（JSON 数组），云端同步，用于避免重复盘面
+    // 玩家已通关的关卡 id 集合（JSON 数组），云端同步，用于随机循环内避免重复盘面
     PlayedLevels = 'mahjong_match_played_levels',
+    // 最近实际选中过的布局历史（含布局指纹），用于跨循环、失败重开时避免近期视觉重复。
+    RecentLevelLayouts = 'mahjong_match_recent_level_layouts',
 }
 
 export class StorageManager {

@@ -60,6 +60,7 @@ export class ArchiveManager {
         StorageKey.SettlementRankState,
         StorageKey.LevelDiffState,
         StorageKey.PlayedLevels,
+        StorageKey.RecentLevelLayouts,
     ];
 
     private static _instance: ArchiveManager;

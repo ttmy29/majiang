@@ -1,7 +1,7 @@
 import { StorageKey, StorageManager } from './StorageManager';
 import { ArchiveManager } from './ArchiveManager';
 import { Constants } from '../config/Constants';
-import { getAvailableBoardIds, LevelTier } from '../config/LevelJsonLoader';
+import { ensureLevelJson, getAvailableBoardIds, LevelJson, LevelTier } from '../config/LevelJsonLoader';
 import { ProgressManager } from './ProgressManager';
 
 export interface LevelStartPlan {
@@ -15,6 +15,17 @@ interface LevelDiffState {
     boardId: number;
     /** 仅为兼容已有存档保留，不再影响复活后的胜利结算。 */
     failed: boolean;
+}
+
+interface RecentLayoutEntry {
+    boardId: number;
+    /** 基于牌位坐标生成；忽略牌型，并把平移、水平/垂直镜像视为同一布局。 */
+    fingerprint: string;
+}
+
+interface StoredRecentLayoutHistory {
+    version: 1;
+    entries: RecentLayoutEntry[];
 }
 
 export type WinStreakRewardType = 'switch' | 'leaf' | 'undo' | 'unlock';
@@ -61,6 +72,7 @@ interface StoredWinStreakRewardState {
 }
 
 const REWARD_STATE_VERSION = 1 as const;
+const RECENT_LAYOUT_HISTORY_VERSION = 1 as const;
 const REWARD_CYCLE_SECONDS = 72 * 60 * 60;
 const MAIN_LEVEL_START = 1;
 
@@ -85,6 +97,47 @@ function isLevelTier(value: unknown): value is LevelTier {
 
 function cloneReward(config: Readonly<WinStreakRewardConfig>): WinStreakRewardConfig {
     return { ...config };
+}
+
+function hashLayout(value: string, seed: number, multiplier: number): string {
+    let hash = seed >>> 0;
+    for (let index = 0; index < value.length; index++) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, multiplier) >>> 0;
+    }
+    return hash.toString(36);
+}
+
+/**
+ * 玩家主要通过堆叠外形识别重复关卡，因此指纹只看坐标、不看牌型。
+ * 棋盘运行时会自动居中，故坐标平移不应产生新布局；水平/垂直镜像也按同形处理。
+ */
+function createLayoutFingerprint(json: LevelJson): string {
+    const positions = Array.isArray(json?.positions) ? json.positions : [];
+    if (positions.length === 0) return 'empty';
+
+    let canonical = '';
+    for (const flipX of [-1, 1]) {
+        for (const flipY of [-1, 1]) {
+            const transformed = positions.map((position) => ({
+                z: Number.isFinite(position.z_layer) ? Math.floor(position.z_layer) : 0,
+                y: (Number.isFinite(position.y_row) ? Math.floor(position.y_row) : 0) * flipY,
+                x: (Number.isFinite(position.x_col) ? Math.floor(position.x_col) : 0) * flipX,
+            }));
+            const minX = Math.min(...transformed.map((position) => position.x));
+            const minY = Math.min(...transformed.map((position) => position.y));
+            const encoded = transformed
+                .map((position) => `${position.z},${position.y - minY},${position.x - minX}`)
+                .sort()
+                .join('|');
+            if (!canonical || encoded < canonical) canonical = encoded;
+        }
+    }
+
+    // 两个独立 32 位散列组合，避免把完整坐标串写入云存档，同时降低碰撞概率。
+    const hash1 = hashLayout(canonical, 2166136261, 16777619);
+    const hash2 = hashLayout(canonical, 5381, 33);
+    return `${positions.length}:${hash1}:${hash2}`;
 }
 
 function clamp01(value: number): number {
@@ -179,7 +232,7 @@ export class StreakManager {
     /** 主线通关结算；活动关和引导关返回 null 且不修改任何连胜状态。 */
     static commitClear(level: number): WinStreakSettlement | null {
         const saved = this.loadDiffState();
-        if (level >= Constants.WinStreak.StartLevel) {
+        if (level >= Constants.WinStreak.RandomPoolStartLevel) {
             const boardId = (saved && saved.level === level) ? saved.boardId : level;
             this.markBoardPlayed(boardId);
         }
@@ -407,15 +460,146 @@ export class StreakManager {
             .filter((id) => id >= Constants.WinStreak.StartLevel);
     }
 
-    private static async pickRandomContinuationBoardId(ids: ReadonlyArray<number>): Promise<number> {
-        if (ids.length === 0) return Constants.WinStreak.StartLevel;
+    private static async getRandomContinuationBoardIds(): Promise<number[]> {
+        return (await getAvailableBoardIds('normal'))
+            .filter((id) => id >= Constants.WinStreak.RandomPoolStartLevel);
+    }
 
+    private static getRecentLayoutHistoryLimit(): number {
+        return Math.max(1, Math.floor(Constants.WinStreak.RecentLayoutHistoryLimit));
+    }
+
+    private static normalizeRecentLayoutEntries(values: unknown[]): RecentLayoutEntry[] {
+        const normalized: RecentLayoutEntry[] = [];
+        for (const rawEntry of values) {
+            const entry = typeof rawEntry === 'number'
+                ? { boardId: rawEntry, fingerprint: '' }
+                : rawEntry as Partial<RecentLayoutEntry> | null;
+            if (!entry || typeof entry.boardId !== 'number' || !Number.isFinite(entry.boardId)) continue;
+            const boardId = Math.floor(entry.boardId);
+            if (boardId < Constants.WinStreak.RandomPoolStartLevel) continue;
+            normalized.push({
+                boardId,
+                fingerprint: typeof entry.fingerprint === 'string' ? entry.fingerprint : '',
+            });
+        }
+
+        // 从最新记录向前去重，保留同盘面/同布局最后一次出现的位置。
+        const boardIds = new Set<number>();
+        const fingerprints = new Set<string>();
+        const uniqueNewestFirst: RecentLayoutEntry[] = [];
+        for (let index = normalized.length - 1; index >= 0; index--) {
+            const entry = normalized[index];
+            if (boardIds.has(entry.boardId)) continue;
+            if (entry.fingerprint && fingerprints.has(entry.fingerprint)) continue;
+            boardIds.add(entry.boardId);
+            if (entry.fingerprint) fingerprints.add(entry.fingerprint);
+            uniqueNewestFirst.push(entry);
+        }
+
+        return uniqueNewestFirst
+            .reverse()
+            .slice(-this.getRecentLayoutHistoryLimit());
+    }
+
+    private static saveRecentLayoutEntries(entries: RecentLayoutEntry[]): void {
+        const state: StoredRecentLayoutHistory = {
+            version: RECENT_LAYOUT_HISTORY_VERSION,
+            entries: this.normalizeRecentLayoutEntries(entries),
+        };
+        StorageManager.instance.setItem(StorageKey.RecentLevelLayouts, JSON.stringify(state));
+        ArchiveManager.instance.scheduleUpload();
+    }
+
+    private static loadRecentLayoutEntries(): RecentLayoutEntry[] {
+        const raw = StorageManager.instance.getItem(StorageKey.RecentLevelLayouts);
+        if (raw) {
+            try {
+                const parsed = JSON.parse(raw) as Partial<StoredRecentLayoutHistory> | unknown[];
+                const entries = Array.isArray(parsed) ? parsed : parsed?.entries;
+                if (Array.isArray(entries)) return this.normalizeRecentLayoutEntries(entries);
+            } catch (e) {
+                console.warn('StreakManager: recent layout history parse failed', e);
+            }
+        }
+
+        // 旧存档没有布局历史：按 PlayedLevels 的插入顺序迁移最近盘面编号。
+        // 指纹会在后续实际选中关卡时逐步补齐，迁移过程无需一次加载 100 份关卡资源。
+        const migrated = this.normalizeRecentLayoutEntries(this.getPlayedBoardIds());
+        if (migrated.length > 0) this.saveRecentLayoutEntries(migrated);
+        return migrated;
+    }
+
+    private static async getBoardLayoutFingerprint(boardId: number): Promise<string> {
+        const json = await ensureLevelJson(boardId, 'normal');
+        return json ? createLayoutFingerprint(json) : '';
+    }
+
+    /** 盘面一经分配就进入近期历史；失败、退出或未通关也不会立即再次抽到。 */
+    private static async markLayoutSeen(boardId: number): Promise<void> {
+        if (boardId < Constants.WinStreak.RandomPoolStartLevel) return;
+
+        const fingerprint = await this.getBoardLayoutFingerprint(boardId);
+        const entries = this.loadRecentLayoutEntries();
+        const last = entries[entries.length - 1];
+        if (last?.boardId === boardId && last.fingerprint === fingerprint) return;
+
+        const next = entries.filter((entry) => entry.boardId !== boardId
+            && (!fingerprint || entry.fingerprint !== fingerprint));
+        next.push({ boardId, fingerprint });
+        this.saveRecentLayoutEntries(next);
+    }
+
+    private static async pickBoardOutsideRecentLayouts(
+        ids: ReadonlyArray<number>,
+        recentBoardIds: ReadonlySet<number>,
+        recentFingerprints: ReadonlySet<string>,
+    ): Promise<number | null> {
+        const candidates = ids.filter((id) => !recentBoardIds.has(id));
+        while (candidates.length > 0) {
+            const index = Math.floor(Math.random() * candidates.length);
+            const [candidate] = candidates.splice(index, 1);
+            const fingerprint = await this.getBoardLayoutFingerprint(candidate);
+            if (!fingerprint || !recentFingerprints.has(fingerprint)) return candidate;
+        }
+        return null;
+    }
+
+    private static async pickRandomContinuationBoardId(ids: ReadonlyArray<number>): Promise<number> {
+        if (ids.length === 0) return Constants.WinStreak.RandomPoolStartLevel;
+
+        // 必须先迁移/读取近期历史，再可能清空旧 PlayedLevels，避免循环边界丢失最近记录。
+        const recent = this.loadRecentLayoutEntries();
         const played = new Set(this.getPlayedBoardIds());
         let unplayed = ids.filter((id) => !played.has(id));
         if (unplayed.length === 0) {
             this.resetPlayedBoardIds();
             unplayed = ids.slice();
         }
+
+        const recentBoardIds = new Set(recent.map((entry) => entry.boardId));
+        const recentFingerprints = new Set(recent
+            .map((entry) => entry.fingerprint)
+            .filter((fingerprint) => !!fingerprint));
+
+        // 随机抽取候选并按布局指纹复核；不同 boardId 但同形的资源也会被排除。
+        const unplayedCandidate = await this.pickBoardOutsideRecentLayouts(
+            unplayed,
+            recentBoardIds,
+            recentFingerprints,
+        );
+        if (unplayedCandidate !== null) return unplayedCandidate;
+
+        // 极少数情况下，剩余未通关编号都与近期布局冲突。此时优先保证玩家视觉不重复，
+        // 允许从本轮较早的已通关编号中取一个，而不是强行展示最近刚见过的布局。
+        const recycledCandidate = await this.pickBoardOutsideRecentLayouts(
+            ids,
+            recentBoardIds,
+            recentFingerprints,
+        );
+        if (recycledCandidate !== null) return recycledCandidate;
+
+        // 仅在整个盘面池都小于近期窗口或资源异常时触发，保证仍能正常开局。
         return unplayed[Math.floor(Math.random() * unplayed.length)];
     }
 
@@ -449,11 +633,14 @@ export class StreakManager {
         const sequentialBoardId = boardIndex >= 0 && boardIndex < orderedBoardIds.length
             ? orderedBoardIds[boardIndex]
             : null;
+        const continuationBoardIds = sequentialBoardId === null
+            ? await this.getRandomContinuationBoardIds()
+            : orderedBoardIds;
 
         const savedBoardIsExpected = sameLevel && saved!.tier !== 'base' && (
             sequentialBoardId !== null
                 ? saved!.boardId === sequentialBoardId
-                : orderedBoardIds.indexOf(saved!.boardId) >= 0
+                : continuationBoardIds.indexOf(saved!.boardId) >= 0
         );
         const failureCount = ProgressManager.loadLevelRetryCount(level);
         const easyBoardIds = failureCount >= Constants.WinStreak.EasyAfterFailures
@@ -466,17 +653,19 @@ export class StreakManager {
             const availableIds = await getAvailableBoardIds(saved!.tier);
             const alreadyUsesRequiredTier = !savedBoardShouldUseEasy || saved!.tier === 'easy';
             if (savedBoardIsExpected && alreadyUsesRequiredTier && availableIds.indexOf(saved!.boardId) >= 0) {
+                await this.markLayoutSeen(saved!.boardId);
                 return { tier: saved!.tier, boardId: saved!.boardId };
             }
         }
 
         const boardId = sequentialBoardId
-            ?? (savedBoardShouldUseEasy ? saved!.boardId : await this.pickRandomContinuationBoardId(orderedBoardIds));
+            ?? (savedBoardShouldUseEasy ? saved!.boardId : await this.pickRandomContinuationBoardId(continuationBoardIds));
         const forceEasy = easyBoardIds.indexOf(boardId) >= 0;
         const tier = forceEasy
             ? 'easy'
             : await this.resolveAvailableTier(boardId, this.rollTier(this.getStreak()));
         this.saveDiffState({ level, tier, boardId, failed: false });
+        await this.markLayoutSeen(boardId);
         ArchiveManager.instance.scheduleUpload();
         return { tier, boardId };
     }

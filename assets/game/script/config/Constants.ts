@@ -121,7 +121,11 @@ const Constants = {
     WinStreak: {
         // 从该关号起启用分档；之前的关恒定用基础盘面（base）
         StartLevel: 12,
+        // 随机续关池额外包含 7-11 号盘面；不影响 StartLevel 起的主线顺序映射。
+        RandomPoolStartLevel: 7,
         // config_levels_base 中存在的同号关优先用 base，其余按 level_hard 实际顺序出题；走完后随机续关。
+        // 随机续关会避开最近这些“实际见过”的布局；按布局指纹而不只是盘面编号判断。
+        RecentLayoutHistoryLimit: 100,
         // 同一关进入失败状态达到该次数后，有同号 level_easy 资源就固定切换到简单档。
         EasyAfterFailures: 5,
         // 档位边界：streak < Tier2Min → 一档；[Tier2Min, Tier3Min) → 二档；>= Tier3Min → 三档
