@@ -2517,6 +2517,7 @@ export class GameCtrl extends Component {
         } else {
             this.unlockNextSlotForContinue();
         }
+        SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
         this.updateHud();
     }
 
