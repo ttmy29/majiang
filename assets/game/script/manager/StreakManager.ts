@@ -565,8 +565,9 @@ export class StreakManager {
         return null;
     }
 
-    private static async pickRandomContinuationBoardId(ids: ReadonlyArray<number>): Promise<number> {
-        if (ids.length === 0) return Constants.WinStreak.RandomPoolStartLevel;
+    private static async pickRandomContinuationBoardId(ids: ReadonlyArray<number>): Promise<number | null> {
+        // 随机池由资源索引动态生成；资源暂不可用时不要写死回退到某个旧关卡。
+        if (ids.length === 0) return null;
 
         // 必须先迁移/读取近期历史，再可能清空旧 PlayedLevels，避免循环边界丢失最近记录。
         const recent = this.loadRecentLayoutEntries();
@@ -658,8 +659,14 @@ export class StreakManager {
             }
         }
 
+        const randomContinuationBoardId = savedBoardShouldUseEasy
+            ? saved!.boardId
+            : await this.pickRandomContinuationBoardId(continuationBoardIds);
         const boardId = sequentialBoardId
-            ?? (savedBoardShouldUseEasy ? saved!.boardId : await this.pickRandomContinuationBoardId(continuationBoardIds));
+            ?? randomContinuationBoardId
+            // 资源索引异常时尽量保持在当前主线资源范围内；正常情况下不会走到这里。
+            ?? orderedBoardIds[orderedBoardIds.length - 1]
+            ?? level;
         const forceEasy = easyBoardIds.indexOf(boardId) >= 0;
         const tier = forceEasy
             ? 'easy'
