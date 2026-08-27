@@ -33,9 +33,9 @@ var rankItemBase = {
     viewportWidth: 640,
     left: 25.6,
     width: 576,
-    height: 80.064,
-    gap: 1.92,
-    top: 0,
+    height: 74,
+    gap: 2,
+    top: 520,
     rankX: 49.18976,
     medalX: 49.89184,
     avatarX: 128.048,
@@ -53,6 +53,11 @@ var rankItemBase = {
     textFontSize: 23.04,
     textOutlineWidth: 1.28,
 };
+var topRankBase = [
+    { centerX: 320, centerY: 317, nameY: 393, avatarSize: 101 },
+    { centerX: 141, centerY: 352, nameY: 428, avatarSize: 101 },
+    { centerX: 499, centerY: 368, nameY: 444, avatarSize: 101 },
+];
 
 function clearCanvas() {
     if (!ctx || !sharedCanvas) return;
@@ -379,6 +384,31 @@ function drawEmpty() {
     drawText(currentEmptyText, sharedCanvas.width / 2, sharedCanvas.height / 2, 34, '#9b6b3a', 'center', true);
 }
 
+function drawTopRankList(data, scale) {
+    var topCount = Math.min(3, data.length);
+    for (var i = 0; i < topCount; i++) {
+        var item = data[i];
+        var layout = topRankBase[i];
+        var avatarSize = layout.avatarSize * scale;
+        var centerX = layout.centerX * scale;
+        var centerY = layout.centerY * scale;
+        drawAvatar(
+            item.avatarUrl,
+            centerX - avatarSize / 2,
+            centerY - avatarSize / 2,
+            avatarSize,
+            item.nickname
+        );
+        drawRankText(
+            clipText(item.nickname, 7),
+            centerX,
+            layout.nameY * scale,
+            rankItemBase.textFontSize * scale,
+            rankItemBase.textOutlineWidth * scale
+        );
+    }
+}
+
 function drawRankList(data) {
     if (!ctx || !sharedCanvas) return;
     lastRankData = data || [];
@@ -398,41 +428,26 @@ function drawRankList(data) {
     var rowX = rankItemBase.left * rowScale;
     var avatarSize = rankItemBase.avatarSize * rowScale;
     var medalWidth = rankItemBase.medalWidth * rowScale;
-    var tierIconWidth = rankItemBase.tierIconWidth * rowScale;
-    var tierIconHeight = rankItemBase.tierIconHeight * rowScale;
     var rankFontSize = rankItemBase.rankFontSize * rowScale;
     var textFontSize = rankItemBase.textFontSize * rowScale;
     var textOutlineWidth = rankItemBase.textOutlineWidth * rowScale;
+    drawTopRankList(lastRankData, rowScale);
 
-    for (var i = 0; i < lastRankData.length; i++) {
+    for (var i = 3; i < lastRankData.length; i++) {
         var item = lastRankData[i];
-        var y = startY + i * (rowHeight + rowGap);
+        var y = startY + (i - 3) * (rowHeight + rowGap);
         var centerY = y + rowHeight / 2;
         var rankX = rowX + rankItemBase.rankX * rowScale;
         var medalX = rowX + rankItemBase.medalX * rowScale;
         var avatarX = rowX + rankItemBase.avatarX * rowScale - avatarSize / 2;
         var nameX = rowX + rankItemBase.nameX * rowScale;
-        var tierIconX = rowX + rankItemBase.tierIconX * rowScale;
-        var tierNameX = rowX + rankItemBase.tierNameX * rowScale;
         var scoreX = rowX + rankItemBase.scoreX * rowScale;
-        var rankTier = getRankTier(item.rankScore);
         drawRankBackground(isSelfRankItem(item), rowX, y, rowWidth, rowHeight);
 
-        var medalColor = i === 0 ? '#ffb52e' : (i === 1 ? '#a9d3e8' : (i === 2 ? '#e27f3d' : ''));
-        if (i < 3) {
-            var medalHeight = rankItemBase.medalHeights[i] * rowScale;
-            if (!drawImageFit(rankMedalPaths[i], medalX - medalWidth / 2, centerY - medalHeight / 2, medalWidth, medalHeight)) {
-                drawRoundRect(medalX - 27 * rowScale, centerY - 24 * rowScale, 54 * rowScale, 48 * rowScale, 14 * rowScale, medalColor);
-            }
-        }
         drawRankText(String(i + 1), rankX, centerY, rankFontSize, textOutlineWidth);
 
         drawAvatar(item.avatarUrl, avatarX, centerY - avatarSize / 2, avatarSize, item.nickname);
         drawRankText(clipText(item.nickname, 8), nameX, centerY, textFontSize, textOutlineWidth);
-        if (rankTier) {
-            drawImageFit(rankTier.iconPath, tierIconX - tierIconWidth / 2, centerY - tierIconHeight / 2, tierIconWidth, tierIconHeight);
-            drawRankText(rankTier.name, tierNameX, centerY, textFontSize, textOutlineWidth);
-        }
         drawRankText(String(item.rankScore), scoreX, centerY, textFontSize, textOutlineWidth);
     }
 }

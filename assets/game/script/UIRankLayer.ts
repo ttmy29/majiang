@@ -42,7 +42,8 @@ export class UIRankLayer extends Component {
     private isClosing = false;
 
     private nowIndex = 1;
-    private tabDefaultSiblingIndexes: number[] = [];
+    private topRankNodes: (Node | null)[] = [];
+    private boundTabButtons: Array<{ node: Node; callback: () => void }> = [];
     private friendRankNode: Node | null = null;
     private friendRankView: SubContextView | null = null;
     private rankRequestToken = 0;
@@ -71,7 +72,8 @@ export class UIRankLayer extends Component {
 
     protected onLoad(): void {
         this.initNodeRefs();
-        this.recordTabDefaultSiblingIndexes();
+        this.initTopRankNodes();
+        this.bindTabButtons();
         this.bindCloseButton();
         this.bindRankScrollView();
         if (this.itemNode) this.itemNode.active = false;
@@ -108,6 +110,7 @@ export class UIRankLayer extends Component {
         if (this.closeButtonNode?.isValid) {
             this.closeButtonNode.off(Button.EventType.CLICK, this.onButonCloseClick, this);
         }
+        this.unbindTabButtons();
         this.unbindRankScrollView();
         this.resetVirtualRankItems(true);
         this.postOpenDataMessage({ type: 'clear' });
@@ -140,7 +143,7 @@ export class UIRankLayer extends Component {
     private switchRankTab(index: number) {
         this.nowIndex = index;
         this.rankRequestToken++;
-        this.updateTabSiblingOrder(this.getTabNode(index));
+        this.updateTabSelectedState(index);
 
         if (index === 1 && this.showFriendRank()) {
             return;
@@ -162,6 +165,62 @@ export class UIRankLayer extends Component {
         this.scrollViewNode = this.scrollViewNode || this.viewNode.getChildByName('bg') || this.findChildByName(this.node, 'scrollView')!;
     }
 
+    private initTopRankNodes() {
+        this.topRankNodes = [1, 2, 3].map(rank => this.findChildByName(this.viewNode, `rank${rank}`));
+
+        // top.png 的领奖台位置固定，预制体中的三个占位节点由脚本对齐到对应领奖台。
+        const positions = [
+            new Vec3(0, 133.077, 0),
+            new Vec3(-179, 98, 0),
+            new Vec3(179, 82, 0),
+        ];
+        this.topRankNodes.forEach((rankNode, index) => {
+            if (rankNode) rankNode.setPosition(positions[index]);
+        });
+        this.renderTopRankItems([]);
+    }
+
+    private bindTabButtons() {
+        this.unbindTabButtons();
+        this.getTabNodes().forEach((tabNode, index) => {
+            if (!tabNode) return;
+            const button = tabNode.getComponent(Button) || tabNode.addComponent(Button);
+            const callback = () => this.onTabButtonClicked(index + 1);
+            tabNode.on(Button.EventType.CLICK, callback, this);
+            button.interactable = true;
+            this.boundTabButtons.push({ node: tabNode, callback });
+        });
+    }
+
+    private unbindTabButtons() {
+        for (const binding of this.boundTabButtons) {
+            if (binding.node?.isValid) {
+                binding.node.off(Button.EventType.CLICK, binding.callback, this);
+            }
+        }
+        this.boundTabButtons = [];
+    }
+
+    private onTabButtonClicked(index: number) {
+        if (index === this.nowIndex) return;
+        AudioManager.instance.playClick();
+        this.switchRankTab(index);
+    }
+
+    private updateTabSelectedState(selectedIndex: number) {
+        this.getTabNodes().forEach((tabNode, index) => {
+            if (!tabNode) return;
+            const selected = index + 1 === selectedIndex;
+            const selectedNode = tabNode.getChildByName('select1');
+            const unselectedNode = tabNode.getChildByName('select2');
+            if (selectedNode) selectedNode.active = selected;
+            if (unselectedNode) unselectedNode.active = !selected;
+
+            const labelNode = tabNode.getChildByName('Label');
+            if (labelNode) labelNode.setSiblingIndex(tabNode.children.length - 1);
+        });
+    }
+
     private normalizeTabIndex(data: any): number {
         const index = Math.floor(Number(data));
         if (index < 1 || index > 3) return 0;
@@ -174,6 +233,7 @@ export class UIRankLayer extends Component {
         const requestToken = ++this.rankRequestToken;
         this.contentNode.active = true;
         this.clearContentNode();
+        this.renderTopRankItems([]);
         this.itemNode.active = false;
 
         if (!this.isWechatGamePlatform()) {
@@ -205,9 +265,15 @@ export class UIRankLayer extends Component {
         this.isRankScrolling = false;
         this.clearContentNode();
         this.itemNode.active = false;
-        this.rankData = rankData;
-        this.prepareVirtualRankList(rankData.length);
-        this.resizeContentNode(rankData.length);
+        const sortedRankData = rankData.slice().sort((a, b) => a.rank - b.rank);
+        const topRankData = [1, 2, 3].map(rank => sortedRankData.find(item => item.rank === rank));
+        const topRankSet = new Set(topRankData.filter((item): item is RankItemData => !!item));
+        const listRankData = sortedRankData.filter(item => !topRankSet.has(item));
+
+        this.renderTopRankItems(topRankData);
+        this.rankData = listRankData;
+        this.prepareVirtualRankList(listRankData.length);
+        this.resizeContentNode(listRankData.length);
 
         const scrollView = this.getScrollViewComponent();
         if (scrollView) {
@@ -215,6 +281,18 @@ export class UIRankLayer extends Component {
         }
         this.updateVisibleRankItems(true);
         this.scheduleOnce(() => this.updateVisibleRankItems(true));
+    }
+
+    private renderTopRankItems(rankData: Array<RankItemData | undefined>) {
+        this.topRankNodes.forEach((rankNode, index) => {
+            const data = rankData[index];
+            if (!rankNode) return;
+            rankNode.active = !!data;
+            if (!data) return;
+
+            this.setLabelString(rankNode.getChildByName('name'), data.name);
+            this.setAvatar(rankNode, data.avatar);
+        });
     }
 
     private prepareVirtualRankList(itemCount: number) {
@@ -474,6 +552,7 @@ export class UIRankLayer extends Component {
         if (!this.ensureFriendRankView()) return false;
 
         if (this.contentNode) this.contentNode.active = false;
+        this.setTopRankNodesActive(false);
         if (this.friendRankNode) this.friendRankNode.active = true;
 
         SDKManager.instance.markWechatFriendRankOpened();
@@ -609,9 +688,7 @@ export class UIRankLayer extends Component {
     private ensureFriendRankView(): boolean {
         if (this.friendRankNode?.isValid && this.friendRankView?.isValid) return true;
 
-        const scrollView = this.getScrollViewComponent();
-        const scrollHost = scrollView?.node || this.findChildByName(this.scrollViewNode, 'scrollView');
-        const host = scrollView?.view?.node || this.findChildByName(scrollHost, 'view') || scrollHost;
+        const host = this.viewNode;
         const hostTransform = host?.getComponent(UITransform);
         if (!host || !hostTransform) return false;
 
@@ -619,24 +696,35 @@ export class UIRankLayer extends Component {
         friendRankNode.active = false;
         friendRankNode.layer = host.layer;
         host.addChild(friendRankNode);
-        friendRankNode.setPosition(new Vec3(0, 0, 0));
+        const friendViewHeight = 1055;
+        const friendViewY = (hostTransform.contentSize.height - friendViewHeight) * 0.5;
+        friendRankNode.setPosition(new Vec3(0, friendViewY, 0));
 
         const friendTransform = friendRankNode.addComponent(UITransform);
         friendTransform.setAnchorPoint(0.5, 0.5);
-        friendTransform.setContentSize(hostTransform.contentSize.width, hostTransform.contentSize.height);
+        friendTransform.setContentSize(hostTransform.contentSize.width, friendViewHeight);
 
         const friendRankView = friendRankNode.addComponent(SubContextView);
         friendRankView.fps = 30;
 
         const designSize = (friendRankView as any)._designResolutionSize;
         if (designSize && typeof designSize.set === 'function') {
-            designSize.set(hostTransform.contentSize.width, hostTransform.contentSize.height);
+            designSize.set(hostTransform.contentSize.width, friendViewHeight);
         }
+
+        const panelNode = this.viewNode.getChildByName('bg');
+        if (panelNode) friendRankNode.setSiblingIndex(panelNode.getSiblingIndex() + 1);
 
         this.friendRankNode = friendRankNode;
         this.friendRankView = friendRankView;
         friendRankNode.active = true;
         return true;
+    }
+
+    private setTopRankNodesActive(active: boolean) {
+        this.topRankNodes.forEach(rankNode => {
+            if (rankNode) rankNode.active = active;
+        });
     }
 
     private isWechatGamePlatform(): boolean {
@@ -720,59 +808,14 @@ export class UIRankLayer extends Component {
         this.setLabelString(item.getChildByName('num'), `${data.rank}`);
         this.setLabelString(item.getChildByName('name'), data.name);
         this.setLabelString(item.getChildByName('count'), `${data.count}`);
-        this.setTier(item, data.count);
+        this.setTier(item);
     }
 
-    private setTier(item: Node, level: number) {
+    private setTier(item: Node) {
         const tierLabelNode = item.getChildByName('tierLabel');
         const tierIconNode = item.getChildByName('tierIcon');
-        const tierIndex = this.getRankTierIndex(level);
-        // 连胜榜的 count 是连胜次数，不是关卡，不能用于计算段位。
-        const shouldShowTier = this.nowIndex !== 2 && tierIndex >= 0;
-
-        if (tierLabelNode) tierLabelNode.active = shouldShowTier;
-        if (tierIconNode) tierIconNode.active = shouldShowTier;
-        if (!shouldShowTier) return;
-
-        this.setLabelString(tierLabelNode, Constants.rankNames[tierIndex] || '');
-
-        const tierSprite = tierIconNode?.getComponent(Sprite);
-        const tierTransform = tierIconNode?.getComponent(UITransform);
-        const tierSpriteFrame = this.tierSpriteArr[tierIndex];
-        if (!tierSprite || !tierTransform || !tierSpriteFrame) {
-            if (tierIconNode) tierIconNode.active = false;
-            return;
-        }
-
-        let maxSize = (tierIconNode as any).__rankTierIconMaxSize as { width: number; height: number } | undefined;
-        if (!maxSize) {
-            maxSize = {
-                width: tierTransform.contentSize.width,
-                height: tierTransform.contentSize.height,
-            };
-            (tierIconNode as any).__rankTierIconMaxSize = maxSize;
-        }
-
-        const sourceSize = tierSpriteFrame.originalSize;
-        const sourceWidth = Math.max(1, sourceSize.width);
-        const sourceHeight = Math.max(1, sourceSize.height);
-        const fitScale = Math.min(maxSize.width / sourceWidth, maxSize.height / sourceHeight);
-
-        tierSprite.spriteFrame = tierSpriteFrame;
-        tierSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-        tierTransform.setContentSize(sourceWidth * fitScale, sourceHeight * fitScale);
-    }
-
-    private getRankTierIndex(level: number): number {
-        const rankCount = Math.min(Constants.rankNames.length, Constants.rankStartLevels.length);
-        if (rankCount <= 0) return -1;
-
-        const normalizedLevel = Math.max(1, Math.floor(Number(level) || 1));
-        for (let i = rankCount - 1; i >= 0; i--) {
-            if (normalizedLevel >= Constants.rankStartLevels[i]) return i;
-        }
-
-        return 0;
+        if (tierLabelNode) tierLabelNode.active = false;
+        if (tierIconNode) tierIconNode.active = false;
     }
 
     private setRankBackground(item: Node, isSelf: boolean) {
@@ -965,42 +1008,8 @@ export class UIRankLayer extends Component {
         return nickname;
     }
 
-    private recordTabDefaultSiblingIndexes() {
-        this.tabDefaultSiblingIndexes = this.getTabNodes().map(tab => tab ? tab.getSiblingIndex() : -1);
-    }
-
-    private updateTabSiblingOrder(activeTabNode: Node | null) {
-        const tabs = this.getTabNodes();
-        const scrollRenderNode = this.getScrollRenderNode();
-
-        for (let i = 0; i < tabs.length; i++) {
-            const tab = tabs[i];
-            const defaultSiblingIndex = this.tabDefaultSiblingIndexes[i];
-            if (!tab?.isValid || tab === activeTabNode || defaultSiblingIndex < 0) continue;
-            tab.setSiblingIndex(defaultSiblingIndex);
-        }
-
-        if (!activeTabNode?.isValid || !scrollRenderNode?.isValid) return;
-        if (activeTabNode.parent !== scrollRenderNode.parent) return;
-
-        activeTabNode.setSiblingIndex(scrollRenderNode.getSiblingIndex() + 1);
-    }
-
-    private getTabNode(index: number): Node | null {
-        return this.getTabNodes()[index - 1] || null;
-    }
-
     private getTabNodes(): (Node | null)[] {
         return [this.tabNode1, this.tabNode2, this.tabNode3];
-    }
-
-    private getScrollRenderNode(): Node | null {
-        const firstTabParent = this.tabNode1?.parent;
-        if (this.scrollViewNode?.isValid && this.scrollViewNode.parent === firstTabParent) {
-            return this.scrollViewNode;
-        }
-
-        return this.viewNode?.getChildByName('bg') || null;
     }
 
     private getScrollViewComponent(): ScrollView | null {
