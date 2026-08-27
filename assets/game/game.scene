@@ -3995,7 +3995,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "解锁盒子",
+    "_string": "增加牌盒",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 40,
@@ -5052,7 +5052,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "解锁盒子",
+    "_string": "增加牌盒",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 40,
@@ -7090,7 +7090,7 @@
     "_contentSize": {
       "__type__": "cc.Size",
       "width": 186,
-      "height": 208
+      "height": 209
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -7872,7 +7872,7 @@
     "_contentSize": {
       "__type__": "cc.Size",
       "width": 186,
-      "height": 211
+      "height": 210
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",

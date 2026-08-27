@@ -210,6 +210,17 @@ export class UIWinLayerImported extends Component {
         const view = this.node.getChildByName('view');
         const hint = view?.getChildByName('promotionHint');
         const tierNode = view?.getChildByName('promotionTier');
+        const splash = view?.getChildByName('SpriteSplash');
+
+        // The redesigned layout uses SpriteSplash as its top banner and keeps the
+        // legacy promotion nodes only for prefab compatibility. Do not override
+        // their inactive state when that banner is present.
+        if (splash) {
+            if (hint) hint.active = false;
+            if (tierNode) tierNode.active = false;
+            return;
+        }
+
         const countNode = hint?.getChildByName('promotionCount');
         if (!hint || !tierNode || !countNode) return;
 
@@ -695,9 +706,12 @@ export class UIWinLayerImported extends Component {
     }
 
     private getRankViewHeight(scrollView: ScrollView): number {
-        return scrollView.view?.contentSize.height
+        // The content parent is the node carrying the Mask, so its height is the
+        // actual visible viewport. The ScrollView node can be taller after a
+        // layout-only resize and must not inflate virtual-list calculations.
+        return scrollView.content?.parent?.getComponent(UITransform)?.contentSize.height
+            ?? scrollView.view?.contentSize.height
             ?? scrollView.node.getComponent(UITransform)?.contentSize.height
-            ?? this._rankLayout?.parent?.getComponent(UITransform)?.contentSize.height
             ?? 0;
     }
 
