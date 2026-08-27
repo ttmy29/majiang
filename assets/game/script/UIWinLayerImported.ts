@@ -1,4 +1,4 @@
-import { _decorator, assetManager, Component, director, Director, instantiate, Label, Layout, Node, ScrollView, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, v3 } from 'cc';
+import { _decorator, assetManager, Component, director, Director, EventTouch, instantiate, Label, Layout, Node, ScrollView, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, v3 } from 'cc';
 import { Constants } from './config/Constants';
 import { AudioManager } from './manager/AudioManager';
 import { LayerManager } from './manager/LayerManager';
@@ -123,7 +123,7 @@ export class UIWinLayerImported extends Component {
     private _leaving = false;
     private _continueAvailable = false;
     private _onContinue: (() => void) | null = null;
-    private _bound: Array<{ node: Node; handler: () => void }> = [];
+    private _bound: Array<{ node: Node; handler: (event: EventTouch) => void }> = [];
     private _rankMoveProxy: RankMoveProxy | null = null;
     private _activeRankFloatItem: Node | null = null;
     private _rankScrollView: ScrollView | null = null;
@@ -1274,12 +1274,18 @@ export class UIWinLayerImported extends Component {
     private bindButtons(): void {
         const buttonView = this.node.getChildByName('buttonView');
         if (!buttonView) return;
-        this.bindTap(buttonView, () => this.onNext());
+        this.bindTap(buttonView.getChildByName('Label'), () => this.onNext());
+        this.bindTap(
+            buttonView.getChildByName('icon'),
+            () => this.closeAndContinue(),
+            true,
+        );
     }
 
-    private bindTap(node: Node | null, fn: () => void): void {
+    private bindTap(node: Node | null, fn: () => void, stopPropagation = false): void {
         if (!node) return;
-        const handler = () => {
+        const handler = (event: EventTouch) => {
+            if (stopPropagation) event.propagationStopped = true;
             AudioManager.instance.playClick();
             fn();
         };
@@ -1295,10 +1301,28 @@ export class UIWinLayerImported extends Component {
         this.leave(onContinue ?? (() => director.emit(Constants.eventNames.EventWinNextLevel)));
     }
 
+    private closeAndContinue(): void {
+        if (this._leaving) return;
+        const onContinue = this._onContinue;
+        this._onContinue = null;
+        this.leave(onContinue ?? (() => director.emit(Constants.eventNames.EventWinNextLevel)));
+    }
+
+    /** 保留给 Cocos 编辑器按钮事件使用。 */
+    public onButonCloseClick(): void {
+        AudioManager.instance.playClick();
+        this.closeAndContinue();
+    }
+
     private setContinueAvailable(available: boolean): void {
         this._continueAvailable = available;
         const buttonView = this.node.getChildByName('buttonView');
-        if (buttonView) buttonView.active = available;
+        if (!buttonView) return;
+
+        // 关闭按钮始终可用；排行榜播放完成后才显示“点击继续”。
+        buttonView.active = true;
+        const continueLabel = buttonView.getChildByName('Label');
+        if (continueLabel) continueLabel.active = available;
     }
 
     private leave(action: () => void): void {
