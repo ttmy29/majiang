@@ -84,7 +84,7 @@ interface TargetBox {
     unlocked: boolean;
     refreshing: boolean;
     refreshQueued: boolean;
-    // 槽位是否还停在屏幕外：MoveOut 后没找到新目标时置 true，
+    // 槽位是否还停在槽口下方：MoveOut 后没找到新目标时置 true，
     // 等后续 fillEmptyTargetBoxes 补到目标再触发 MoveIn 把它带回原位
     movedOut: boolean;
     // 槽位正在播 MoveIn 回原位动画。期间不接受新的匹配——否则 slot 里的牌会按半路位置算飞行目标
@@ -1729,12 +1729,8 @@ export class GameCtrl extends Component {
                 tile.node.setWorldPosition(endWorldPosition);
                 tile.node.setPosition(targetBoxPosition);
                 tile.node.setScale(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1);
-                // siblingIndex 绑定这张牌起飞时就定好的落格 targetIndex,而不是落位瞬间的 box.progress。
-                // 多张牌同时飞向同一目标槽时,tween 的 .call 完成顺序并不保证等于起飞顺序;
-                // 若按落位时的 progress 递增,会出现"后落的牌 siblingIndex 反而更小",
-                // 导致它的牌叠到相邻格子的牌上面 —— 看起来就是"牌跑到盒子上面"。
-                // 用 targetIndex(=该牌落入的 itemNodes 下标)定层,z 序永远和它落入的格子一致。
-                tile.node.setSiblingIndex(Constants.MahjongBoard.TargetBoxSiblingBase + targetIndex);
+                // 多张牌同时飞入时回调顺序不固定，每次落位都按最终 x 坐标重排。
+                this.syncTargetBoxTileRenderingOrder(box);
                 //屏蔽触摸方法
                 tile.item.disableTileTouch();
                 Utils.onVibrationShort();
@@ -1889,7 +1885,7 @@ export class GameCtrl extends Component {
                         tile.node.setScale(slotTileScale, slotTileScale, 1);
                         //屏蔽触摸方法
                         tile.item.disableTileTouch();
-                        tile.node.setSiblingIndex(Constants.MahjongBoard.BottomSlotSiblingBase + this.slots.indexOf(tile));
+                        this.syncBottomSlotTileRenderingOrder();
                         // 只有真正"飞进来"的那张牌算落位反馈,其余靠 reparent/位移补位的牌不算
                         if (tile === flyingTile) Utils.onVibrationShort();
                     })
@@ -1902,12 +1898,32 @@ export class GameCtrl extends Component {
                 .to(duration, { position: target, scale: new Vec3(slotTileScale, slotTileScale, 1) })
                 .start();
         }
+        this.syncBottomSlotTileRenderingOrder();
     }
 
     private getSlotTargetPosition(index: number): Vec3 {
         if (index < this.slotPositions.length) return this.slotPositions[index].clone();
         const gap = this.slotCapacity <= 7 ? 72 : 62;
         return new Vec3(-((this.slotCapacity - 1) * gap) / 2 + index * gap, 0, 0);
+    }
+
+    /** 目标牌盒内不论飞入顺序如何，预览牌与收集牌都按 x 从左到右绘制。 */
+    private syncTargetBoxTileRenderingOrder(box: TargetBox) {
+        const tileNodes = box.node.children
+            .filter((child) => child.name.startsWith('targetPreview_') || child.name.startsWith('targetTile_'))
+            .sort((left, right) => left.position.x - right.position.x || left.name.localeCompare(right.name));
+        for (const node of tileNodes) {
+            node.setSiblingIndex(box.node.children.length - 1);
+        }
+    }
+
+    /** slots 数组是左到右的布局顺序；依次置顶后最右牌层级最高。 */
+    private syncBottomSlotTileRenderingOrder() {
+        for (let index = 0; index < this.slots.length; index++) {
+            const tile = this.slots[index];
+            if (!tile.node?.isValid || tile.node.parent !== this.slotNode) continue;
+            tile.node.setSiblingIndex(this.slotNode.children.length - 1);
+        }
     }
 
     // UIGameLayer.slotNodeArr[0] 是底部存牌槽，目标槽 slot1~slot4 从下标 1 开始
@@ -1924,6 +1940,8 @@ export class GameCtrl extends Component {
             required: box.required,
             refreshing: box.refreshing,
         });
+        // UI 可能在本次渲染中新建最左侧的预览牌，因此事件返回后统一重排。
+        this.syncTargetBoxTileRenderingOrder(box);
     }
 
     private emitClearSlot(box: TargetBox) {
@@ -2707,13 +2725,12 @@ export class GameCtrl extends Component {
         }
     }
 
-    // 失败弹窗"继续游戏(还有锁着的槽位)":解锁下一个槽位,并在动画结束后给它分配新目标
+    // 失败弹窗"继续游戏(还有锁着的槽位)":解锁下一个槽位，并让新目标随槽位一起升起。
     private unlockNextSlotForContinue() {
         const box = this.targetBoxes.find((b) => !b.unlocked);
         if (!box) return;
         box.unlocked = true;
         box.refreshing = true;
-        director.emit(Constants.eventNames.EventShowSlotUnlock, this.getTargetBoxSlotID(box));
         // 底部槽满时,先看队首目标能不能接住一张底部牌;能接住就保持原始任务顺序。
         // 只有队首不能救场时,才按剩余 taskQueue 顺序找第一个能接住底部牌的类型并提前。
         if (this.slots.length >= this.getSlotFailThreshold()) {
@@ -2728,10 +2745,13 @@ export class GameCtrl extends Component {
             }
         }
 
+        // 先创建新目标，再播放解锁上升；预览牌会跟着整个槽位一起从底部出现。
+        this.assignNewTarget(box);
+        director.emit(Constants.eventNames.EventShowSlotUnlock, this.getTargetBoxSlotID(box));
+
         this.scheduleOnce(() => {
             box.refreshing = false;
             if (this.gameState !== 'playing' || !box.unlocked) return;
-            this.assignNewTarget(box);
             this.collectStoredTargets();
             this.updateHud();
             if (!this.resolvingMatch) this.checkEndState();
@@ -3070,7 +3090,7 @@ export class GameCtrl extends Component {
             if (!box.unlocked || box.type || box.refreshing) continue;
             this.assignNewTarget(box);
             if (!box.type) continue;
-            // 如果这个槽位之前因为没目标停在屏幕外，现在补到了新目标，把它移入回原位
+            // 如果这个槽位之前因为没目标停在槽口下方，现在补到了新目标，把它升回原位
             if (box.movedOut) {
                 box.movedOut = false;
                 this.startSlotMoveIn(box);
@@ -3128,10 +3148,10 @@ export class GameCtrl extends Component {
 
         const slotID = this.getTargetBoxSlotID(box);
 
-        // 触发槽位移出动画：整个槽位带着收集到的麻将牌一起飞出屏幕
+        // 触发槽位移出动画：整个槽位带着收集到的麻将牌一起沉入槽口
         director.emit(Constants.eventNames.EventShowSlotMoveOut, slotID);
 
-        // MoveOut 动画约 0.6333s，等其结束后再清理旧资源、生成新目标并回弹
+        // 等 glow 与旧盒同时消失后，再清理旧资源、生成新目标并从底部升起。
         this.scheduleOnce(() => {
             // assignNewTarget 内部会清理旧的 collectedNodes 与 previewNode，并生成新预览
             const assigned = this.assignNewTarget(box);
@@ -3140,11 +3160,11 @@ export class GameCtrl extends Component {
             this.tryStartAutoFinish();
 
             if (assigned) {
-                // 有新目标：把槽位从屏幕外带回原位
+                // 有新目标：把槽位从槽口下方升回原位
                 this.startSlotMoveIn(box);
                 box.movedOut = false;
             } else {
-                // 没新目标可发：让槽位继续停在屏幕外，等后续 fillEmptyTargetBoxes 补上目标时再 MoveIn
+                // 没新目标可发：让槽位继续停在槽口下方，等后续 fillEmptyTargetBoxes 补上目标时再 MoveIn
                 box.movedOut = true;
             }
 
@@ -3254,7 +3274,8 @@ export class GameCtrl extends Component {
         if (!rootSlotNode) return;
         this.targetBoxes = [];
         for (let i = 1; i <= 4; i++) {
-            const node = rootSlotNode.getChildByName(`slot${i}`);
+            // UIGameLayer 会在运行时给目标槽包一层 Mask，不能再假设 slot1~4 是直属子节点。
+            const node = Utils.findChildDeep(rootSlotNode, `slot${i}`);
             if (!node) continue;
             node.active = true;
 
@@ -3327,7 +3348,7 @@ export class GameCtrl extends Component {
         const now = Date.now();
         this.comboTimes = this.comboTimes > 0 ? this.comboTimes + 1 : 1;
         this.lastComboAt = now;
-        // 0.18s 延迟跟槽位 MoveOut 起手对齐:让 combo 口号/进度条出现在"砸完→飞走"那一刻,
+        // 0.18s 延迟跟槽位 MoveOut 起手对齐:让 combo 口号/进度条出现在"砸完→下沉"那一刻,
         // 而不是飞行落位那一帧。同时 collectStoredTargets 一次让多个 box 完成时,
         // 0.18s 内的多次 updateCombo 只 emit 一次,避免口号文字/音效互相覆盖到只剩最后一档。
         if (this.comboEmitPending) return;
@@ -3730,18 +3751,17 @@ export class GameCtrl extends Component {
         // 用 refreshing 当锁，挡住 fillEmptyTargetBoxes 在动画期间抢先塞目标
         box.refreshing = true;
 
-        // 触发解锁动画：盖子飞出 + 槽位回弹，box_2 由动画自行处理显示与隐藏
+        // 先生成目标牌，再让目标牌随整个槽位从槽口底部升起。
+        this.assignNewTarget(box);
         director.emit(Constants.eventNames.EventShowSlotUnlock, this.getTargetBoxSlotID(box));
 
         this.updateHud();
         this.showToast('槽位+1', 0.8);
 
-        // 解锁动画约 0.5667s，等盖子飞完再生成新目标，
-        // 避免预览图在盖子还没飞走的时候提前露脸
+        // 等槽位上升结束后解除刷新锁，再允许底部存牌飞向新目标。
         this.scheduleOnce(() => {
             box.refreshing = false;
             if (this.gameState !== 'playing' || !box.unlocked) return;
-            this.assignNewTarget(box);
             this.collectStoredTargets();
             this.updateHud();
             this.saveProgressDeferred();
@@ -4010,6 +4030,7 @@ export class GameCtrl extends Component {
             tile.node.setSiblingIndex(Constants.MahjongBoard.BottomSlotSiblingBase + i);
             tile.item.disableTileTouch();
         }
+        this.syncBottomSlotTileRenderingOrder();
 
         // 5. 目标槽 + 落入的 tiles
         for (let i = 0; i < this.targetBoxes.length && i < snap.boxes.length; i++) {

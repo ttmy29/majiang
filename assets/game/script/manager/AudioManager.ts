@@ -24,6 +24,7 @@ export enum AudioClipNames {
     combo_level5 = 'taiqiangle5', //5_真厉害
     combo_level6 = 'yingmale6', // 6_太棒了
     combo_level7 = 'wudile7', //7_绝绝子
+    mahjong_merge_sd = 'mahjong_merge_sd', // 目标牌盒消除 glow 音效
     open_door = 'open_door' //打开门
 }
 

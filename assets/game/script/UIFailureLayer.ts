@@ -6,6 +6,7 @@ import { LayerManager } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
 import { StreakManager } from './manager/StreakManager';
 import { SDKManager } from '../../loading/SDKManager';
+import { MahjongItem } from './MahjongItem';
 
 const { ccclass, property } = _decorator;
 
@@ -37,18 +38,26 @@ export class UIFailureLayer extends Component {
         // soltNode/iconNode2 任一缺失(prefab 未挂或非 clearSlot 模式)就不摆牌,避免读 null.children 崩溃
         if (this.isMax && this.soltNode && this.iconNode2) {
             let idx = 1;
-            const tiles = this.soltNode.children.filter((item) => item.getChildByName("bg"));
+            const displayedTiles: Node[] = [];
+            const tiles = this.soltNode.children
+                .filter((item) => item.getChildByName("bg"))
+                .sort((left, right) => left.position.x - right.position.x || left.name.localeCompare(right.name));
             tiles.forEach((item) => {
                 //if (!item.active) return;
                 // iconNode2 只有 item1~item6 六个占位,而底部 slot 可能因历史挂起的牌多于 6 张。
                 // 占位取不到时直接跳过,避免 setPosition(undefined) 崩溃。
                 const slot = this.iconNode2.getChildByName(`item${idx}`);
                 if (!slot) return;
+                item.setParent(this.iconNode2);
                 item.setPosition(slot.getPosition());
-                item.parent = this.iconNode2;
                 item.setScale(Constants.MahjongBoard.SlotScale + 0.06, Constants.MahjongBoard.SlotScale + 0.06, 1);
+                item.getComponent(MahjongItem)?.setShadowVisible(false);
+                displayedTiles.push(item);
                 idx += 1;
             });
+            displayedTiles
+                .sort((left, right) => left.position.x - right.position.x || left.name.localeCompare(right.name))
+                .forEach((item) => item.setSiblingIndex(this.iconNode2.children.length - 1));
         }
 
     }
