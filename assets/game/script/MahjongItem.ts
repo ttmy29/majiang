@@ -167,6 +167,11 @@ export class MahjongItem extends Component {
         return this.node.parent?.parent?.name === 'pNode';
     }
 
+    private isInSlot(): boolean {
+        const parentName = this.node.parent?.name || '';
+        return parentName === 'slot' || /^slot[1-4]$/.test(parentName);
+    }
+
     /**
      * 把阴影挂到 tile 所在的 _layer_<N>_ 容器里的最前面位置,
      * 让阴影先于同层牌身渲染,但仍盖在更低层牌身之上。
@@ -205,7 +210,8 @@ export class MahjongItem extends Component {
     /**
      * 牌被移到其他容器（fly layer / 槽位）或撤回到棋盘时调用：
      * - 回到 pNode → 重新挂回对应 layer 阴影容器并按原状态显示
-     * - 进入 fly layer / 槽位 → 把阴影内嵌到牌身下方，跟着牌一起显示
+     * - 进入 fly layer → 把阴影内嵌到牌身下方，跟着牌一起显示
+     * - 进入底部槽或目标槽 → 阴影仍内嵌到牌身，但不显示
      * - 完全脱离父节点 → 隐藏阴影（不销毁，便于撤回时复用）
      */
     private onTileParentChanged() {
@@ -217,6 +223,7 @@ export class MahjongItem extends Component {
             this.shadowNode.active = this._originalShadowActive;
         } else if (parent) {
             this.detachShadowToTile();
+            if (this.isInSlot()) this.shadowNode.active = false;
         } else {
             this.shadowNode.active = false;
         }
@@ -357,6 +364,17 @@ export class MahjongItem extends Component {
         this.boardScale = scale;
     }
 
+    setEditorPreviewVisible(visible: boolean) {
+        this.node.active = visible;
+        if (this.shadowNode?.isValid) {
+            this.shadowNode.active = visible && this._originalShadowActive;
+        }
+    }
+
+    public setShadowVisible(visible: boolean) {
+        if (this.shadowNode?.isValid) this.shadowNode.active = visible;
+    }
+
     private hideLegacyIcon() {
         const iconSprite = this.iconNode?.getComponent(Sprite);
         if (iconSprite?.isValid) iconSprite.spriteFrame = null;
@@ -388,6 +406,10 @@ export class MahjongItem extends Component {
      */
     public updateShadowStatus() {
         if (!this.shadowNode) return;
+        if (!this.isOnBoard()) {
+            this.shadowNode.active = false;
+            return;
+        }
         const parent = this.node.parent;
         if (!parent) return;
 

@@ -67,13 +67,16 @@ const Constants = {
     // 槽位动画的等待时长，与 UIGameLayer 里的 tween 段累加值保持一致。
     // 改动 UIGameLayer 的动画节奏时记得同步这里，否则会出现动画还没演完业务状态就刷新的衔接 bug。
     slotAnim: {
-        // MoveOut: 0.1833 延迟 + 三段挤压 0.05*3 + 0.3 飞出 = 0.6333s，留少量余量到 0.65s
-        MoveOutWait: 0.65,
-        // MoveIn: 实际飞回动画 0.45s(见 UIGameLayer.onEventShowSlotMoveIn 的 .to(0.45)),留余量到 0.5s。
+        // “牌盒在下”实验组使用更紧凑的飞牌节奏；对照组继续使用原来的 0.28/0.26s。
+        BottomUiTileToTargetDuration: 0.14,
+        BottomUiTileToBottomDuration: 0.14,
+        // MoveOut: 左右两组对撞 0.22s + glow 1s（最后 0.25s 旧盒同步下沉），再留 0.1s 换新目标。
+        MoveOutWait: 1.32,
+        // MoveIn: 0.25s 槽口薄边停留 + 0.25s 上升展开，共 0.5s。
         // 必须 >= 动画时长:否则 movingIn 提前解除,collectStoredTargets 会让挂起的牌飞向"还在半路(偏上)"
         // 的盒子世界坐标,表现为"牌先落到盒子上方,落位瞬间才吸进格子"。
         MoveInWait: 0.5,
-        // Unlock: 盖子飞出最长链路 0.35 延迟 + 0.2167 淡出 = 0.5667s，留余量到 0.6s
+        // Unlock: 复用 MoveIn 的槽口停留 + 上升动画，并留 0.1s 余量。
         UnlockWait: 0.6,
     },
     shuffleAnim: {
@@ -175,9 +178,9 @@ const Constants = {
             [0, 0],
         ] as Array<readonly [number, number]>,
         // 槽位麻将牌实例的统一缩放比例 36。
-        SlotScale: 0.40,
+        SlotScale: 0.54,
         // 底部存牌槽里牌的缩放(比目标槽 SlotScale 略小 0.05),视觉上比目标槽小一圈
-        SlotTileScale: 0.27,
+        SlotTileScale: 0.38,
         // 牌在底部 slot 内的 siblingIndex 基数: BottomSlotSiblingBase + slotIndex
         BottomSlotSiblingBase: 100,
         // 牌在目标槽内的 siblingIndex 基数: TargetBoxSiblingBase + orderInBox + 1

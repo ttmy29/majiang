@@ -211,7 +211,10 @@ export class GuideCtrl extends Component {
     }
 
     private getTargetNodeHighlightRect(bgNode: Node, left: number, right: number, bottom: number, top: number): HighlightRect | null {
-        const target = find(this.targetNodePath);
+        // 牌盒运行时会被包进 slotRevealMask_x 遮罩父节点，
+        // 原来序列化在 prefab 里的 Canvas/gameLayer/slotNode/slot1 路径因此会失效。
+        // 路径失效时按末级节点名在 slotNode 子树中查找，保证引导高亮跟随真实牌盒位置。
+        const target = this.resolveTargetNode();
         const targetUi = target?.getComponent(UITransform);
         const bgUi = bgNode.getComponent(UITransform);
         if (!target || !targetUi || !bgUi || targetUi.contentSize.width <= 0 || targetUi.contentSize.height <= 0) return null;
@@ -250,6 +253,25 @@ export class GuideCtrl extends Component {
             width: maxX - minX,
             height: maxY - minY,
         }, left, right, bottom, top);
+    }
+
+    private resolveTargetNode(): Node | null {
+        const direct = find(this.targetNodePath);
+        if (direct) return direct;
+
+        const slotRoot = find('Canvas/gameLayer/slotNode');
+        if (!slotRoot) return null;
+        const separator = this.targetNodePath.lastIndexOf('/');
+        const targetName = separator >= 0
+            ? this.targetNodePath.slice(separator + 1)
+            : this.targetNodePath;
+        const pending: Node[] = [slotRoot];
+        while (pending.length > 0) {
+            const current = pending.shift()!;
+            if (current.name === targetName) return current;
+            pending.push(...current.children);
+        }
+        return null;
     }
 
     private drawShadowCells(
