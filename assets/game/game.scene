@@ -256,7 +256,7 @@
         "__id__": 321
       }
     ],
-    "_active": true,
+    "_active": false,
     "_components": [
       {
         "__id__": 363
@@ -3523,9 +3523,11 @@
       "__id__": 86
     },
     "box3": null,
+    "box4": null,
     "box1SpriteArr": [],
     "box2SpriteArr": [],
     "box3SpriteArr": [],
+    "box4SpriteArr": [],
     "_id": "2fZ7G3nstJDpOQYD7n8B5p"
   },
   {
