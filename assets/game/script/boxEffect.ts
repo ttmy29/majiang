@@ -5,7 +5,7 @@ const { ccclass, property } = _decorator;
 export class boxEffect extends Component {
     private static readonly BOX1_MIN_OPACITY = 80;
     private static readonly BOX4_MOVE_Y = 80;
-    private static readonly BOX4_MOVE_DURATION = 0.8;
+    private static readonly BOX4_MOVE_DURATION = 1.4;
     private static readonly BOX4_LOOP_DELAY = 0.2;
     private hasStarted = false;
     private box4StartPosition: Vec3 | null = null;

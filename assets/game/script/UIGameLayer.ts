@@ -78,25 +78,38 @@ export class UIGameLayer extends Component {
     private static readonly BOTTOM_UI_BOARD_TOP = 93.9;
     private static readonly BOTTOM_UI_BOARD_BOTTOM = 599.1;
     private static readonly BOTTOM_UI_COMBO_TOP = 120;
-    // 牌盒刷新播放 1s glow，旧盒在特效后半段同步下沉，与特效一起消失。
+    // 牌盒刷新播放 1s glow，旧盒在特效后半段同步下沉，收尾时保留一条底座边缘。
     private static readonly SLOT_GLOW_DURATION = 1;
+    // glow/huaban 起效后很快清掉旧牌，不再等牌盒下沉完成。
+    private static readonly SLOT_EFFECT_TILE_CLEAR_DELAY = 0.12;
     private static readonly SLOT_GROUP_COLLISION_SPREAD = 0.12;
     private static readonly SLOT_GROUP_COLLISION_IMPACT = 0.1;
     private static readonly SLOT_GROUP_COLLISION_REBOUND = 0.12;
     private static readonly SLOT_GROUP_COLLISION_DISTANCE = 24;
-    private static readonly SLOT_REVEAL_HOLD = 0.25;
-    private static readonly SLOT_REVEAL_RISE = 0.25;
+    private static readonly SLOT_REVEAL_DURATION = 0.5;
+    // 小推板起点比 groove 的裁切底边再低一点，避免抗锯齿边缘漏出。
+    private static readonly SLOT_SMALL_PAD_HIDDEN_EXTRA = 2;
+    // 在 Inspector 停靠点基础上再多推出一点，让推板和带出的牌盒关系更明显。
+    private static readonly SLOT_SMALL_PAD_PUSH_EXTRA = 24;
+    // 推板到位时比牌盒上边缘多露出的高度，突出“推板带出牌盒”的层次。
+    private static readonly SLOT_SMALL_PAD_VISIBLE_EXTENSION = 14;
+    // 无法读取小推板尺寸时的兜底带出比例；正常情况会按小推板上边缘动态计算。
+    private static readonly SLOT_SMALL_PAD_FALLBACK_LIFT_RATIO = 0.22;
+    // 牌盒底边越过遮罩裁切线后再多留一点安全距离，避免阴影提前穿帮。
+    private static readonly SLOT_REVEAL_MASK_CLEARANCE = 2;
     private static readonly SLOT_HIDE_SINK = 0.25;
-    private static readonly SLOT_HIDE_FADE = 0.12;
     private static readonly SLOT_HIDE_DELAY = UIGameLayer.SLOT_GLOW_DURATION - UIGameLayer.SLOT_HIDE_SINK;
     private static readonly SLOT_REVEAL_START_SCALE = 0.91;
-    // 起始帧只保留一条很薄的牌盒边缘；场景中的凹槽下沿不应再露出完整盒体。
+    // 退场结束/入场起始时，在凹槽裁切线上方保留的牌盒边缘高度。
+    private static readonly SLOT_RETRACTED_VISIBLE_EDGE = 1;
+    // 没有新目标时，让牌盒顶边再越过裁切线一段，确保完全移出。
+    private static readonly SLOT_RETRACTED_HIDDEN_EXTRA = 18;
+    // 没有创建遮罩时的位移兜底。
     private static readonly SLOT_REVEAL_START_OFFSET_RATIO = 1.10;
     private static readonly SLOT_GROOVE_WIDTH_RATIO = 1.044;
     // 新凹槽图为 454:145；按当前场景宽度等比缩放，避免旧 454:177 比例造成纵向拉高。
     private static readonly SLOT_GROOVE_HEIGHT_RATIO = 0.7954;
     private static readonly SLOT_GROOVE_Y_RATIO = -0.15;
-    private static readonly SLOT_HIDE_EXTRA_OFFSET = 18;
 
     @property(Node)
     slotNodeArr: Node[] = []!;
@@ -127,11 +140,14 @@ export class UIGameLayer extends Component {
 
     // 每个槽位在场景里的原始位置，MoveIn 时回到自己的原点而不是写死坐标
     private slotOriginPositions: Vec3[] = [];
+    // slotNode 下新增的 box1~box4 背景节点，下标与 slotNodeArr 的目标槽位保持一致。
+    private slotBoxBackgrounds: (Node | null)[] = [];
     // 目标牌盒运行时包进固定遮罩父节点；牌盒自身在遮罩内移动，形成从槽口顶出的裁切效果。
     private slotRevealMasks: (Node | null)[] = [];
     private slotGrooves: (Node | null)[] = [];
     private slotPads: (Node | null)[] = [];
     private slotSmallPads: (Node | null)[] = [];
+    private slotSmallPadOriginPositions: Vec3[] = [];
     private slotDecorEnabled: boolean[] = [];
     private slotGrooveAnimationSeq: number[] = [];
     // 记录每个牌盒当前所处的位移动画阶段，避免撞击/解锁动画中断 MoveIn 的收尾回调后，
@@ -195,6 +211,14 @@ export class UIGameLayer extends Component {
     private shuffleEffectClip: AnimationClip | null = null;
     private shuffleEffectSeq = 0;
     private iqLabel: Label | null = null;
+    private iqEffectNode: Node | null = null;
+    private currentIQValue = 0;
+    private iqLabelDefaultStyle: {
+        color: Color;
+        enableOutline: boolean;
+        outlineColor: Color;
+        outlineWidth: number;
+    } | null = null;
     private addIQCountPrefab: Prefab | null = null;
     private addIQCountLoading = false;
     private pendingIQAnimations: { addValue: number; position: Vec3 | null }[] = [];
@@ -211,6 +235,7 @@ export class UIGameLayer extends Component {
         this.bottomUiExperimentEnabled = GameExperiment.isBottomUiEnabled();
         if (this.bottomUiExperimentEnabled) this.applyBottomUiExperimentLayout();
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
+        this.cacheSlotBoxBackgrounds();
         this.setupSlotRevealMasks();
         this.slotRootTop = this.getSlotRootWidget()?.top ?? 0;
         this.propButtonOriginPositions = [this.undoButton, this.switchButton, this.unlockButton].map(btn => btn ? btn.position.clone() : new Vec3());
@@ -218,6 +243,20 @@ export class UIGameLayer extends Component {
         this.setupComboNode();
         this.preloadSlotEffectPrefabs();
         this.preloadShuffleEffectClip();
+    }
+
+    private cacheSlotBoxBackgrounds() {
+        const slotRoot = this.slotNodeArr[0]?.parent;
+        for (let slotID = 1; slotID < this.slotNodeArr.length; slotID++) {
+            this.slotBoxBackgrounds[slotID] = slotRoot?.getChildByName(`box${slotID}`) || null;
+        }
+    }
+
+    private setSlotBoxBackgroundVisible(slotID: number, visible: boolean) {
+        const boxBackground = this.slotBoxBackgrounds[slotID];
+        // 新手引导只使用前两个目标槽，box3/box4 不能被动画收尾重新点亮。
+        const shouldShow = visible && !(this.isGuideLevel && (slotID === 3 || slotID === 4));
+        if (boxBackground?.isValid) boxBackground.active = shouldShow;
     }
 
     /**
@@ -318,7 +357,10 @@ export class UIGameLayer extends Component {
         }
         // 小垫片属于凹槽的内部层，不再作为 slotNode 下的独立装饰显示。
         // 兼容旧场景：如果仍是 groove 的兄弟节点，运行时保留世界坐标并迁入 groove。
-        let smallPad = groove.getChildByName(smallPadName) || originalParent.getChildByName(smallPadName);
+        let smallPad = groove.getChildByName(smallPadName)
+            || groove.getChildByName('slotPadSmall')
+            || originalParent.getChildByName(smallPadName)
+            || originalParent.getChildByName('slotPadSmall');
         const smallPadWasCreated = !smallPad;
         if (!smallPad) {
             smallPad = new Node(smallPadName);
@@ -376,6 +418,7 @@ export class UIGameLayer extends Component {
         this.slotGrooves[slotID] = groove;
         this.slotPads[slotID] = pad;
         this.slotSmallPads[slotID] = smallPad;
+        this.slotSmallPadOriginPositions[slotID] = smallPad.position.clone();
         this.slotDecorEnabled[slotID] = false;
         groove.active = false;
         pad.active = false;
@@ -409,6 +452,7 @@ export class UIGameLayer extends Component {
         const groove = this.slotGrooves[slotID];
         const pad = this.slotPads[slotID];
         const smallPad = this.slotSmallPads[slotID];
+        this.resetSlotSmallPad(slotID);
         if (!enabled) {
             if (groove?.isValid) groove.active = false;
             if (pad?.isValid) pad.active = false;
@@ -426,10 +470,75 @@ export class UIGameLayer extends Component {
         const groove = this.slotGrooves[slotID];
         const pad = this.slotPads[slotID];
         const smallPad = this.slotSmallPads[slotID];
+        if (!visible) this.resetSlotSmallPad(slotID);
         if (groove?.isValid) groove.active = visible;
         if (pad?.isValid) pad.active = !visible;
-        // smallPad 是 groove 的子层，和 groove 使用同一个显隐状态，绝不独立出现。
-        if (smallPad?.isValid) smallPad.active = visible;
+        // 小推板只在 MoveIn 设置好完全隐藏的起点后单独启用，避免 MoveOut 阶段提前露出。
+        if (smallPad?.isValid) smallPad.active = false;
+    }
+
+    private resetSlotSmallPad(slotID: number) {
+        const smallPad = this.slotSmallPads[slotID];
+        if (!smallPad?.isValid) return;
+        Tween.stopAllByTarget(smallPad);
+        const origin = this.slotSmallPadOriginPositions[slotID];
+        if (origin) smallPad.setPosition(origin.clone());
+    }
+
+    /** 把小推板放到完全隐藏的起点，并计算推出终点及其上边缘位置。 */
+    private prepareSlotSmallPadPush(slotID: number): {
+        pushPosition: Vec3;
+        pushedTopEdgeY: number | null;
+    } | null {
+        if (!this.slotDecorEnabled[slotID]) return null;
+        const smallPad = this.slotSmallPads[slotID];
+        const origin = this.slotSmallPadOriginPositions[slotID];
+        if (!smallPad?.isValid || !origin) return null;
+
+        this.resetSlotSmallPad(slotID);
+        const pushPosition = new Vec3(
+            origin.x,
+            origin.y + UIGameLayer.SLOT_SMALL_PAD_PUSH_EXTRA,
+            origin.z,
+        );
+        const smallPadTransform = smallPad.getComponent(UITransform);
+        const grooveTransform = smallPad.parent?.getComponent(UITransform);
+        const slotParentTransform = this.slotNodeArr[slotID]?.parent?.getComponent(UITransform);
+        let pushedTopEdgeY: number | null = null;
+        if (smallPadTransform && slotParentTransform) {
+            // 临时放到推出终点换算边缘坐标，同一帧会继续切到隐藏起点，不会被渲染出来。
+            smallPad.setPosition(pushPosition);
+            const topEdgeWorld = smallPadTransform.convertToWorldSpaceAR(new Vec3(
+                0,
+                smallPadTransform.contentSize.height * (1 - smallPadTransform.anchorPoint.y),
+                0,
+            ));
+            pushedTopEdgeY = slotParentTransform.convertToNodeSpaceAR(topEdgeWorld).y;
+        }
+        const hiddenPosition = origin.clone();
+        if (smallPadTransform && grooveTransform) {
+            const scaledTopOffset = smallPadTransform.contentSize.height
+                * Math.abs(smallPad.scale.y)
+                * (1 - smallPadTransform.anchorPoint.y);
+            hiddenPosition.y = -grooveTransform.contentSize.height * grooveTransform.anchorPoint.y
+                - scaledTopOffset
+                - UIGameLayer.SLOT_SMALL_PAD_HIDDEN_EXTRA;
+        } else {
+            hiddenPosition.y -= 124;
+        }
+        smallPad.setPosition(hiddenPosition);
+        smallPad.active = true;
+        return { pushPosition, pushedTopEdgeY };
+    }
+
+    private playSlotSmallPadPush(slotID: number, pushPosition: Vec3, duration: number) {
+        const smallPad = this.slotSmallPads[slotID];
+        if (!smallPad?.isValid) return;
+        tween(smallPad)
+            .to(duration, {
+                position: pushPosition,
+            }, { easing: 'sineIn' })
+            .start();
     }
 
     private setSlotGrooveAnimationState(slotID: number, _visible: boolean): number {
@@ -457,6 +566,7 @@ export class UIGameLayer extends Component {
         const opacity = targetNode.getComponent(UIOpacity) || targetNode.addComponent(UIOpacity);
         Tween.stopAllByTarget(opacity);
         opacity.opacity = 255;
+        this.setSlotBoxBackgroundVisible(slotID, true);
         this.setSlotRevealMaskEnabled(slotID, false);
         this.setSlotGrooveVisible(slotID, false);
         const motionStreakNode = targetNode.getChildByName('motionStreak');
@@ -476,33 +586,39 @@ export class UIGameLayer extends Component {
 
         Tween.stopAllByTarget(targetNode);
         const originPos = this.slotOriginPositions[slotID] ?? targetNode.position.clone();
-        const transform = targetNode.getComponent(UITransform);
-        const slotHeight = transform?.contentSize.height || 124;
         const opacity = targetNode.getComponent(UIOpacity) || targetNode.addComponent(UIOpacity);
         Tween.stopAllByTarget(opacity);
         opacity.opacity = 255;
-        targetNode.setPosition(
-            originPos.x,
-            originPos.y - slotHeight * UIGameLayer.SLOT_REVEAL_START_OFFSET_RATIO,
-            originPos.z,
-        );
         const startScale = UIGameLayer.SLOT_REVEAL_START_SCALE;
+        targetNode.setPosition(this.getSlotRetractedPosition(slotID, originPos, startScale));
         targetNode.setScale(startScale, startScale, 1);
         this.setSlotRevealMaskEnabled(slotID, true);
         return targetNode;
     }
 
-    private getSlotHiddenPosition(slotID: number, originPos: Vec3, scale: number): Vec3 {
+    private getSlotRetractedPosition(
+        slotID: number,
+        originPos: Vec3,
+        scale: number,
+        keepVisibleEdge = true,
+    ): Vec3 {
         const targetNode = this.slotNodeArr[slotID];
         const slotTransform = targetNode?.getComponent(UITransform);
         const slotHeight = slotTransform?.contentSize.height || 124;
         const wrapperTransform = this.slotRevealMasks[slotID]?.getComponent(UITransform);
-        const hiddenY = wrapperTransform
+        const slotAnchorY = slotTransform?.anchorPoint.y ?? 0.5;
+        const slotTopOffset = slotHeight * scale * (1 - slotAnchorY);
+        const edgeOffset = keepVisibleEdge
+            ? UIGameLayer.SLOT_RETRACTED_VISIBLE_EDGE
+            : -UIGameLayer.SLOT_RETRACTED_HIDDEN_EXTRA;
+        const retractedY = wrapperTransform
             ? -wrapperTransform.contentSize.height * wrapperTransform.anchorPoint.y
-                - slotHeight * scale * 0.5
-                - UIGameLayer.SLOT_HIDE_EXTRA_OFFSET
-            : originPos.y - slotHeight * 1.2;
-        return new Vec3(originPos.x, hiddenY, originPos.z);
+                - slotTopOffset
+                + edgeOffset
+            : originPos.y - slotHeight * (keepVisibleEdge
+                ? UIGameLayer.SLOT_REVEAL_START_OFFSET_RATIO
+                : 1.4);
+        return new Vec3(originPos.x, retractedY, originPos.z);
     }
 
     /** 应用“牌盒在下”暂存方案中的场景坐标；对照组完全沿用 scene 原值。 */
@@ -742,8 +858,10 @@ export class UIGameLayer extends Component {
 
     private onEventIQUpdate(payload: IQUpdatePayload) {
         if (!payload || typeof payload.value !== 'number') return;
+        this.currentIQValue = payload.value;
         const label = this.ensureIQLabel();
         if (label) label.string = this.formatIQNumber(payload.value);
+        this.updateIQEffectVisual(payload.value);
         if (!payload.animate || !payload.addValue || payload.addValue <= 0) return;
         if (this.isGuideLevel) return;
         this.playAddIQAnimation(payload.addValue, this.getIQAnimationPosition(payload.slotID));
@@ -756,14 +874,54 @@ export class UIGameLayer extends Component {
     private setIQLabelVisible(visible: boolean) {
         const label = this.ensureIQLabel();
         if (label?.node?.isValid) label.node.active = visible;
+        this.updateIQEffectVisual(this.currentIQValue);
     }
 
     private ensureIQLabel(): Label | null {
-        if (this.iqLabel?.isValid) return this.iqLabel;
-        const node = this.findChildByName(this.node, 'iqLabel');
-        const label = node?.getComponent(Label) || null;
-        this.iqLabel = label;
-        return label;
+        if (!this.iqLabel?.isValid) {
+            const node = this.findChildByName(this.node, 'iqLabel');
+            this.iqLabel = node?.getComponent(Label) || null;
+        }
+        if (this.iqLabel && !this.iqLabelDefaultStyle) {
+            this.iqLabelDefaultStyle = {
+                color: this.iqLabel.color.clone(),
+                enableOutline: this.iqLabel.enableOutline,
+                outlineColor: this.iqLabel.outlineColor.clone(),
+                outlineWidth: this.iqLabel.outlineWidth,
+            };
+        }
+        return this.iqLabel;
+    }
+
+    private ensureIQEffectNode(): Node | null {
+        if (!this.iqEffectNode?.isValid) {
+            this.iqEffectNode = this.findChildByName(this.node, 'IQ_effect');
+        }
+        return this.iqEffectNode;
+    }
+
+    private updateIQEffectVisual(value: number) {
+        const label = this.ensureIQLabel();
+        const effectNode = this.ensureIQEffectNode();
+        const enhanced = value >= 50;
+
+        if (effectNode?.isValid) effectNode.active = enhanced && !!label?.node.active;
+        if (!label) return;
+
+        if (enhanced) {
+            label.color = new Color(0xf6, 0xdd, 0x11, 255);
+            label.enableOutline = true;
+            label.outlineWidth = 2;
+            label.outlineColor = new Color(0x61, 0x24, 0x03, 255);
+            return;
+        }
+
+        if (this.iqLabelDefaultStyle) {
+            label.color = this.iqLabelDefaultStyle.color.clone();
+            label.enableOutline = this.iqLabelDefaultStyle.enableOutline;
+            label.outlineWidth = this.iqLabelDefaultStyle.outlineWidth;
+            label.outlineColor = this.iqLabelDefaultStyle.outlineColor.clone();
+        }
     }
 
     private formatIQNumber(value: number): string {
@@ -895,6 +1053,8 @@ export class UIGameLayer extends Component {
         if (this.slotNodeArr[0]) this.slotNodeArr[0].active = !this.isGuideLevel;
         if (this.slotNodeArr[3]) this.slotNodeArr[3].active = !this.isGuideLevel;
         if (this.slotNodeArr[4]) this.slotNodeArr[4].active = !this.isGuideLevel;
+        this.setSlotBoxBackgroundVisible(3, !this.isGuideLevel);
+        this.setSlotBoxBackgroundVisible(4, !this.isGuideLevel);
 
         const levelNode = this.node.getChildByName('levelLabel');
         if (levelNode) levelNode.active = !this.isGuideLevel;
@@ -1016,8 +1176,14 @@ export class UIGameLayer extends Component {
         const slotNode = this.slotNodeArr[payload.slotID];
         if (!slotNode) return;
         this.clearComboBoxEffect(payload.slotID);
+        this.clearSlotTileVisuals(payload.slotID);
+    }
 
-        const preview = this.slotPreviews[payload.slotID];
+    private clearSlotTileVisuals(slotID: number) {
+        const slotNode = this.slotNodeArr[slotID];
+        if (!slotNode) return;
+
+        const preview = this.slotPreviews[slotID];
         if (preview?.isValid) {
             Tween.stopAllByTarget(preview);
             // 先 removeFromParent 再 destroy:Cocos 的 destroy 延迟到帧末执行,
@@ -1027,7 +1193,7 @@ export class UIGameLayer extends Component {
             preview.removeFromParent();
             preview.destroy();
         }
-        this.slotPreviews[payload.slotID] = null;
+        this.slotPreviews[slotID] = null;
 
         // 兜底：扫一遍 slot 子节点，把所有目标预览/已收集的牌都清掉
         for (const child of slotNode.children.slice()) {
@@ -1037,6 +1203,14 @@ export class UIGameLayer extends Component {
                 child.destroy();
             }
         }
+    }
+
+    private scheduleSlotTileClearAfterEffect(slotID: number, grooveSeq: number) {
+        this.scheduleOnce(() => {
+            if (this.slotGrooveAnimationSeq[slotID] !== grooveSeq
+                || this.slotMotionPhases[slotID] !== 'moveOut') return;
+            this.clearSlotTileVisuals(slotID);
+        }, UIGameLayer.SLOT_EFFECT_TILE_CLEAR_DELAY);
     }
 
     // 关卡重开时一次性把所有槽位的 transform/box_2 复位到场景初始状态，
@@ -1651,12 +1825,13 @@ export class UIGameLayer extends Component {
         return UIGameLayer.SLOT_GROUP_COLLISION_SPREAD + UIGameLayer.SLOT_GROUP_COLLISION_IMPACT;
     }
 
-    onEventShowSlotMoveOut(slotID: number) {
+    onEventShowSlotMoveOut(slotID: number, willReceiveNewTarget = true) {
         const targetNode = this.slotNodeArr[slotID];
         if (!targetNode) {
             console.warn(`[UIGameLayer] onEventShowSlotMoveOut 找不到 slotID 为 ${slotID} 的节点`);
             return;
         }
+        this.setSlotBoxBackgroundVisible(slotID, false);
         let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
             motionStreakNode.setPosition(new Vec3(0, -140, 0));
@@ -1669,8 +1844,8 @@ export class UIGameLayer extends Component {
         this.alignSlotRevealMaskToGroove(this.slotRevealMasks[slotID]!, this.slotGrooves[slotID]);
         const grooveSeq = this.setSlotGrooveAnimationState(slotID, false);
         this.slotMotionPhases[slotID] = 'moveOut';
-        // 碰撞和 glow 阶段保持完整显示；等旧盒完全淡出后才启用下沉遮罩，
-        // 避免低帧率设备长时间停在“半张牌被 Mask 截断”的中间帧。
+        // 碰撞和 glow 阶段保持完整显示；下沉开始时再启用遮罩。
+        // 有新目标时留一条底座边缘，没有新目标时则完全移出。
         this.setSlotRevealMaskEnabled(slotID, false);
         const originPos = this.slotOriginPositions[slotID] ?? targetNode.position.clone();
         // 退场始终从记录的布局原点开始，避免多轮刷新后位移累计。
@@ -1684,17 +1859,21 @@ export class UIGameLayer extends Component {
         const collisionImpactDelay = this.playSlotGroupCollision(targetNode);
 
         // 不再播放原版的盒盖下压/淡入和牌盒挤压。
-        // 碰撞后播放 glow，特效进入后半段时整盒连同已收集牌开始下沉，并与 glow 同时消失。
+        // 碰撞后播放 glow，特效进入后半段时整盒连同已收集牌开始下沉。
         // 与入场共用 0.91 缩放和 sineInOut，形成“沉下去 → 新盒升起来”的完整刷新。
         const endScale = UIGameLayer.SLOT_REVEAL_START_SCALE;
-        const hiddenPosition = this.getSlotHiddenPosition(slotID, originPos, endScale);
-        tween(targetOpacity)
-            .delay(collisionImpactDelay + UIGameLayer.SLOT_HIDE_DELAY - UIGameLayer.SLOT_HIDE_FADE)
-            .to(UIGameLayer.SLOT_HIDE_FADE, { opacity: 0 }, { easing: 'sineIn' })
-            .start();
+        const retractedPosition = this.getSlotRetractedPosition(
+            slotID,
+            originPos,
+            endScale,
+            willReceiveNewTarget,
+        );
         tween(targetNode)
             .delay(collisionImpactDelay)
-            .call(() => this.playSlotGlow(slotID))
+            .call(() => {
+                this.playSlotGlow(slotID);
+                this.scheduleSlotTileClearAfterEffect(slotID, grooveSeq);
+            })
             .delay(UIGameLayer.SLOT_HIDE_DELAY)
             .call(() => {
                 if (this.slotGrooveAnimationSeq[slotID] !== grooveSeq
@@ -1703,11 +1882,11 @@ export class UIGameLayer extends Component {
                 this.setSlotRevealMaskEnabled(slotID, true);
             })
             .to(UIGameLayer.SLOT_HIDE_SINK, {
-                position: hiddenPosition,
+                position: retractedPosition,
                 scale: new Vec3(endScale, endScale, 1),
             }, { easing: 'sineInOut' })
             .call(() => {
-                targetNode.setPosition(hiddenPosition);
+                targetNode.setPosition(retractedPosition);
                 targetNode.setScale(endScale, endScale, 1);
                 if (motionStreakNode) motionStreakNode.active = false;
             })
@@ -1720,6 +1899,8 @@ export class UIGameLayer extends Component {
             console.warn(`[UIGameLayer] onEventShowSlotMoveIn 找不到 slotID 为 ${slotID} 的节点`);
             return;
         }
+        // 移入期间保持隐藏，等 finishSlotMoveIn 收尾后再由稳定态显示。
+        this.setSlotBoxBackgroundVisible(slotID, false);
         if (this.activeBoxEffectLevel >= 0) this.showComboBoxEffectForSlot(slotID, this.activeBoxEffectLevel);
         let motionStreakNode = targetNode.getChildByName('motionStreak');
         if (motionStreakNode) {
@@ -1735,15 +1916,78 @@ export class UIGameLayer extends Component {
         this.setSlotAtRevealStart(slotID);
         // 任务箱滑回的起手音效
         if (playSound) AudioManager.instance.playOneShot(AudioClipNames.taskBoxMove);
-        // 2. 从固定遮罩下方先露出薄边，再带着预览牌/已收集牌一起上升。
+        // 2. 小推板同步带出牌盒并多露出一截；推板到位后停住，牌盒再独立完成剩余上升。
         // 不使用透明度与回弹，保持类似自动麻将桌的硬质机械感。
         const originPos = this.slotOriginPositions[slotID] ?? targetNode.position.clone();
+        const revealStartPos = targetNode.position.clone();
+        const startScale = UIGameLayer.SLOT_REVEAL_START_SCALE;
+        let preLiftRatio = UIGameLayer.SLOT_SMALL_PAD_FALLBACK_LIFT_RATIO;
+        const smallPadPush = this.prepareSlotSmallPadPush(slotID);
+        const pushedPadTopEdgeY = smallPadPush?.pushedTopEdgeY ?? null;
+        const slotTransform = targetNode.getComponent(UITransform);
+        if (pushedPadTopEdgeY !== null && slotTransform) {
+            const topHeight = slotTransform.contentSize.height * (1 - slotTransform.anchorPoint.y);
+            const startTopEdgeY = revealStartPos.y + topHeight * startScale;
+            const fullTopEdgeTravel = originPos.y - revealStartPos.y + topHeight * (1 - startScale);
+            if (Math.abs(fullTopEdgeTravel) > 0.001) {
+                preLiftRatio = Math.max(0.05, Math.min(
+                    0.95,
+                    (pushedPadTopEdgeY
+                        - UIGameLayer.SLOT_SMALL_PAD_VISIBLE_EXTENSION
+                        - startTopEdgeY) / fullTopEdgeTravel,
+                ));
+            }
+        }
+        const preLiftPos = new Vec3(
+            revealStartPos.x + (originPos.x - revealStartPos.x) * preLiftRatio,
+            revealStartPos.y + (originPos.y - revealStartPos.y) * preLiftRatio,
+            revealStartPos.z + (originPos.z - revealStartPos.z) * preLiftRatio,
+        );
+        const preLiftScale = startScale + (1 - startScale) * preLiftRatio;
+        const preLiftDuration = UIGameLayer.SLOT_REVEAL_DURATION * preLiftRatio;
+        const riseDuration = UIGameLayer.SLOT_REVEAL_DURATION - preLiftDuration;
+        // 遮罩不能在两段交接时立刻关闭：那时牌盒下半部仍在槽口下方，会把自身阴影整块露出。
+        // 根据牌盒底边越过裁切线的实际进度，换算到当前两段 easing 的时间点再关闭。
+        let revealMaskDisableDelay = UIGameLayer.SLOT_REVEAL_DURATION;
+        const revealMaskTransform = this.slotRevealMasks[slotID]?.getComponent(UITransform);
+        if (slotTransform && revealMaskTransform) {
+            const bottomHeight = slotTransform.contentSize.height * slotTransform.anchorPoint.y;
+            const startBottomEdgeY = revealStartPos.y - bottomHeight * startScale;
+            const fullBottomEdgeTravel = originPos.y - revealStartPos.y
+                - bottomHeight * (1 - startScale);
+            if (Math.abs(fullBottomEdgeTravel) > 0.001) {
+                const maskBottomEdgeY = -revealMaskTransform.contentSize.height
+                    * revealMaskTransform.anchorPoint.y;
+                const safeRatio = Math.max(preLiftRatio, Math.min(
+                    1,
+                    (maskBottomEdgeY
+                        + UIGameLayer.SLOT_REVEAL_MASK_CLEARANCE
+                        - startBottomEdgeY) / fullBottomEdgeTravel,
+                ));
+                const riseProgress = (safeRatio - preLiftRatio) / (1 - preLiftRatio);
+                const riseTimeRatio = 2 / Math.PI * Math.asin(Math.max(0, Math.min(1, riseProgress)));
+                revealMaskDisableDelay = preLiftDuration + riseDuration * riseTimeRatio;
+            }
+        }
+        this.scheduleOnce(() => {
+            if (this.slotGrooveAnimationSeq[slotID] !== grooveSeq
+                || this.slotMotionPhases[slotID] !== 'moveIn') return;
+            this.setSlotRevealMaskEnabled(slotID, false);
+        }, revealMaskDisableDelay);
+        if (smallPadPush) {
+            this.playSlotSmallPadPush(slotID, smallPadPush.pushPosition, preLiftDuration);
+        }
         tween(targetNode)
-            .delay(UIGameLayer.SLOT_REVEAL_HOLD)
-            .to(UIGameLayer.SLOT_REVEAL_RISE, {
+            // 推板和牌盒同时启动，交接时推板比牌盒边缘多露出一截。
+            // 前段加速、后段减速；时长按各自行程分配，交接点速度连续，不再半路停顿。
+            .to(preLiftDuration, {
+                position: preLiftPos,
+                scale: new Vec3(preLiftScale, preLiftScale, 1),
+            }, { easing: 'sineIn' })
+            .to(riseDuration, {
                 position: originPos.clone(),
                 scale: new Vec3(1, 1, 1),
-            }, { easing: 'sineInOut' })
+            }, { easing: 'sineOut' })
             .call(() => {
                 this.finishSlotMoveIn(slotID, grooveSeq);
             })
@@ -1752,7 +1996,7 @@ export class UIGameLayer extends Component {
         // 正常 tween 收尾之外再留一个带序号/阶段校验的兜底；旧轮次不会误关新一轮动画的 Mask。
         this.scheduleOnce(() => {
             this.finishSlotMoveIn(slotID, grooveSeq);
-        }, UIGameLayer.SLOT_REVEAL_HOLD + UIGameLayer.SLOT_REVEAL_RISE + 0.05);
+        }, UIGameLayer.SLOT_REVEAL_DURATION + 0.05);
     }
 
     onSetUndoButtonStatus(status: boolean) {

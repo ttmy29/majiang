@@ -1,4 +1,4 @@
-import { _decorator, Component, director, EventMouse, Node, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, assetManager, Component, director, EventMouse, Node, tween, UIOpacity, Vec3 } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
@@ -6,6 +6,7 @@ import { ProgressManager } from './manager/ProgressManager';
 import { Utils } from './util/Utils';
 import { getCurrentGameMode } from './config/GameMode';
 import { Constants } from './config/Constants';
+import { clearLevelBundleCaches } from './config/LevelJsonLoader';
 const { ccclass, property } = _decorator;
 
 @ccclass('UISetingLayer')
@@ -16,6 +17,7 @@ export class UISetingLayer extends Component {
     maskNode: Node = null!;
 
     opentype: number = 0;
+    private isClearingCache = false;
 
     start() {
 
@@ -27,8 +29,13 @@ export class UISetingLayer extends Component {
 
         // opentype === 1 时才显示 viewNode 下的 button 节点
         const buttonNode = this.viewNode?.getChildByName('Game_frame')?.getChildByName('button');
-        if (buttonNode) {
-            buttonNode.active = opentype === 1;
+        const releaseNode = this.viewNode?.getChildByName('Game_frame')?.getChildByName('release');
+        if (opentype === 1) {
+            buttonNode.active = true;
+            releaseNode.active = false
+        } else {
+            buttonNode.active = false;
+            releaseNode.active = true
         }
 
         this.applySavedSettings();
@@ -153,5 +160,34 @@ export class UISetingLayer extends Component {
         LayerManager.instance.showStartLayer();
     }
 
-}
 
+    onButtonReleaseClick() {
+        if (this.isClearingCache) return;
+        this.isClearingCache = true;
+
+        AudioManager.instance.playClick();
+        try {
+            // 清理关卡 JSON、索引和三个关卡 Bundle 的运行时缓存。
+            clearLevelBundleCaches();
+
+            // 非 Web 平台（如微信小游戏）才有文件缓存管理器；不会清除 sys.localStorage 中的玩家存档。
+            const cacheManager = assetManager.cacheManager;
+            if (cacheManager) {
+                cacheManager.clearCache();
+                LayerManager.instance.showToast('缓存已清理');
+            } else {
+                // Web 预览的网络缓存由浏览器管理，此处只能清理关卡运行时缓存。
+                console.warn('UISetingLayer: cacheManager is unavailable on the current platform');
+                LayerManager.instance.showToast('运行缓存已清理');
+            }
+        } catch (err) {
+            console.warn('UISetingLayer: clear level cache failed', err);
+            LayerManager.instance.showToast('缓存清理失败，请重试');
+            this.isClearingCache = false;
+            return;
+        }
+
+        this.playCloseAnimation();
+    }
+
+}

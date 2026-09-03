@@ -3147,13 +3147,20 @@ export class GameCtrl extends Component {
         box.pending = 0;
 
         const slotID = this.getTargetBoxSlotID(box);
+        // 多个槽位同时刷新时，按已进入退场的完成槽位数预留队列目标。
+        // 当前槽位没有可分配的新目标时，UI 会让它完全移出。
+        const refreshingCompletedBoxCount = this.targetBoxes.filter((candidate) =>
+            candidate.refreshing && candidate.progress >= candidate.required
+        ).length;
+        const willReceiveNewTarget = this.taskQueue.length >= refreshingCompletedBoxCount;
 
         // 触发槽位移出动画：整个槽位带着收集到的麻将牌一起沉入槽口
-        director.emit(Constants.eventNames.EventShowSlotMoveOut, slotID);
+        director.emit(Constants.eventNames.EventShowSlotMoveOut, slotID, willReceiveNewTarget);
 
-        // 等 glow 与旧盒同时消失后，再清理旧资源、生成新目标并从底部升起。
+        // UI 会在 glow/huaban 起效后先清掉旧牌；这里仍等退场完成后
+        // 再切换业务状态、生成新目标并从底部升起。
         this.scheduleOnce(() => {
-            // assignNewTarget 内部会清理旧的 collectedNodes 与 previewNode，并生成新预览
+            // assignNewTarget 会再做一次幂等清理，然后生成新预览。
             const assigned = this.assignNewTarget(box);
 
             box.refreshing = false;
