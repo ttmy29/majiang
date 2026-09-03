@@ -76,6 +76,7 @@ const bundleLoadingPromises = new Map<string, Promise<AssetManager.Bundle | null
 const bundleAssetRefState = new Map<string, number>();
 const bundleLoadingCounts = new Map<string, number>();
 const missingBundles = new Set<string>();
+let cacheGeneration = 0;
 
 function createVariantBucket(): VariantBucket {
     return {
@@ -161,7 +162,10 @@ async function ensureVariantIndex(variant: LevelVariant): Promise<VariantIndex> 
         return state;
     }
 
+    const generation = cacheGeneration;
     state.readyPromise = ensureBundleReady(state.bundleName).then((bundle) => {
+        if (generation !== cacheGeneration) return;
+
         if (!bundle) {
             state.missing = true;
             state.scanned = true;
@@ -205,6 +209,7 @@ async function ensureVariantAsset(info: LevelAssetInfo): Promise<JsonAsset | nul
     if (bucket.assets.has(cacheKey)) return bucket.assets.get(cacheKey)!;
     if (bucket.loading.has(cacheKey)) return bucket.loading.get(cacheKey)!;
 
+    const generation = cacheGeneration;
     adjustCount(bundleLoadingCounts, info.bundleName, 1);
 
     const promise = ensureBundleReady(info.bundleName).then((bundle) => {
@@ -212,6 +217,12 @@ async function ensureVariantAsset(info: LevelAssetInfo): Promise<JsonAsset | nul
 
         return new Promise<JsonAsset | null>((resolve) => {
             bundle.load(info.path, JsonAsset, (err, asset) => {
+                if (generation !== cacheGeneration) {
+                    if (asset) assetManager.releaseAsset(asset);
+                    resolve(null);
+                    return;
+                }
+
                 if (err || !asset) {
                     console.warn(`LevelJsonLoader: load ${info.bundleName}/${info.path} failed`, err);
                     resolve(null);
@@ -225,13 +236,22 @@ async function ensureVariantAsset(info: LevelAssetInfo): Promise<JsonAsset | nul
         });
     });
 
-    const trackedPromise = promise.then((asset) => {
-        bucket.loading.delete(cacheKey);
-        adjustCount(bundleLoadingCounts, info.bundleName, -1);
+    let trackedPromise: Promise<JsonAsset | null>;
+    trackedPromise = promise.then((asset) => {
+        if (bucket.loading.get(cacheKey) === trackedPromise) {
+            bucket.loading.delete(cacheKey);
+        }
+        if (generation === cacheGeneration) {
+            adjustCount(bundleLoadingCounts, info.bundleName, -1);
+        }
         return asset;
     }, (err) => {
-        bucket.loading.delete(cacheKey);
-        adjustCount(bundleLoadingCounts, info.bundleName, -1);
+        if (bucket.loading.get(cacheKey) === trackedPromise) {
+            bucket.loading.delete(cacheKey);
+        }
+        if (generation === cacheGeneration) {
+            adjustCount(bundleLoadingCounts, info.bundleName, -1);
+        }
         throw err;
     });
 
@@ -289,8 +309,20 @@ export async function ensureBundleReady(bundleName: string): Promise<AssetManage
         return bundleLoadingPromises.get(bundleName)!;
     }
 
+    const generation = cacheGeneration;
     const promise = new Promise<AssetManager.Bundle | null>((resolve) => {
         assetManager.loadBundle(bundleName, (err, bundle) => {
+            if (generation !== cacheGeneration) {
+                if (bundle) {
+                    bundle.releaseAll();
+                    if (assetManager.getBundle(bundleName) === bundle) {
+                        assetManager.removeBundle(bundle);
+                    }
+                }
+                resolve(null);
+                return;
+            }
+
             if (err || !bundle) {
                 console.warn(`LevelJsonLoader: load bundle ${bundleName} failed`, err);
                 resolve(null);
@@ -300,12 +332,19 @@ export async function ensureBundleReady(bundleName: string): Promise<AssetManage
         });
     });
 
-    const trackedPromise = promise.then((bundle) => {
-        bundleLoadingPromises.delete(bundleName);
-        if (!bundle) missingBundles.add(bundleName);
+    let trackedPromise: Promise<AssetManager.Bundle | null>;
+    trackedPromise = promise.then((bundle) => {
+        if (bundleLoadingPromises.get(bundleName) === trackedPromise) {
+            bundleLoadingPromises.delete(bundleName);
+        }
+        if (generation === cacheGeneration && !bundle) {
+            missingBundles.add(bundleName);
+        }
         return bundle;
     }, (err) => {
-        bundleLoadingPromises.delete(bundleName);
+        if (bundleLoadingPromises.get(bundleName) === trackedPromise) {
+            bundleLoadingPromises.delete(bundleName);
+        }
         throw err;
     });
 
@@ -409,4 +448,48 @@ export function releaseActivityOutsideWindow(level: number, aheadCount = 10): vo
             releaseVariantLevel(variant, parsed.bundleName, parsed.level);
         }
     })();
+}
+
+/**
+ * 清理所有关卡 Bundle 的内存资源与本加载器缓存。
+ * 文件系统中的远程资源缓存由调用方通过 assetManager.cacheManager 清理。
+ */
+export function clearLevelBundleCaches(): void {
+    cacheGeneration++;
+
+    const bundleNames = [BASE_BUNDLE, ADVANCED_BUNDLE, ACTIVITY_BUNDLE];
+    for (const bundleName of bundleNames) {
+        const bundle = assetManager.getBundle(bundleName);
+        if (!bundle) continue;
+
+        try {
+            bundle.releaseAll();
+        } catch (err) {
+            console.warn(`LevelJsonLoader: releaseAll ${bundleName} failed`, err);
+        }
+
+        try {
+            assetManager.removeBundle(bundle);
+        } catch (err) {
+            console.warn(`LevelJsonLoader: remove bundle ${bundleName} failed`, err);
+        }
+    }
+
+    for (const variant of Object.keys(variantBuckets) as LevelVariant[]) {
+        const bucket = variantBuckets[variant];
+        bucket.assets.clear();
+        bucket.loading.clear();
+
+        const state = variantIndexes[variant];
+        state.indexedLevels.clear();
+        state.pathByLevel.clear();
+        state.scanned = false;
+        state.missing = false;
+        state.readyPromise = null;
+    }
+
+    bundleLoadingPromises.clear();
+    bundleAssetRefState.clear();
+    bundleLoadingCounts.clear();
+    missingBundles.clear();
 }
