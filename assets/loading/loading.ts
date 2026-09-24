@@ -4,6 +4,7 @@ import { HttpManager } from './HttpManager';
 import { GameExperiment } from './GameExperiment';
 
 const { ccclass, property } = _decorator;
+const LOGIN_REWARD_SHOWN_DATE_KEY = 'mahjong_match_login_reward_shown_date';
 declare global {
     interface Window {
         dnSDK: any; // 如果有具体类型定义，建议替换 any 为具体接口
@@ -107,6 +108,12 @@ export class loading extends Component {
                 if (key.indexOf('mahjong_match_') !== 0) return;
                 const value = data[key];
                 if (value === null || value === undefined) return;
+                if (key === LOGIN_REWARD_SHOWN_DATE_KEY) {
+                    const cloudDate = typeof value === 'string' ? value : '';
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(cloudDate)) return;
+                    const localDate = sys.localStorage.getItem(key);
+                    if (localDate && /^\d{4}-\d{2}-\d{2}$/.test(localDate) && localDate > cloudDate) return;
+                }
                 sys.localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
             });
         } catch (e) {

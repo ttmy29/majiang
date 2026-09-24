@@ -32,6 +32,8 @@ export class MahjongItem extends Component {
     // 和"节点池/父节点反激活后重启（onEnable 需要主动挂回）"两种场景
     private _started: boolean = false;
     private boardScale = Constants.MahjongBoard.BoardScale;
+    private travelBoardStepX: number | null = null;
+    private travelBoardStepY: number | null = null;
 
     // 同 z 层容器内的深度排序。row+col 合成单一深度键:
     // 屏幕越靠"下+右"(row+col 越大)画得越在前面。
@@ -51,7 +53,13 @@ export class MahjongItem extends Component {
         const tileNodes = children
             .map((node) => ({ node, item: node.getComponent(MahjongItem) }))
             .filter((entry): entry is { node: Node; item: MahjongItem } => !!entry.item)
-            .sort((a, b) => MahjongItem.compareBoardDisplayOrderRC(a.item.row, a.item.col, b.item.row, b.item.col));
+            .sort((a, b) => {
+                // 旅行的行号向下递增：同层先画上面的牌，下面的牌盖住上面的牌边。
+                if (a.item.travelBoardStepY !== null && b.item.travelBoardStepY !== null) {
+                    return a.item.row - b.item.row || a.item.col - b.item.col;
+                }
+                return MahjongItem.compareBoardDisplayOrderRC(a.item.row, a.item.col, b.item.row, b.item.col);
+            });
         const overlaySet = new Set([...chainNodes, ...ironNodes]);
 
         let index = 0;
@@ -364,6 +372,11 @@ export class MahjongItem extends Component {
         this.boardScale = scale;
     }
 
+    setTravelBoardStep(stepX: number, stepY: number) {
+        this.travelBoardStepX = stepX;
+        this.travelBoardStepY = stepY;
+    }
+
     setEditorPreviewVisible(visible: boolean) {
         this.node.active = visible;
         if (this.shadowNode?.isValid) {
@@ -455,13 +468,13 @@ export class MahjongItem extends Component {
 
         const curPos = this.node.position;
 
-        // 跟 GameCtrl.isTileBlocked 用同一套阈值:相邻 step 的 82% 内算遮挡。
-        // 之前这里写死的 80/100 是按 BoardScale=0.75 时手调出来的像素值,
-        // 跟 GameCtrl 的 TileStepX*0.82=62.3 / TileStepY*0.82=77.9 略有出入,
-        // 会出现"GameCtrl 算挡 / MahjongItem 算不挡"的判定不一致,统一掉。
+        // 主线沿用 GameCtrl 的阈值；旅行按导入布局的 0.98 格遮挡规则，
+        // 以当前格距换算触摸反馈，避免牌身放大后按下和实际收牌判定不同。
         const fitRatio = this.boardScale / Constants.MahjongBoard.BoardScale;
-        const blockLimitX = Constants.MahjongBoard.TileStepX * fitRatio * 0.82;
-        const blockLimitY = Constants.MahjongBoard.TileStepY * fitRatio * 0.82;
+        const blockLimitX = this.travelBoardStepX !== null ? this.travelBoardStepX * 0.98
+            : Constants.MahjongBoard.TileStepX * fitRatio * 0.82;
+        const blockLimitY = this.travelBoardStepY !== null ? this.travelBoardStepY * 0.98
+            : Constants.MahjongBoard.TileStepY * fitRatio * 0.82;
 
         // 容器化后只能从同层容器看到同层 tiles,上层 tile 在兄弟 _layer_<M>_ 容器里
         for (const layerContainer of pNode.children) {
@@ -678,9 +691,12 @@ export class MahjongItem extends Component {
     }
 
     private getMotionStreak(): MotionStreak | null {
+        // 父节点销毁时，Cocos 可能先清空牌组件的 node，再调用旅行层的清理回调。
+        const tileNode = this.node;
+        if (!tileNode?.isValid) return null;
         if (this.streak?.isValid) return this.streak;
 
-        const streak = this.node.getChildByName('motionStreak')?.getComponent(MotionStreak) || null;
+        const streak = tileNode.getChildByName('motionStreak')?.getComponent(MotionStreak) || null;
         if (streak) this.streak = streak;
         return streak;
     }

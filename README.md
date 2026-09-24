@@ -186,6 +186,14 @@ library/ temp/ build/      Cocos 生成目录或构建产物
 - `build-templates/web-mobile/level-config.html`：关卡配置/预览工具页面，可导入导出关卡 JSON，并重建 `positions`、`decoded_config.data/task/taskNum` 和 `summary`。
 - `engine-mangle-config.json`：引擎混淆相关配置。
 
+### Web 构建兼容性
+
+Creator 的 Web 构建会对数组展开语法做宽松转换，因此不能直接展开 `Map.keys()`、`Map.values()` 或 `Map.entries()`。这类写法在源码中看起来可以遍历迭代器，打包后却可能变成对迭代器对象执行 `concat`，从而造成数据为空、动画回调无法完成或输入状态一直锁定。
+
+旅行模式的槽位排序、磁铁牌型收集和特效清理已经统一使用显式数组转换。主线和活动模式的存档校验也已将牌型集合改为先用 `Array.from` 转换 `Map` 迭代器再合并。新增的 `tools/test-build-iterables.cjs` 会扫描运行时代码中的展开操作，并同时检查源码和 Web 构建产物的主线存档校验。
+
+修改涉及 `assets/game/script/UITravelLayer.ts` 和 `assets/game/script/GameCtrl.ts`。完成脚本检查、旅行模式回归、关卡导入检查以及 Web 构建产物回归后，再发布新的 Web 包。
+
 ## 开发注意事项
 
 - Cocos 资源文件和 `.meta` 文件要一起提交，避免资源 UUID 丢失。

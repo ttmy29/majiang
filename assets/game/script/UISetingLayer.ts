@@ -1,4 +1,4 @@
-import { _decorator, assetManager, Component, director, EventMouse, Node, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, assetManager, Component, director, EventMouse, Node, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { LayerManager } from './manager/LayerManager';
 import { AudioManager } from './manager/AudioManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
@@ -7,7 +7,11 @@ import { Utils } from './util/Utils';
 import { getCurrentGameMode } from './config/GameMode';
 import { Constants } from './config/Constants';
 import { clearLevelBundleCaches } from './config/LevelJsonLoader';
+import { UigmLayer } from './UigmLayer';
 const { ccclass, property } = _decorator;
+
+const GM_TAP_WINDOW_MS = 2000;
+const GM_TAP_THRESHOLD = 9;
 
 @ccclass('UISetingLayer')
 export class UISetingLayer extends Component {
@@ -18,14 +22,20 @@ export class UISetingLayer extends Component {
 
     opentype: number = 0;
     private isClearingCache = false;
+    private onQuit: (() => void) | null = null;
+    private isClosing = false;
+    private gmTriggerNode: Node | null = null;
+    private gmTapTimes: number[] = [];
+    private gmTriggered = false;
 
     start() {
 
     }
 
-    init(opentype: number) {
+    init(opentype: number, onQuit?: () => void) {
         //console.log('UISetingLayer.init', opentype);
         this.opentype = opentype;
+        this.onQuit = typeof onQuit === 'function' ? onQuit : null;
 
         // opentype === 1 时才显示 viewNode 下的 button 节点
         const buttonNode = this.viewNode?.getChildByName('Game_frame')?.getChildByName('button');
@@ -37,6 +47,7 @@ export class UISetingLayer extends Component {
             buttonNode.active = false;
             releaseNode.active = true
         }
+        this.configureGmTrigger(opentype === 1 && !this.onQuit, buttonNode);
 
         this.applySavedSettings();
         this.playOpenAnimation();
@@ -86,8 +97,9 @@ export class UISetingLayer extends Component {
         }
     }
 
-    private playCloseAnimation() {
-        if (!this.node) return;
+    private playCloseAnimation(onClosed?: () => void) {
+        if (!this.node || this.isClosing) return;
+        this.isClosing = true;
 
         const target = this.viewNode ?? this.node;
         const maskOpacity = this.maskNode ? this.maskNode.getComponent(UIOpacity) : null;
@@ -97,6 +109,7 @@ export class UISetingLayer extends Component {
             .to(0.18, { scale: new Vec3(0.3, 0.3, 1) }, { easing: 'quadIn' })
             .call(() => {
                 this.node.destroy();
+                onClosed?.();
             })
             .start();
 
@@ -115,11 +128,47 @@ export class UISetingLayer extends Component {
     }
 
     protected onDestroy(): void {
-
+        this.gmTriggerNode = null;
+        this.gmTapTimes.length = 0;
     }
 
     protected onEnable(): void {
 
+    }
+
+    private configureGmTrigger(enabled: boolean, buttonNode: Node | null): void {
+        if (this.gmTriggerNode?.isValid) {
+            this.gmTriggerNode.off(Node.EventType.TOUCH_END, this.onGmTriggerTouchEnd, this);
+            this.gmTriggerNode.destroy();
+        }
+        this.gmTriggerNode = null;
+        this.gmTapTimes.length = 0;
+        this.gmTriggered = false;
+
+        if (!enabled || !buttonNode) return;
+
+        const trigger = new Node('gmTrigger');
+        trigger.layer = buttonNode.layer;
+        trigger.setPosition(0, 168.57, 0);
+        trigger.addComponent(UITransform).setContentSize(200, 200);
+        buttonNode.addChild(trigger);
+        trigger.on(Node.EventType.TOUCH_END, this.onGmTriggerTouchEnd, this);
+        this.gmTriggerNode = trigger;
+    }
+
+    private onGmTriggerTouchEnd(): void {
+        if (this.gmTriggered || this.isClosing) return;
+
+        const now = Date.now();
+        this.gmTapTimes = this.gmTapTimes.filter((tapTime) => now - tapTime <= GM_TAP_WINDOW_MS);
+        this.gmTapTimes.push(now);
+        if (this.gmTapTimes.length < GM_TAP_THRESHOLD) return;
+
+        this.gmTriggered = true;
+        this.gmTapTimes.length = 0;
+        this.playCloseAnimation(() => {
+            if (!UigmLayer.show()) LayerManager.instance.showToast('GM 面板打开失败');
+        });
     }
 
     onButtonSwichtClick(event: EventMouse, data: string) {
@@ -148,7 +197,13 @@ export class UISetingLayer extends Component {
     }
 
     onButtonQuitClick() {
+        if (this.isClosing) return;
         AudioManager.instance.playClick();
+        // 独立玩法自行处理退出，不发送主线放弃事件或清除主线存档。
+        if (this.onQuit) {
+            this.playCloseAnimation(this.onQuit);
+            return;
+        }
         this.onButonCloseClick();
         // 设置面板里的"退出游戏" = 主动放弃本局 → 清掉中途快照
         if (getCurrentGameMode() === 'activity') {

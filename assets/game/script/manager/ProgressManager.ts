@@ -65,6 +65,47 @@ interface ActivityBoardRecord {
 }
 
 export class ProgressManager {
+    static readonly TRAVEL_DAILY_LIMIT = 5;
+
+    static loadTravelRemaining(now = new Date()): number {
+        const raw = StorageManager.instance.getItem(StorageKey.TravelDailyUsage);
+        if (!raw) return this.TRAVEL_DAILY_LIMIT;
+        try {
+            const record = JSON.parse(raw) as { date?: string; used?: number };
+            const used = record?.used;
+            if (record?.date !== this.formatSignDate(now)
+                || typeof used !== 'number' || !Number.isInteger(used) || used < 0) {
+                return this.TRAVEL_DAILY_LIMIT;
+            }
+            return Math.max(0, this.TRAVEL_DAILY_LIMIT - used);
+        } catch {
+            return this.TRAVEL_DAILY_LIMIT;
+        }
+    }
+
+    static consumeTravelAttempt(now = new Date()): number {
+        const remaining = this.loadTravelRemaining(now);
+        if (remaining === 0) return 0;
+        const next = remaining - 1;
+        StorageManager.instance.setItem(StorageKey.TravelDailyUsage, JSON.stringify({
+            date: this.formatSignDate(now),
+            used: this.TRAVEL_DAILY_LIMIT - next,
+        }));
+        ArchiveManager.instance.scheduleUpload();
+        return next;
+    }
+
+    static refillTravelAttempts(now = new Date()): number {
+        const remaining = this.loadTravelRemaining(now);
+        if (remaining > 0) return remaining;
+        StorageManager.instance.setItem(StorageKey.TravelDailyUsage, JSON.stringify({
+            date: this.formatSignDate(now),
+            used: 0,
+        }));
+        ArchiveManager.instance.scheduleUpload();
+        return this.TRAVEL_DAILY_LIMIT;
+    }
+
     static loadLevel(): number {
         const raw = StorageManager.instance.getItem(StorageKey.CurrentLevel);
         if (raw === null) return 0;
@@ -300,8 +341,8 @@ export class ProgressManager {
     }
 
     static shouldAutoShowDailySignToday(now = new Date()): boolean {
-        if (this.hasDailySignedToday(now)) return false;
-        return StorageManager.instance.getItem(StorageKey.DailySignShownDate) !== this.formatSignDate(now);
+        // 已展示但未领取时，下次进入首页仍需提醒。
+        return !this.hasDailySignedToday(now);
     }
 
     static markDailySignShownToday(now = new Date()): void {

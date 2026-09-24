@@ -1,4 +1,4 @@
-import { _decorator, Component, director, find, Label, Node, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Component, director, find, instantiate, Label, Node, tween, UIOpacity, Vec3 } from 'cc';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { getCurrentGameMode } from './config/GameMode';
@@ -9,6 +9,13 @@ import { SDKManager } from '../../loading/SDKManager';
 import { MahjongItem } from './MahjongItem';
 
 const { ccclass, property } = _decorator;
+
+/** 独立玩法复用原版弹窗时，使用自己的回调，避免触发主线事件。 */
+export interface FailureActions {
+    onContinue: () => void;
+    onRestart: () => void;
+    onExit: () => void;
+}
 
 @ccclass('UIFailureLayer')
 export class UIFailureLayer extends Component {
@@ -26,6 +33,9 @@ export class UIFailureLayer extends Component {
 
     isMax: boolean = false;
     soltNode: Node = null!;
+    private actions: FailureActions | null = null;
+    private isClosing = false;
+    private continuePending = false;
     start() {
         tween(this.node)
             .delay(0.5)
@@ -48,11 +58,14 @@ export class UIFailureLayer extends Component {
                 // 占位取不到时直接跳过,避免 setPosition(undefined) 崩溃。
                 const slot = this.iconNode2.getChildByName(`item${idx}`);
                 if (!slot) return;
-                item.setParent(this.iconNode2);
-                item.setPosition(slot.getPosition());
-                item.setScale(Constants.MahjongBoard.SlotScale + 0.06, Constants.MahjongBoard.SlotScale + 0.06, 1);
-                item.getComponent(MahjongItem)?.setShadowVisible(false);
-                displayedTiles.push(item);
+                // 独立玩法只展示牌的副本，不把真实牌从其棋盘/存档管理中移走。
+                const displayItem = this.actions ? instantiate(item) : item;
+                displayItem.setParent(this.iconNode2);
+                displayItem.setPosition(slot.getPosition());
+                displayItem.setScale(Constants.MahjongBoard.SlotScale + 0.06, Constants.MahjongBoard.SlotScale + 0.06, 1);
+                displayItem.getComponent(MahjongItem)?.setShadowVisible(false);
+                if (this.actions) displayItem.getComponent(MahjongItem)?.disableTileTouch();
+                displayedTiles.push(displayItem);
                 idx += 1;
             });
             displayedTiles
@@ -62,8 +75,9 @@ export class UIFailureLayer extends Component {
 
     }
 
-    init(isMax: boolean = false, soltNode: Node = null) {
+    init(isMax: boolean = false, soltNode: Node = null, actions?: FailureActions) {
         this.isMax = isMax;
+        this.actions = actions || null;
         const restartConfirmNode = this.getRestartConfirmNode();
         if (restartConfirmNode) restartConfirmNode.active = false;
         // opentype 非空 = 槽位全部已解锁，切到"清空底部 slot"模式:隐藏默认图标、显示 slot 占位,
@@ -106,6 +120,7 @@ export class UIFailureLayer extends Component {
     }
 
     private returnTilesToSlotNode() {
+        if (this.actions) return; // 副本随弹窗销毁，真实牌由对应玩法自行处理。
         if (!this.soltNode || !this.iconNode2) return;
         const tiles = this.iconNode2.children.filter((item) => item.getChildByName("bg"));
         tiles.forEach((item) => {
@@ -114,8 +129,9 @@ export class UIFailureLayer extends Component {
         });
     }
 
-    private playCloseAnimation() {
-        if (!this.node) return;
+    private playCloseAnimation(onClosed?: () => void) {
+        if (!this.node || this.isClosing) return;
+        this.isClosing = true;
 
         this.returnTilesToSlotNode();
 
@@ -126,6 +142,7 @@ export class UIFailureLayer extends Component {
             .to(0.18, { scale: new Vec3(0.3, 0.3, 1) }, { easing: 'quadIn' })
             .call(() => {
                 this.node.destroy();
+                onClosed?.();
             })
             .start();
 
@@ -153,7 +170,12 @@ export class UIFailureLayer extends Component {
     }
 
     onButonCloseClick() {
+        if (this.isClosing || this.continuePending) return;
         AudioManager.instance.playClick();
+        if (this.actions) {
+            this.playCloseAnimation(this.actions.onExit);
+            return;
+        }
         this.playCloseAnimation();
         // 关失败弹窗回主菜单 = 放弃本局 → 清掉中途快照,下次从这关 fresh 开始
         if (getCurrentGameMode() === 'activity') ProgressManager.clearActivitySnapshot();
@@ -165,7 +187,12 @@ export class UIFailureLayer extends Component {
     }
 
     onButtonRestartClick() {
+        if (this.isClosing || this.continuePending) return;
         AudioManager.instance.playClick();
+        if (this.actions) {
+            this.playCloseAnimation(this.actions.onRestart);
+            return;
+        }
 
         const restartConfirmNode = this.getRestartConfirmNode();
         if (getCurrentGameMode() === 'main'
@@ -188,13 +215,23 @@ export class UIFailureLayer extends Component {
     }
 
     onButtonContinueClick() {
+        if (this.isClosing || this.continuePending) return;
         AudioManager.instance.playClick();
 
         // 看视频广告
+        this.continuePending = true;
         SDKManager.instance.showVideoAd(() => {
+            this.continuePending = false;
+            if (!this.node.isValid || this.isClosing) return;
+            if (this.actions) {
+                this.playCloseAnimation(this.actions.onContinue);
+                return;
+            }
             director.emit(Constants.eventNames.EventFailureContinue, this.isMax);
             this.playCloseAnimation();
         }, () => {
+            this.continuePending = false;
+            if (!this.node.isValid || this.isClosing) return;
             LayerManager.instance.showToast("视频播放未完成！");
         }, 'continue');
     }

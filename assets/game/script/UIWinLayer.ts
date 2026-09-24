@@ -3,6 +3,8 @@ import { LayerManager } from './manager/LayerManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
 import { Constants } from './config/Constants';
 import { SDKManager } from '../../loading/SDKManager';
+import { TravelRecoveryManager } from './manager/TravelRecoveryManager';
+import { ProgressManager } from './manager/ProgressManager';
 import { StreakManager, WinStreakRewardConfig, WinStreakSettlement } from './manager/StreakManager';
 const { ccclass, property } = _decorator;
 
@@ -13,6 +15,8 @@ interface WinLayerData {
     comboTimes?: number;
     winStreakSettlement?: WinStreakSettlement | null;
     isActivity?: boolean;
+    isTravel?: boolean;
+    travelCompleted?: boolean;
 }
 
 @ccclass('UIWinLayer')
@@ -60,13 +64,16 @@ export class UIWinLayer extends Component {
     private displayedReward: WinStreakRewardConfig | null = null;
     private nextLevel = 0;
     private isActivity = false;
+    private isTravel = false;
+    private travelCompleted = false;
     private onContinue: (() => void) | null = null;
+    private onExit: (() => void) | null = null;
     private isClosing = false;
     start() {
         AudioManager.instance.playOneShot(AudioClipNames.game_win);
     }
 
-    init(dataOrTime: WinLayerData | number = 0, onContinue?: () => void) {
+    init(dataOrTime: WinLayerData | number = 0, onContinue?: () => void, onExit?: () => void) {
         const data = typeof dataOrTime === 'number' ? { time: dataOrTime } : (dataOrTime || {});
         const time = data.time ?? 0;
         const iqText = this.formatNumber(data.iq ?? 0);
@@ -74,13 +81,16 @@ export class UIWinLayer extends Component {
         const comboTimes = Math.max(0, Math.floor(data.comboTimes ?? 0));
         this.nextLevel = nextLevel;
         this.isActivity = !!data.isActivity;
+        this.isTravel = !!data.isTravel;
+        this.travelCompleted = !!data.travelCompleted;
         this.onContinue = typeof onContinue === 'function' ? onContinue : null;
+        this.onExit = typeof onExit === 'function' ? onExit : null;
 
-        director.emit(Constants.eventNames.EventSetIQLabelVisible, false);
+        if (!data.isTravel) director.emit(Constants.eventNames.EventSetIQLabelVisible, false);
         this.playOpenAnimation();
         this.setLabelString(this.rankLabel, this.getSettlementCopyText());
         this.setLabelString(this.iqLabel, iqText);
-        this.setLabelString(this.levleNexLabel, this.isActivity ? '挑战成功' : `关卡 ${nextLevel}`);
+        this.setLabelString(this.levleNexLabel, data.travelCompleted ? '旅程完成' : this.isActivity ? '挑战成功' : `关卡 ${nextLevel}`);
         this.setLabelString(this.gridLabel1, this.formatTime(time));
         this.setLabelString(this.gridLabel2, iqText);
         this.setLabelString(this.gridLabel3, `${comboTimes}`);
@@ -90,6 +100,7 @@ export class UIWinLayer extends Component {
 
     protected onDestroy(): void {
         this.onContinue = null;
+        this.onExit = null;
         this.unschedule(this.refreshWinStreakCountdown);
         if (this.winStreakProgressBar?.isValid) Tween.stopAllByTarget(this.winStreakProgressBar);
         for (const box of this.getWinStreakBoxes()) {
@@ -104,7 +115,7 @@ export class UIWinLayer extends Component {
         this.resolveWinStreakRefs();
         const settlement = data.winStreakSettlement ?? null;
         this.streakSettlement = settlement;
-        if (!this.winStreakNode?.isValid || data.isActivity || !settlement) {
+        if (!this.winStreakNode?.isValid || data.isActivity || data.isTravel || !settlement) {
             if (this.winStreakNode?.isValid) this.winStreakNode.active = false;
             return;
         }
@@ -344,7 +355,7 @@ export class UIWinLayer extends Component {
     onButonCloseClick() {
         if (this.isClosing) return;
         AudioManager.instance.playClick();
-        this.playCloseAnimation();
+        this.playCloseAnimation(this.onExit || undefined);
     }
 
     onButtonShareClick() {
@@ -361,6 +372,16 @@ export class UIWinLayer extends Component {
     onButtonNextLevelClick() {
         if (this.isClosing) return;
         AudioManager.instance.playClick();
+        if (this.isTravel && !this.travelCompleted && ProgressManager.loadTravelRemaining() === 0) {
+            TravelRecoveryManager.show(() => {
+                if (this.node?.isValid && !this.isClosing) this.continueToNextLevel();
+            });
+            return;
+        }
+        this.continueToNextLevel();
+    }
+
+    private continueToNextLevel(): void {
         const onContinue = this.onContinue
             ?? (this.isActivity
                 ? () => LayerManager.instance.showStartLayer()
@@ -370,6 +391,11 @@ export class UIWinLayer extends Component {
     }
 
     OnBtoonGoHomeClick() {
+        if (this.isClosing) return;
+        if (this.onExit) {
+            this.onButonCloseClick();
+            return;
+        }
         AudioManager.instance.playClick();
         this.onButonCloseClick();
         // 胜利时 winLevel 已经 saveLevel(next)+clearSnapshot,这里直接返主菜单即可

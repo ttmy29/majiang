@@ -4,11 +4,12 @@ import { ActivitySignMode, GameMode, setCurrentActivitySignMode, setCurrentGameM
 import { ensureActivityLevelJson, ensureLevelJson, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
 import { ArchiveManager } from './manager/ArchiveManager';
 import { AudioClipNames, AudioManager } from './manager/AudioManager';
-import { LayerManager } from './manager/LayerManager';
+import { LayerManager, LayerType } from './manager/LayerManager';
 import { ProgressManager } from './manager/ProgressManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
 import { StreakManager } from './manager/StreakManager';
 import { SDKManager } from '../../loading/SDKManager';
+import { TravelRecoveryManager } from './manager/TravelRecoveryManager';
 
 declare const wx: any;
 
@@ -31,10 +32,12 @@ const HOME_RETURN_APPEAR_ANIMATION = 'Appear2';
 const HOME_DISAPPEAR_ANIMATION = 'Disappear';
 const HOME_IDLE_ANIMATION = 'Idle';
 const LEAF_LOOP_ANIMATION = 'Loop';
-const DAILY_SIGN_HOME_RETURN_DELAY = 1.8;
+const HOME_REWARD_RETURN_DELAY = 1.8;
 const FAVORITE_REWARD_QUERY_KEY = 'favoriteReward';
 const FAVORITE_REWARD_SCENES = new Set([1103, 1104]);
 const FAVORITE_REWARD_TOAST_RETRY_LIMIT = 10;
+const FAVORITE_REWARD_ICON_ROTATION_SPEED = 45;
+const TRAVEL_UNLOCK_AFTER_LEVEL = 10;
 
 @ccclass('UIStartLayer')
 export class UIStartLayer extends Component {
@@ -72,10 +75,12 @@ export class UIStartLayer extends Component {
     private uiNodeTargetOpacity: Map<Node, number> = new Map();
     private wxGameClubBtn: any = null;
     private favoriteRewardToastRetryCount = 0;
-    private dailySignPendingForHomeReturn = false;
-    private dailySignHomeReturnDelayElapsed = false;
+    private homeRewardPending = false;
+    private homeRewardDelayElapsed = false;
+    private favoriteRewardIcon: Node | null = null;
 
     protected onLoad(): void {
+        this.favoriteRewardIcon = this.node.getChildByPath('ui/down/button4/icon72');
         ProgressManager.initSignUserState();
         //this.refreshSignNodeAnimationMembership();
         //this.refreshSignNodeVisible();
@@ -106,6 +111,8 @@ export class UIStartLayer extends Component {
         this.refreshWarmupWindow();
         this.refreshActivityButtonVisible();
         this.refreshLeafConutLabel();
+        this.refreshTravelRemainingLabel();
+        this.schedule(this.refreshTravelRemainingLabel, 60);
 
         if (this.hasStarted) {
             this.playStartLayerEnterAnimation(HOME_RETURN_APPEAR_ANIMATION, true);
@@ -120,9 +127,10 @@ export class UIStartLayer extends Component {
         this.clearHomeSkeletonListener();
         this.unschedule(this.tryGrantFavoriteRewardFromFavoriteEnter);
         this.unschedule(this.showFavoriteRewardToast);
-        this.unschedule(this.onDailySignHomeReturnDelayElapsed);
-        this.dailySignPendingForHomeReturn = false;
-        this.dailySignHomeReturnDelayElapsed = false;
+        this.unschedule(this.onHomeRewardDelayElapsed);
+        this.unschedule(this.refreshTravelRemainingLabel);
+        this.homeRewardPending = false;
+        this.homeRewardDelayElapsed = false;
         director.off("gameBack", this.onGameBack, this);
         director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
         director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
@@ -137,7 +145,8 @@ export class UIStartLayer extends Component {
         this.clearHomeSkeletonListener();
         this.unschedule(this.tryGrantFavoriteRewardFromFavoriteEnter);
         this.unschedule(this.showFavoriteRewardToast);
-        this.unschedule(this.onDailySignHomeReturnDelayElapsed);
+        this.unschedule(this.onHomeRewardDelayElapsed);
+        this.unschedule(this.refreshTravelRemainingLabel);
         director.off("gameBack", this.onGameBack, this);
         director.off(Constants.eventNames.EventLeafConutUpdate, this.onLeafConutUpdate, this);
         director.off(Constants.eventNames.EventSignInUpdate, this.onSignInUpdate, this);
@@ -149,6 +158,7 @@ export class UIStartLayer extends Component {
     }
 
     private onGameBack = () => {
+        this.refreshTravelRemainingLabel();
         this.scheduleFavoriteRewardCheck(0);
     };
 
@@ -161,19 +171,19 @@ export class UIStartLayer extends Component {
     };
 
     private onUIPrefabsReady = () => {
-        this.tryShowDailySignPopup();
+        this.tryShowHomeRewardPopup();
     };
 
     private onReturnHome = () => {
-        this.dailySignPendingForHomeReturn = true;
-        this.dailySignHomeReturnDelayElapsed = false;
-        this.unschedule(this.onDailySignHomeReturnDelayElapsed);
-        this.scheduleOnce(this.onDailySignHomeReturnDelayElapsed, DAILY_SIGN_HOME_RETURN_DELAY);
+        this.homeRewardPending = true;
+        this.homeRewardDelayElapsed = false;
+        this.unschedule(this.onHomeRewardDelayElapsed);
+        this.scheduleOnce(this.onHomeRewardDelayElapsed, HOME_REWARD_RETURN_DELAY);
     };
 
-    private onDailySignHomeReturnDelayElapsed = () => {
-        this.dailySignHomeReturnDelayElapsed = true;
-        this.tryShowDailySignPopup();
+    private onHomeRewardDelayElapsed = () => {
+        this.homeRewardDelayElapsed = true;
+        this.tryShowHomeRewardPopup();
     };
 
     private onEventWinStreakStartGame = () => {
@@ -188,6 +198,7 @@ export class UIStartLayer extends Component {
         this.refreshWarmupWindow();
         this.refreshActivityButtonVisible();
         this.refreshLeafConutLabel();
+        this.refreshTravelRemainingLabel();
         this.playStartLayerEnterAnimation(HOME_INITIAL_APPEAR_ANIMATION);
 
         this.scheduleOnce(() => {
@@ -202,7 +213,16 @@ export class UIStartLayer extends Component {
     }
 
     update(deltaTime: number) {
+        const icon = this.favoriteRewardIcon;
+        if (!icon?.isValid || !icon.activeInHierarchy) return;
 
+        // 首页淡出使用透明度隐藏，完全不可见时也要停止旋转。
+        for (let node: Node | null = icon; node; node = node.parent) {
+            const opacity = node.getComponent(UIOpacity);
+            if (opacity?.enabled && opacity.opacity === 0) return;
+        }
+
+        icon.angle = (icon.angle - FAVORITE_REWARD_ICON_ROTATION_SPEED * deltaTime) % 360;
     }
 
     private initWeChatButtons() {
@@ -300,21 +320,22 @@ export class UIStartLayer extends Component {
             return null;
         }
 
-        const worldPos = uiTrans.convertToWorldSpaceAR(new Vec3(0, 0, 0));
         const width = uiTrans.contentSize.width;
         const height = uiTrans.contentSize.height;
         const anchorX = uiTrans.anchorPoint.x;
         const anchorY = uiTrans.anchorPoint.y;
+        const bottomLeft = uiTrans.convertToWorldSpaceAR(new Vec3(-width * anchorX, -height * anchorY, 0));
+        const topRight = uiTrans.convertToWorldSpaceAR(new Vec3(width * (1 - anchorX), height * (1 - anchorY), 0));
 
         const visibleSize = view.getVisibleSize();
         const frameSize = view.getFrameSize();
         const ratioW = frameSize.width / visibleSize.width;
         const ratioH = frameSize.height / visibleSize.height;
 
-        const left = (worldPos.x - width * anchorX) * ratioW;
-        const top = frameSize.height - (worldPos.y + height * (1 - anchorY)) * ratioH;
-        const btnWidth = width * ratioW;
-        const btnHeight = height * ratioH;
+        const left = Math.min(bottomLeft.x, topRight.x) * ratioW;
+        const top = frameSize.height - Math.max(bottomLeft.y, topRight.y) * ratioH;
+        const btnWidth = Math.abs(topRight.x - bottomLeft.x) * ratioW;
+        const btnHeight = Math.abs(topRight.y - bottomLeft.y) * ratioH;
 
         const style = {
             left: left,
@@ -352,6 +373,44 @@ export class UIStartLayer extends Component {
             () => this.enterActivityFromSign('daily'),
             () => this.enterActivityFromSign('makeup'),
         );
+    }
+
+    async onClickTravelButton(): Promise<void> {
+        if (this.enteringGame) return;
+        AudioManager.instance.playClick();
+        this.refreshTravelRemainingLabel();
+        // 主线通关后保存的是下一关编号，所以进度 11 表示已通过第 10 关。
+        if (ProgressManager.loadLevel() <= TRAVEL_UNLOCK_AFTER_LEVEL) {
+            LayerManager.instance.showToast('通关第十关后解锁');
+            return;
+        }
+        const savedTravelLevel = Number(StorageManager.instance.getItem(StorageKey.TravelLevel));
+        const firstTravelLevel = StorageManager.instance.getItem(StorageKey.TravelReplayMode) !== 'true'
+            && (!Number.isSafeInteger(savedTravelLevel) || savedTravelLevel <= 1);
+        // 第一关即使剩余 0 次也能免费进入；第二关起才要求补充次数。
+        if (!firstTravelLevel && ProgressManager.loadTravelRemaining() === 0) {
+            TravelRecoveryManager.show(() => {
+                if (this.node.isValid) this.refreshTravelRemainingLabel();
+            });
+            return;
+        }
+        if (!LayerManager.instance.hasUI('gameLayerThree')) {
+            LayerManager.instance.showToast('旅行资源加载中，请稍后再试');
+            return;
+        }
+        this.enteringGame = true;
+        try {
+            await this.playExitAnimation();
+            if (!this.node.isValid) return;
+            if (LayerManager.instance.showUI('gameLayerThree')) {
+                LayerManager.instance.getLayer(LayerType.Start).active = false;
+            } else {
+                LayerManager.instance.showToast('旅行资源加载失败，请稍后重试');
+                this.playStartLayerEnterAnimation(HOME_RETURN_APPEAR_ANIMATION, true);
+            }
+        } finally {
+            this.enteringGame = false;
+        }
     }
 
     private enterActivityFromSign(signMode: ActivitySignMode) {
@@ -402,25 +461,36 @@ export class UIStartLayer extends Component {
         }
     }
 
-    private tryShowDailySignPopup() {
-        if (!this.dailySignPendingForHomeReturn) return;
-        if (!this.dailySignHomeReturnDelayElapsed) return;
-        if (!ProgressManager.shouldAutoShowDailySignToday()) {
-            this.dailySignPendingForHomeReturn = false;
-            this.dailySignHomeReturnDelayElapsed = false;
+    private tryShowHomeRewardPopup() {
+        if (!this.homeRewardPending || !this.homeRewardDelayElapsed) return;
+        const layers = LayerManager.instance;
+        const today = this.getTodayString();
+        if (layers.getOpenUI('loginReward') || layers.getOpenUI('signDaily')) {
+            this.homeRewardPending = false;
+            this.homeRewardDelayElapsed = false;
             return;
         }
-        if (!LayerManager.instance.hasUI("signDaily")) return;
-
-        if (this.openSignDailyPopup()) {
-            this.dailySignPendingForHomeReturn = false;
-            this.dailySignHomeReturnDelayElapsed = false;
+        if (StorageManager.instance.getItem(StorageKey.LoginRewardShownDate) !== today
+            && StorageManager.instance.getItem(StorageKey.LoginShareRewardDate) !== today) {
+            if (!layers.hasUI('loginReward') || !this.showLoginRewardPopup()) return;
         }
+
+        this.homeRewardPending = false;
+        this.homeRewardDelayElapsed = false;
     }
 
     private openSignDailyPopup(): Node | null {
         return LayerManager.instance.getOpenUI("signDaily")
             || LayerManager.instance.showUI("signDaily");
+    }
+
+    private showLoginRewardPopup(): Node | null {
+        const popup = LayerManager.instance.showUI('loginReward');
+        if (popup) {
+            StorageManager.instance.setItem(StorageKey.LoginRewardShownDate, this.getTodayString());
+            ArchiveManager.instance.scheduleUpload();
+        }
+        return popup;
     }
 
     private uploadRankDataForStartButtonTest(): void {
@@ -474,6 +544,12 @@ export class UIStartLayer extends Component {
     onClickSignDailyButton() {
         AudioManager.instance.playClick();
         this.openSignDailyPopup();
+    }
+
+    onClickLoginRewardButton() {
+        if (LayerManager.instance.getOpenUI('loginReward')) return;
+        AudioManager.instance.playClick();
+        this.showLoginRewardPopup();
     }
 
     onClickWinStreakButton() {
@@ -558,6 +634,11 @@ export class UIStartLayer extends Component {
         }
         label.string = this.formatLeafConut(count);
     }
+
+    private refreshTravelRemainingLabel = (): void => {
+        const label = this.node.getChildByPath('ui/down/buttonGame1/Label')?.getComponent(Label);
+        if (label) label.string = `${ProgressManager.loadTravelRemaining()}/${ProgressManager.TRAVEL_DAILY_LIMIT}`;
+    };
 
     private refreshSignNodeVisible() {
         if (!this.signNode?.isValid) return;
