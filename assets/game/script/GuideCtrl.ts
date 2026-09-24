@@ -1,7 +1,6 @@
 import { _decorator, Color, Component, director, find, Graphics, Node, Sprite, tween, UITransform, Vec3, Tween } from 'cc';
 import { Constants } from './config/Constants';
 import { LayerManager } from './manager/LayerManager';
-import { GameExperiment } from '../../loading/GameExperiment';
 const { ccclass, property } = _decorator;
 
 interface HighlightRect {
@@ -13,8 +12,6 @@ interface HighlightRect {
 
 @ccclass('GuideCtrl')
 export class GuideCtrl extends Component {
-    private static readonly TILE_HIGHLIGHT_PADDING_X = 18;
-    private static readonly TILE_HIGHLIGHT_PADDING_Y = 18;
 
     @property(Node)
     fingerNode: Node = null!;
@@ -92,14 +89,7 @@ export class GuideCtrl extends Component {
         this._basePos.set(this._initPos);
 
         this.refreshGuideMask();
-        if (GameExperiment.isBottomUiEnabled()) {
-            // 实验布局的 Widget 对齐和棋盘发牌会跨越数帧，按最终世界坐标重算镂空。
-            for (const delay of [0, 0.25, 0.6, 1]) {
-                this.scheduleOnce(() => this.refreshGuideMask(), delay);
-            }
-        } else {
-            this.scheduleOnce(() => this.refreshGuideMask(), 0);
-        }
+        this.scheduleOnce(() => this.refreshGuideMask(), 0);
         this.playSlideAndClickAnim();
     }
 
@@ -129,7 +119,6 @@ export class GuideCtrl extends Component {
             this._initPos.z,
         );
         this.moveFingerTo(this._basePos);
-        if (GameExperiment.isBottomUiEnabled()) this.scheduleOnce(() => this.refreshGuideMask(), 0);
     }
 
     private getTapOffset(payload: { count: number; type: string; col: number; row: number; layer: number; worldPos: Vec3 }): { x: number; y: number } | null {
@@ -209,75 +198,15 @@ export class GuideCtrl extends Component {
                 width: this.targetHighlightWidth,
                 height: this.targetHighlightHeight,
             }, left, right, bottom, top);
-        const tileRect = GameExperiment.isBottomUiEnabled()
-            ? this.getBoardTileHighlightRect(bgNode, left, right, bottom, top)
-            : null;
-
         return [
             targetRect,
-            tileRect || this.clampRect({
+            this.clampRect({
                 x: this.tileHighlightX,
                 y: this.tileHighlightY,
                 width: this.tileHighlightWidth,
                 height: this.tileHighlightHeight,
             }, left, right, bottom, top),
         ].filter(rect => rect.width > 0 && rect.height > 0);
-    }
-
-    private getBoardTileHighlightRect(bgNode: Node, left: number, right: number, bottom: number, top: number): HighlightRect | null {
-        const boardRoot = find('Canvas/gameLayer/pNode');
-        const bgUi = bgNode.getComponent(UITransform);
-        if (!boardRoot || !bgUi) return null;
-
-        let minX = Infinity;
-        let maxX = -Infinity;
-        let minY = Infinity;
-        let maxY = -Infinity;
-        let tileCount = 0;
-
-        const visit = (parent: Node) => {
-            for (const child of parent.children) {
-                if (child.activeInHierarchy && child.name.startsWith('tile_')) {
-                    const tileUi = child.getComponent(UITransform);
-                    if (tileUi && tileUi.contentSize.width > 0 && tileUi.contentSize.height > 0) {
-                        const center = bgUi.convertToNodeSpaceAR(child.worldPosition);
-                        if (center.x >= left && center.x <= right && center.y >= bottom && center.y <= top) {
-                            const width = tileUi.contentSize.width;
-                            const height = tileUi.contentSize.height;
-                            const anchor = tileUi.anchorPoint;
-                            const corners = [
-                                new Vec3(-anchor.x * width, -anchor.y * height, 0),
-                                new Vec3(-anchor.x * width, (1 - anchor.y) * height, 0),
-                                new Vec3((1 - anchor.x) * width, -anchor.y * height, 0),
-                                new Vec3((1 - anchor.x) * width, (1 - anchor.y) * height, 0),
-                            ];
-                            for (const corner of corners) {
-                                const world = tileUi.convertToWorldSpaceAR(corner);
-                                const local = bgUi.convertToNodeSpaceAR(world);
-                                minX = Math.min(minX, local.x);
-                                maxX = Math.max(maxX, local.x);
-                                minY = Math.min(minY, local.y);
-                                maxY = Math.max(maxY, local.y);
-                            }
-                            tileCount++;
-                        }
-                    }
-                }
-                visit(child);
-            }
-        };
-        visit(boardRoot);
-
-        if (tileCount === 0 || !Number.isFinite(minX) || !Number.isFinite(maxX)
-            || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
-            return null;
-        }
-        return this.clampRect({
-            x: (minX + maxX) / 2,
-            y: (minY + maxY) / 2,
-            width: maxX - minX + GuideCtrl.TILE_HIGHLIGHT_PADDING_X * 2,
-            height: maxY - minY + GuideCtrl.TILE_HIGHLIGHT_PADDING_Y * 2,
-        }, left, right, bottom, top);
     }
 
     private getTargetNodeHighlightRect(bgNode: Node, left: number, right: number, bottom: number, top: number): HighlightRect | null {

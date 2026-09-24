@@ -1,21 +1,18 @@
-import { _decorator, assetManager, AssetManager, Component, director, find, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, sys, Texture2D, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, AssetManager, Component, director, find, game, Game, instantiate, Label, Node, Prefab, SpriteFrame, sys, Tween, tween, UITransform, Vec3 } from 'cc';
 import { Constants } from './config/Constants';
 import { getLevelPlayConfig, LevelPlayConfig } from './config/LevelConfig';
 import { ActivitySignMode, GameMode, getCurrentActivitySignMode, getCurrentGameMode, setCurrentGameMode } from './config/GameMode';
-import { ensureActivityLevelJson, ensureLevelJson, LevelJson, LevelJsonPosition, LevelVariant, releaseActivityOutsideWindow, releaseOutsideWindow, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
+import { ensureActivityLevelJson, ensureLevelJson, LevelJson, LevelJsonPosition, releaseActivityOutsideWindow, releaseOutsideWindow, warmupActivityForwardWindow, warmupForwardWindow } from './config/LevelJsonLoader';
 import { MahjongItem } from './MahjongItem';
 import { ironItem } from './ironItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
-import { LayerManager, LayerType } from './manager/LayerManager';
+import { LayerManager } from './manager/LayerManager';
 import { ProgressManager, ProgressSnapshot, TileKey, TileSnap, BoxSnap } from './manager/ProgressManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
 import { ArchiveManager } from './manager/ArchiveManager';
 import { StreakManager, WinStreakSettlement } from './manager/StreakManager';
 import { Utils } from './util/Utils';
 import { SDKEvent, SDKManager } from '../../loading/SDKManager';
-import { GameExperiment } from '../../loading/GameExperiment';
-import { isWebLevelEditorRequested, WebLevelEditor } from './editor/WebLevelEditor';
-import { cloneLevelJson, positionKey } from './editor/LevelEditorModel';
 
 
 interface RuntimeLevelConfig extends LevelPlayConfig {
@@ -218,15 +215,12 @@ export class GameCtrl extends Component {
     // 资源数据
     private iconIds: string[] = [];
     private iconFrames: Map<string, SpriteFrame> = new Map();
-    private baseIconFrames: Map<string, SpriteFrame> = new Map();
-    private experimentIconFrames: Map<string, SpriteFrame> = new Map();
     private flipFrame: SpriteFrame | null = null;
     private chainItemPrefab: Prefab | null = null;
     private ironItemPrefab: Prefab | null = null;
     private levelRequestSeq = 0;
     private pendingBeginLevelSeq = 0;
     private static readonly FLIP_FRAME_ID = 'flip';
-    private static readonly EXPERIMENT_MAHJONG_DIR = 'resources/mahjong1';
     private static readonly TIPS_TYPE_IRON: TipsType = 1;
     private static readonly TIPS_TYPE_COVER: TipsType = 2;
     private static readonly TIPS_TYPE_ROPE: TipsType = 3;
@@ -239,12 +233,6 @@ export class GameCtrl extends Component {
     private randomPropLevelContextReady = false;
     private gameEvaluatePageManager: GameEvaluatePageManager | null = null;
     private gameEvaluateShowRequested = false;
-    private webLevelEditor: WebLevelEditor | null = null;
-    private webLevelEditorPlaytesting = false;
-    private webLevelEditorPlaytestVariant: LevelVariant = 'base';
-    private editorLayerFilter: number | null = null;
-    private editorHiddenPositionKeys = new Set<string>();
-    private webLevelEditorTilePreviewUrls = new Map<string, string | null>();
 
     start() {
         //this.requestSharePropExperimentInfo();
@@ -271,7 +259,6 @@ export class GameCtrl extends Component {
                         mahjongItem: this.mahjongItem,
                         iconFrames: this.iconFrames,
                     });
-                    if (this.openWebLevelEditor()) return;
                     this.scheduleOnce(() => {
                         this.gameMode = getCurrentGameMode();
                         this.activitySignMode = getCurrentActivitySignMode();
@@ -288,7 +275,6 @@ export class GameCtrl extends Component {
     // 看广告成功统一入口：每局埋点计数 + 全局累计持久化(难度自适应用) + 云同步
     private bumpAdCount() {
         this.ad_cnt++;
-        if (this.webLevelEditorPlaytesting) return;
         ProgressManager.addGlobalAdCount(1);
         ArchiveManager.instance.scheduleUpload();
     }
@@ -320,7 +306,7 @@ export class GameCtrl extends Component {
     };
 
     protected onDisable(): void {
-        if (!this.webLevelEditorPlaytesting && this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_EXIT', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_EXIT', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         this.pendingBeginLevelSeq++;
         this.isFreePropState = null;
         director.off("gameBack", this.onEventGameBack, this);
@@ -337,8 +323,6 @@ export class GameCtrl extends Component {
         director.off(Constants.eventNames.EventWinNextLevel, this.onEventWinNextLevel, this);
         director.off(Constants.eventNames.EventFavoriteRewardClaimed, this.onEventFavoriteRewardClaimed, this);
         game.off(Game.EVENT_HIDE, this.onAppHide, this);
-        this.webLevelEditor?.destroy();
-        this.webLevelEditor = null;
         this.destroyGameEvaluate();
     }
 
@@ -465,7 +449,6 @@ export class GameCtrl extends Component {
     }
 
     private addExperimentSharePropDailyCount(): number {
-        if (this.webLevelEditorPlaytesting) return this.loadExperimentSharePropDailyCount();
         const next = Math.min(
             GameCtrl.SHARE_PROP_EXPT_DAILY_LIMIT,
             this.loadExperimentSharePropDailyCount() + 1
@@ -524,7 +507,7 @@ export class GameCtrl extends Component {
 
     /** GM 跳关复用正式的关卡选取、资源加载和开局流程。 */
     public async gmJumpToLevel(level: number): Promise<boolean> {
-        if (this.webLevelEditorPlaytesting || !this.hasStarted || !Number.isSafeInteger(level) || level < 0) {
+        if (!this.hasStarted || !Number.isSafeInteger(level) || level < 0) {
             return false;
         }
 
@@ -543,8 +526,7 @@ export class GameCtrl extends Component {
 
     /** GM 直接完成沿用正式胜利结算，保证进度与界面状态一致。 */
     public gmCompleteLevel(): boolean {
-        if (this.webLevelEditorPlaytesting
-            || !this.node.activeInHierarchy
+        if (!this.node.activeInHierarchy
             || this.gameState !== 'playing') {
             return false;
         }
@@ -603,7 +585,7 @@ export class GameCtrl extends Component {
     }
 
     private onAppHide = () => {
-        if (this.webLevelEditorPlaytesting || this.gameState !== 'playing' || this.isGuideLevel()) return;
+        if (this.gameState !== 'playing' || this.isGuideLevel()) return;
         // 切后台时 scheduleOnce 不再 tick,直接同步 flush
         this.snapshotDirty = true;
         this.flushSnapshot();
@@ -639,7 +621,6 @@ export class GameCtrl extends Component {
     }
 
     private startLevel(level: number, snapshot: ProgressSnapshot | null = null, difficultyLevel = 0) {
-        this.applyMahjongFramesForExperiment();
         this.gameState = 'ready';
         this.nowLevel = level;
         this.randomPropButtonConsumedThisLevel = false;
@@ -658,10 +639,8 @@ export class GameCtrl extends Component {
         this.refreshRandomPropButtonVisibility();
         // Random share-prop button: config levels keep old behavior; experiment users get daily-limited entries.
         // 上报关卡进入事件
-        if (!this.webLevelEditorPlaytesting) {
-            SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
-            if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_ENTER', { enter_level_name: `关卡${this.nowLevel}`, level_id: this.nowLevel });
-        }
+        SDKManager.instance.report({ event: SDKEvent.level, type: 1, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
+        if (this.nowLevel > 0) window.dnSDK?.track?.('LEVEL_ENTER', { enter_level_name: `关卡${this.nowLevel}`, level_id: this.nowLevel });
         this.uidSeed = 1;
         this.tiles = [];
         this.slots = [];
@@ -748,15 +727,13 @@ export class GameCtrl extends Component {
             AudioManager.instance.playOneShotPauseBgm(AudioClipNames.game_start);
         } else {
             // 全新开局:写入关卡号 + 清掉旧快照,然后正常发牌
-            if (!this.webLevelEditorPlaytesting) {
-                if (this.gameMode === 'activity') {
-                    ProgressManager.saveActivityLevel(this.nowLevel);
-                    ProgressManager.saveActivityBoardId(this.nowLevel, this.currentBoardId);
-                    ProgressManager.clearActivitySnapshot();
-                } else {
-                    ProgressManager.saveLevel(this.nowLevel);
-                    ProgressManager.clearSnapshot();
-                }
+            if (this.gameMode === 'activity') {
+                ProgressManager.saveActivityLevel(this.nowLevel);
+                ProgressManager.saveActivityBoardId(this.nowLevel, this.currentBoardId);
+                ProgressManager.clearActivitySnapshot();
+            } else {
+                ProgressManager.saveLevel(this.nowLevel);
+                ProgressManager.clearSnapshot();
             }
             this.playDealAnimation();
         }
@@ -799,7 +776,6 @@ export class GameCtrl extends Component {
     }
 
     private markTipsShown(type: TipsType): void {
-        if (this.webLevelEditorPlaytesting) return;
         StorageManager.instance.setBoolean(this.getTipsShownKey(type), true);
         ArchiveManager.instance.scheduleUpload();
     }
@@ -861,7 +837,6 @@ export class GameCtrl extends Component {
             this.getOrCreateLayerContainer(p.z_layer).addChild(node);
 
             const item = node.getComponent(MahjongItem) || node.addComponent(MahjongItem);
-            item.editorMode = this.webLevelEditor !== null && !this.webLevelEditorPlaytesting;
             item.setBoardScale(boardScale);
             item.setData(type, p.y_row, p.x_col, p.z_layer, this.iconFrames.get(type) || null);
 
@@ -886,7 +861,7 @@ export class GameCtrl extends Component {
         // 容器化后:层间顺序由 _layer_<N>_ 容器位置保证,这里只重排每个层容器内部的牌身。
         this.buildChainLinks();
         this.buildIronLocks();
-        if (!this.webLevelEditor || this.webLevelEditorPlaytesting) this.revealAvailableCoveredTiles(false);
+        this.revealAvailableCoveredTiles(false);
 
         const layers = new Set<number>();
         for (const tile of this.tiles) {
@@ -1203,7 +1178,7 @@ export class GameCtrl extends Component {
                 (!this.dealingTiles || this.dealOverlayLayoutReady)
                 && lock.locked
                 && this.isBoardTileOnBoard(lock.tile)
-                && (!this.webLevelEditor || this.webLevelEditorPlaytesting || !!lock.tile.node?.activeInHierarchy)
+                && !!lock.tile.node?.activeInHierarchy
             );
             if (active && !lock.node?.isValid) {
                 lock.node = this.createIronNode(lock.tile);
@@ -1598,15 +1573,6 @@ export class GameCtrl extends Component {
     }
 
     private onTileTap(tile: TileRecord) {
-        if (this.webLevelEditor && !this.webLevelEditorPlaytesting) {
-            this.webLevelEditor.selectPosition({
-                z_layer: tile.layer,
-                y_row: tile.row,
-                x_col: tile.col,
-                tile_id: Number(tile.type),
-            });
-            return;
-        }
         if (this.gameState !== 'playing' || this.autoFinishing || this.dealingTiles || this.shuffleAnimating || tile.collected || tile.removed) {
             return;
         }
@@ -1778,9 +1744,7 @@ export class GameCtrl extends Component {
         const targetBoxPosition = targetCell ? targetCell.position.clone() : Vec3.ZERO.clone();
 
         // 牌起飞时就触发抖动:把飞行时长传给 UI,让挤压峰值精准落在落位时刻
-        const flyToBoxDuration = GameExperiment.isBottomUiEnabled()
-            ? Constants.slotAnim.BottomUiTileToTargetDuration
-            : 0.18 + 0.1;
+        const flyToBoxDuration = 0.18 + 0.1;
         director.emit(Constants.eventNames.EventShowSlotShake, this.getTargetBoxSlotID(box), flyToBoxDuration);
         tween(tile.node)
             .to(flyToBoxDuration, { position: targetFlyPosition, scale: new Vec3(Constants.MahjongBoard.SlotScale, Constants.MahjongBoard.SlotScale, 1) })
@@ -1841,9 +1805,7 @@ export class GameCtrl extends Component {
         this.moveTileNodeToFlyLayer(tile, flyLayer, wasBoardTile);
         tile.item.setPlayable(true);
 
-        const flyToBottomDuration = GameExperiment.isBottomUiEnabled()
-            ? Constants.slotAnim.BottomUiTileToBottomDuration
-            : 0.16 + 0.1;
+        const flyToBottomDuration = 0.16 + 0.1;
         this.arrangeSlotTiles(flyToBottomDuration, tile);
         this.updatePlayableStates();
         this.updateHud();
@@ -1881,9 +1843,7 @@ export class GameCtrl extends Component {
         this.revealAvailableCoveredTiles(true);
         const isSlotFull = this.isBottomSlotFull();
         if (isSlotFull) this.lockBoardInputForFullSlot();
-        const flyToBottomDuration = GameExperiment.isBottomUiEnabled()
-            ? Constants.slotAnim.BottomUiTileToBottomDuration
-            : 0.16 + 0.1;
+        const flyToBottomDuration = 0.16 + 0.1;
         this.arrangeSlotTiles(flyToBottomDuration, tiles[0] || null);
         this.updatePlayableStates();
         this.updateHud();
@@ -2560,10 +2520,6 @@ export class GameCtrl extends Component {
         this.clearIdleTips();
         this.autoFinishing = false;
         this.unschedule(this.autoFinishStep);
-        if (this.webLevelEditorPlaytesting) {
-            this.showWinFlow(this.getWinLayerData(null));
-            return;
-        }
         // 上报关卡成功事件
         SDKManager.instance.report({ event: SDKEvent.level, type: 3, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel, time: Math.ceil(this.elapsedTime) });
         //
@@ -2699,7 +2655,7 @@ export class GameCtrl extends Component {
         if (this.gameState !== 'playing') return;
         this.gameState = 'fail';
         // 每次真正进入失败状态只累计一次；原地复活不换盘面，下一次重开/进关再应用降档。
-        if (!this.webLevelEditorPlaytesting && this.gameMode === 'main') {
+        if (this.gameMode === 'main') {
             ProgressManager.addLevelRetryCount(this.nowLevel, 1);
             ArchiveManager.instance.scheduleUpload();
         }
@@ -2708,10 +2664,8 @@ export class GameCtrl extends Component {
         this.autoFinishing = false;
         this.unschedule(this.autoFinishStep);
         // 上报关卡失败事件
-        if (!this.webLevelEditorPlaytesting) {
-            SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel, reason });
-            window.dnSDK?.track?.('LEVEL_LOSE', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
-        }
+        SDKManager.instance.report({ event: SDKEvent.level, type: 2, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel, reason });
+        window.dnSDK?.track?.('LEVEL_LOSE', { duration: Math.ceil(this.elapsedTime), level_id: this.nowLevel, ad_cnt: this.ad_cnt });
         // 槽位满了 -> 弹失败界面，由玩家选 继续/重开。其余原因(死局/时间到)按旧流程自动重开
         if (reason === '槽位满了') {
             const allUnlocked = this.targetBoxes.every((b) => b.unlocked);
@@ -2726,13 +2680,6 @@ export class GameCtrl extends Component {
             return;
         }
 
-        if (this.webLevelEditorPlaytesting) {
-            this.showToast(`${reason}，重新试玩`, 1);
-            this.scheduleOnce(() => {
-                if (this.webLevelEditorPlaytesting && this.gameState === 'fail') this.restartWebLevelEditorPlaytest();
-            }, 1.5);
-            return;
-        }
 
         this.showToast(`${reason}，重开本关`);
         this.commitMainLevelLoss();
@@ -2741,10 +2688,6 @@ export class GameCtrl extends Component {
     }
 
     private onEventFailureRestart() {
-        if (this.webLevelEditorPlaytesting) {
-            this.restartWebLevelEditorPlaytest();
-            return;
-        }
         this.commitMainLevelLoss();
         this.recordRetryAndClearSnapshot();
         // 确认重开后断连并重算难度；失败达到阈值时优先切换同号 easy。
@@ -2752,10 +2695,6 @@ export class GameCtrl extends Component {
     }
 
     private onEventWinNextLevel() {
-        if (this.webLevelEditorPlaytesting) {
-            this.restartWebLevelEditorPlaytest();
-            return;
-        }
         void this.requestStartLevel(this.nowLevel + 1);
     }
 
@@ -2764,7 +2703,6 @@ export class GameCtrl extends Component {
     }
 
     private commitMainLevelLoss() {
-        if (this.webLevelEditorPlaytesting) return;
         if (this.gameMode !== 'main' || this.nowLevel < 1) return;
         StreakManager.commitLoss(this.nowLevel);
         SDKManager.instance.uploadWechatRankScores(ProgressManager.loadLevel(), StreakManager.getStreak());
@@ -2772,7 +2710,6 @@ export class GameCtrl extends Component {
     }
 
     private recordRetryAndClearSnapshot() {
-        if (this.webLevelEditorPlaytesting) return;
         if (this.gameMode === 'activity') {
             ProgressManager.addActivityRetryCount(this.nowLevel, 1);
             ProgressManager.clearActivitySnapshot();
@@ -2793,9 +2730,7 @@ export class GameCtrl extends Component {
         } else {
             this.unlockNextSlotForContinue();
         }
-        if (!this.webLevelEditorPlaytesting) {
-            SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
-        }
+        SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
         this.updateHud();
     }
 
@@ -3472,8 +3407,6 @@ export class GameCtrl extends Component {
     private preloadMahjongFrames(done: () => void) {
         const bundle = assetManager.getBundle('game');
         this.iconFrames.clear();
-        this.baseIconFrames.clear();
-        this.experimentIconFrames.clear();
         this.flipFrame = null;
         this.iconIds = [];
 
@@ -3494,45 +3427,11 @@ export class GameCtrl extends Component {
                     this.flipFrame = frame;
                 }
                 const id = this.normalizeMahjongFrameName(frame.name);
-                if (id) this.baseIconFrames.set(id, frame);
+                if (id) this.iconFrames.set(id, frame);
             }
-            this.applyMahjongFramesForExperiment();
-            if (GameExperiment.isMahjongFaceEnabled()) {
-                this.preloadExperimentMahjongFrames(bundle, done);
-            } else {
-                done();
-            }
-        });
-    }
-
-    private preloadExperimentMahjongFrames(bundle: AssetManager.Bundle, done: () => void) {
-        bundle.loadDir(GameCtrl.EXPERIMENT_MAHJONG_DIR, SpriteFrame, (err, frames) => {
-            if (err) {
-                console.warn('GameCtrl: load experiment mahjong frames failed', err);
-            } else {
-                for (const frame of frames || []) {
-                    const id = this.normalizeMahjongFrameName(frame.name);
-                    // 只替换基础目录已存在的同名牌面，避免实验资源改变牌型集合。
-                    if (id && this.baseIconFrames.has(id)) this.experimentIconFrames.set(id, frame);
-                }
-                this.applyMahjongFramesForExperiment();
-            }
+            this.iconIds = Array.from(this.iconFrames.keys()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
             done();
         });
-    }
-
-    private applyMahjongFramesForExperiment() {
-        this.iconFrames.clear();
-        for (const [id, frame] of this.baseIconFrames) {
-            this.iconFrames.set(id, frame);
-        }
-        if (GameExperiment.isMahjongFaceEnabled()) {
-            for (const [id, frame] of this.experimentIconFrames) {
-                this.iconFrames.set(id, frame);
-            }
-        }
-        this.iconIds = Array.from(this.iconFrames.keys()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-        this.webLevelEditorTilePreviewUrls.clear();
     }
 
     private preloadChainItem(bundle: AssetManager.Bundle | null, done: () => void) {
@@ -3643,240 +3542,6 @@ export class GameCtrl extends Component {
         }
     }
 
-    private openWebLevelEditor(): boolean {
-        if (!isWebLevelEditorRequested()) return false;
-
-        this.gameMode = 'main';
-        this.gameState = 'ready';
-        this.webLevelEditor = new WebLevelEditor({
-            loadLevel: async (level, variant) => {
-                if (variant === 'activity') return ensureActivityLevelJson(level);
-                return ensureLevelJson(level, variant);
-            },
-            renderLevel: (json, variant) => this.renderWebLevelEditorBoard(json, variant),
-            startPlaytest: (json, variant) => this.startWebLevelEditorPlaytest(json, variant),
-            stopPlaytest: () => this.stopWebLevelEditorPlaytest(),
-            getTileIds: () => this.iconIds.slice(),
-            getTilePreviewUrl: (tileId) => this.getWebLevelEditorTilePreviewUrl(tileId),
-            setSelection: (position) => this.setWebLevelEditorSelection(position),
-            setLayerFilter: (layer) => this.setWebLevelEditorLayerFilter(layer),
-            setHiddenPositions: (positions) => this.setWebLevelEditorHiddenPositions(positions),
-        });
-        void this.webLevelEditor.open().catch((error) => {
-            console.error('GameCtrl: failed to open web level editor', error);
-        });
-        return true;
-    }
-
-    private getWebLevelEditorTilePreviewUrl(tileId: string): string | null {
-        if (this.webLevelEditorTilePreviewUrls.has(tileId)) {
-            return this.webLevelEditorTilePreviewUrls.get(tileId) || null;
-        }
-        const frame = this.iconFrames.get(tileId);
-        if (!frame || typeof document === 'undefined') return null;
-
-        const original = frame.original;
-        const texture = (original?._texture || frame.texture) as Texture2D;
-        const source = texture.image?.data;
-        if (!source || ArrayBuffer.isView(source)) return null;
-
-        const rect = frame.rect;
-        const sourceX = original?._x ?? rect.x;
-        const sourceY = original?._y ?? rect.y;
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(rect.width));
-        canvas.height = Math.max(1, Math.round(rect.height));
-        const context = canvas.getContext('2d');
-        if (!context) return null;
-
-        try {
-            if (frame.rotated) {
-                context.translate(0, canvas.height);
-                context.rotate(-Math.PI / 2);
-                context.drawImage(
-                    source as CanvasImageSource,
-                    sourceX,
-                    sourceY,
-                    rect.height,
-                    rect.width,
-                    0,
-                    0,
-                    rect.height,
-                    rect.width,
-                );
-            } else {
-                context.drawImage(
-                    source as CanvasImageSource,
-                    sourceX,
-                    sourceY,
-                    rect.width,
-                    rect.height,
-                    0,
-                    0,
-                    rect.width,
-                    rect.height,
-                );
-            }
-            const url = canvas.toDataURL('image/png');
-            this.webLevelEditorTilePreviewUrls.set(tileId, url);
-            return url;
-        } catch (error) {
-            console.warn(`GameCtrl: failed to create preview for tile ${tileId}`, error);
-            this.webLevelEditorTilePreviewUrls.set(tileId, null);
-            return null;
-        }
-    }
-
-    private startWebLevelEditorPlaytest(json: LevelJson, variant: LevelVariant) {
-        if (!this.webLevelEditor) return;
-        this.unscheduleAllCallbacks();
-        this.clearWebLevelEditorPlaytestUI();
-        this.webLevelEditorPlaytesting = true;
-        this.webLevelEditorPlaytestVariant = variant;
-        this.editorLayerFilter = null;
-        this.gameMode = variant === 'activity' ? 'activity' : 'main';
-        this.activitySignMode = 'daily';
-        this.levelJson = cloneLevelJson(json);
-        this.currentBoardId = json.level_no;
-        LayerManager.instance.showGameLayer();
-        this.startLevel(json.level_no, null, this.getWebLevelEditorPlaytestDifficulty(variant));
-    }
-
-    private stopWebLevelEditorPlaytest() {
-        if (!this.webLevelEditorPlaytesting) return;
-        this.webLevelEditorPlaytesting = false;
-        this.pendingBeginLevelSeq++;
-        this.levelRequestSeq++;
-        this.unscheduleAllCallbacks();
-        this.clearIdleTips();
-        this.isFreePropState = null;
-        this.clearWebLevelEditorPlaytestUI();
-        LayerManager.instance.showGameLayer();
-    }
-
-    private restartWebLevelEditorPlaytest() {
-        if (!this.webLevelEditorPlaytesting || !this.levelJson) return;
-        this.unscheduleAllCallbacks();
-        this.clearWebLevelEditorPlaytestUI();
-        LayerManager.instance.showGameLayer();
-        this.startLevel(this.levelJson.level_no, null, this.getWebLevelEditorPlaytestDifficulty(this.webLevelEditorPlaytestVariant));
-    }
-
-    private getWebLevelEditorPlaytestDifficulty(variant: LevelVariant): number {
-        if (variant === 'normal') return 3;
-        if (variant === 'easy' || variant === 'hard') return 1;
-        return 0;
-    }
-
-    private clearWebLevelEditorPlaytestUI() {
-        const names = new Set(['UIWinLayer', 'win', 'winSign', 'winStreak', 'failure', 'tips']);
-        const uiLayer = LayerManager.instance.getLayer(LayerType.UI);
-        for (const child of uiLayer.children.slice()) {
-            if (!names.has(child.name)) continue;
-            child.active = false;
-            child.removeFromParent();
-            child.destroy();
-        }
-    }
-
-    private renderWebLevelEditorBoard(json: LevelJson, variant: LevelVariant) {
-        this.webLevelEditorPlaytesting = false;
-        this.pendingBeginLevelSeq++;
-        this.levelRequestSeq++;
-        this.unschedule(this.finishDealAnimation);
-        this.unschedule(this.autoFinishStep);
-        this.clearIdleTips();
-
-        this.gameMode = variant === 'activity' ? 'activity' : 'main';
-        this.applyMahjongFramesForExperiment();
-        this.levelJson = cloneLevelJson(json);
-        this.currentBoardId = json.level_no;
-        this.nowLevel = json.level_no;
-        this.config = this.createLevelConfig(json.level_no);
-        this.taskQueue = this.buildTaskQueue(this.levelJson);
-        this.onUpDateUiInit();
-        this.gameState = 'ready';
-        this.autoFinishing = false;
-        this.resolvingMatch = false;
-        this.dealingTiles = false;
-        this.dealOverlayLayoutReady = true;
-        this.targetsInitialized = false;
-        this.shuffleAnimating = false;
-        this.slotFullInputLocked = false;
-        this.shuffleSeq++;
-
-        this.clearBoard();
-        this.tiles = [];
-        this.slots = [];
-        this.discardedTiles = [];
-        this.actionHistory = [];
-        this.uidSeed = 1;
-        this.generateBoard();
-
-        const boardScale = this.getBoardTileScale();
-        for (const tile of this.tiles) {
-            Tween.stopAllByTarget(tile.node);
-            tile.node.setPosition(tile.boardPos);
-            tile.node.setScale(boardScale, boardScale, 1);
-            tile.item.setMotionStreakEnabled(false);
-        }
-        this.refreshChainLinkVisuals();
-        this.refreshIronLockVisuals();
-        this.updateBoardTileShadows();
-        this.applyWebLevelEditorLayerFilter();
-    }
-
-    private setWebLevelEditorSelection(position: LevelJsonPosition | null) {
-        const selectedKey = position ? positionKey(position) : '';
-        for (const tile of this.tiles) {
-            let opacity = tile.node.getComponent(UIOpacity);
-            if (!opacity) opacity = tile.node.addComponent(UIOpacity);
-            const tileKey = positionKey({
-                z_layer: tile.layer,
-                y_row: tile.row,
-                x_col: tile.col,
-            });
-            opacity.opacity = !selectedKey || tileKey === selectedKey ? 255 : 155;
-        }
-    }
-
-    private setWebLevelEditorLayerFilter(layer: number | null) {
-        this.editorLayerFilter = layer;
-        this.applyWebLevelEditorLayerFilter();
-    }
-
-    private setWebLevelEditorHiddenPositions(positions: LevelJsonPosition[]) {
-        this.editorHiddenPositionKeys = new Set(positions.map((position) => positionKey(position)));
-        this.applyWebLevelEditorHiddenPositions();
-    }
-
-    private applyWebLevelEditorHiddenPositions() {
-        for (const tile of this.tiles) {
-            if (!tile.node?.isValid) continue;
-            const key = positionKey({
-                z_layer: tile.layer,
-                y_row: tile.row,
-                x_col: tile.col,
-            });
-            tile.item.setEditorPreviewVisible(!this.editorHiddenPositionKeys.has(key));
-        }
-        this.refreshChainLinkVisuals();
-        this.refreshIronLockVisuals();
-        this.updateBoardTileShadows();
-    }
-
-    private applyWebLevelEditorLayerFilter() {
-        if (!this.mahjongPnode?.isValid) return;
-        for (const child of this.mahjongPnode.children) {
-            const match = child.name.match(/^_layer_(\d+)_$/);
-            if (!match) continue;
-            child.active = this.editorLayerFilter === null || Number(match[1]) === this.editorLayerFilter;
-        }
-        this.refreshChainLinkVisuals();
-        this.refreshIronLockVisuals();
-        this.updateBoardTileShadows();
-    }
-
     private createLevelConfig(level: number): RuntimeLevelConfig {
         const json = this.levelJson;
         if (!json) {
@@ -3927,10 +3592,8 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.setUndoCount(this.undoCount + 3);
                 this.bumpAdCount();
-                if (!this.webLevelEditorPlaytesting) {
-                    window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
-                    SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
-                }
+                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
+                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
             }, 'undo');
@@ -3959,7 +3622,7 @@ export class GameCtrl extends Component {
             this.refreshUndoButtonStatus();
             return;
         }
-        if (!this.webLevelEditorPlaytesting) window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         // 有次数:消耗 1 次并直接撤回(不再看广告)
         this.setUndoCount(this.undoCount - 1);
         this.executeUndo(tile, index);
@@ -4036,28 +3699,22 @@ export class GameCtrl extends Component {
 
     private setUndoCount(v: number) {
         this.undoCount = Math.max(0, v);
-        if (!this.webLevelEditorPlaytesting) {
-            ProgressManager.saveUndoCount(this.undoCount);
-            ArchiveManager.instance.scheduleUpload();
-        }
+        ProgressManager.saveUndoCount(this.undoCount);
+        ArchiveManager.instance.scheduleUpload();
         this.emitPropCounts();
     }
 
     private setSwitchCount(v: number) {
         this.switchCount = Math.max(0, v);
-        if (!this.webLevelEditorPlaytesting) {
-            ProgressManager.saveSwitchCount(this.switchCount);
-            ArchiveManager.instance.scheduleUpload();
-        }
+        ProgressManager.saveSwitchCount(this.switchCount);
+        ArchiveManager.instance.scheduleUpload();
         this.emitPropCounts();
     }
 
     private setUnlockCount(v: number) {
         this.unlockCount = Math.max(0, v);
-        if (!this.webLevelEditorPlaytesting) {
-            ProgressManager.saveUnlockCount(this.unlockCount);
-            ArchiveManager.instance.scheduleUpload();
-        }
+        ProgressManager.saveUnlockCount(this.unlockCount);
+        ArchiveManager.instance.scheduleUpload();
         this.emitPropCounts();
     }
 
@@ -4075,19 +3732,19 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.bumpAdCount();
                 if (this.gameState !== 'playing' || box.unlocked) return;
-                if (!this.webLevelEditorPlaytesting) window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
+                window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
                 this.executeUnlock(box);
-                if (!this.webLevelEditorPlaytesting) SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
+                SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
             }, 'unlock');
             return;
         }
 
-        if (!this.webLevelEditorPlaytesting) window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         this.setUnlockCount(this.unlockCount - 1);
         this.executeUnlock(box);
-        if (!this.webLevelEditorPlaytesting) SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
+        SDKManager.instance.report({ event: SDKEvent.level, type: 4, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
     }
 
     private executeUnlock(box: TargetBox) {
@@ -4137,10 +3794,8 @@ export class GameCtrl extends Component {
             SDKManager.instance.showVideoAd(() => {
                 this.bumpAdCount();
                 this.setSwitchCount(this.switchCount + 3);
-                if (!this.webLevelEditorPlaytesting) {
-                    window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
-                    SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
-                }
+                window.dnSDK?.track?.('GET_ITEM', { item_source: 2 });
+                SDKManager.instance.report({ event: SDKEvent.level, type: 5, level: this.gameMode === 'activity' ? this.nowLevel + 20000 : this.nowLevel });
             }, () => {
                 LayerManager.instance.showToast("视频播放未完成！")
             }, 'shuffle');
@@ -4154,7 +3809,7 @@ export class GameCtrl extends Component {
         if (topCandidates.length === 0) return;
 
 
-        if (!this.webLevelEditorPlaytesting) window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
+        window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
         // 有次数:消耗 1 次并直接换牌(不再看广告)
         this.setSwitchCount(this.switchCount - 1);
         this.executeShuffle(activeTiles, topCandidates);
@@ -4468,7 +4123,7 @@ export class GameCtrl extends Component {
     }
 
     private saveProgressDeferred() {
-        if (this.webLevelEditorPlaytesting || this.isGuideLevel()) return;
+        if (this.isGuideLevel()) return;
         this.snapshotDirty = true;
         if (this.snapshotFlushScheduled) return;
         this.snapshotFlushScheduled = true;
@@ -4479,7 +4134,6 @@ export class GameCtrl extends Component {
     }
 
     private flushSnapshot() {
-        if (this.webLevelEditorPlaytesting) return;
         if (!this.snapshotDirty) return;
         if (this.gameState !== 'playing') return;
         if (this.resolvingMatch || this.dealingTiles || this.shuffleAnimating) return;

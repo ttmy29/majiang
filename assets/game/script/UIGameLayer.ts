@@ -5,7 +5,6 @@ import { LayerManager } from './manager/LayerManager';
 import { MahjongItem } from './MahjongItem';
 import { AudioManager, AudioClipNames } from './manager/AudioManager';
 import { boxEffect } from './boxEffect';
-import { GameExperiment } from '../../loading/GameExperiment';
 const { ccclass, property } = _decorator;
 
 interface HudPayload {
@@ -70,14 +69,6 @@ interface IQUpdatePayload {
 
 @ccclass('UIGameLayer')
 export class UIGameLayer extends Component {
-    private static readonly BOTTOM_UI_SLOT_ROOT_TOP = 933.632;
-    private static readonly BOTTOM_UI_SLOT_ROOT_BOTTOM = 220.368;
-    private static readonly BOTTOM_UI_STORED_SLOT_Y = 196.97;
-    private static readonly BOTTOM_UI_RIGHT_TARGET_X = 151;
-    // 在暂存布局基础上整体上移 30px，高度仍保持 641px。
-    private static readonly BOTTOM_UI_BOARD_TOP = 93.9;
-    private static readonly BOTTOM_UI_BOARD_BOTTOM = 599.1;
-    private static readonly BOTTOM_UI_COMBO_TOP = 120;
     // 牌盒刷新播放 1s glow，旧盒在特效后半段同步下沉，收尾时保留一条底座边缘。
     private static readonly SLOT_GLOW_DURATION = 1;
     // glow/huaban 起效后很快清掉旧牌，不再等牌盒下沉完成。
@@ -226,14 +217,11 @@ export class UIGameLayer extends Component {
     private hasLevelUiMode = false;
     private slotRootTop = 0;
     private guideNode: Node | null = null;
-    private bottomUiExperimentEnabled = false;
 
     protected onLoad() {
         //背景适配
         this.adaptBackground();
 
-        this.bottomUiExperimentEnabled = GameExperiment.isBottomUiEnabled();
-        if (this.bottomUiExperimentEnabled) this.applyBottomUiExperimentLayout();
         this.slotOriginPositions = this.slotNodeArr.map(node => node ? node.position.clone() : new Vec3());
         this.cacheSlotBoxBackgrounds();
         this.setupSlotRevealMasks();
@@ -619,44 +607,6 @@ export class UIGameLayer extends Component {
                 ? UIGameLayer.SLOT_REVEAL_START_OFFSET_RATIO
                 : 1.4);
         return new Vec3(originPos.x, retractedY, originPos.z);
-    }
-
-    /** 应用“牌盒在下”暂存方案中的场景坐标；对照组完全沿用 scene 原值。 */
-    private applyBottomUiExperimentLayout() {
-        const slotRoot = this.slotNodeArr[0]?.parent || null;
-        const slotRootWidget = slotRoot?.getComponent(Widget) || null;
-        if (slotRootWidget) {
-            slotRootWidget.isAlignTop = false;
-            slotRootWidget.isAlignBottom = true;
-            slotRootWidget.top = UIGameLayer.BOTTOM_UI_SLOT_ROOT_TOP;
-            slotRootWidget.bottom = UIGameLayer.BOTTOM_UI_SLOT_ROOT_BOTTOM;
-            slotRootWidget.updateAlignment();
-        }
-
-        const storedSlot = this.slotNodeArr[0];
-        if (storedSlot) {
-            storedSlot.setPosition(storedSlot.position.x, UIGameLayer.BOTTOM_UI_STORED_SLOT_Y, storedSlot.position.z);
-        }
-        for (const index of [2, 4]) {
-            const target = this.slotNodeArr[index];
-            if (target) target.setPosition(UIGameLayer.BOTTOM_UI_RIGHT_TARGET_X, target.position.y, target.position.z);
-        }
-
-        const boardNode = this.node.getChildByName('pNode');
-        const boardWidget = boardNode?.getComponent(Widget) || null;
-        if (boardWidget) {
-            boardWidget.isAlignTop = true;
-            boardWidget.isAlignBottom = true;
-            boardWidget.top = UIGameLayer.BOTTOM_UI_BOARD_TOP;
-            boardWidget.bottom = UIGameLayer.BOTTOM_UI_BOARD_BOTTOM;
-            boardWidget.updateAlignment();
-        }
-
-        const comboWidget = this.comboNode?.getComponent(Widget) || null;
-        if (comboWidget) {
-            comboWidget.top = UIGameLayer.BOTTOM_UI_COMBO_TOP;
-            comboWidget.updateAlignment();
-        }
     }
 
     adaptBackground() {
@@ -1061,13 +1011,7 @@ export class UIGameLayer extends Component {
 
         const widget = this.getSlotRootWidget();
         if (widget) {
-            if (this.bottomUiExperimentEnabled) {
-                widget.isAlignTop = false;
-                widget.isAlignBottom = true;
-                widget.bottom = UIGameLayer.BOTTOM_UI_SLOT_ROOT_BOTTOM;
-            } else {
-                widget.top = this.isGuideLevel ? 300 : this.slotRootTop;
-            }
+            widget.top = this.isGuideLevel ? 300 : this.slotRootTop;
             widget.updateAlignment();
         }
 

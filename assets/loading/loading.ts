@@ -1,7 +1,6 @@
 import { _decorator, assetManager, Component, director, Label, Node, ProgressBar, SpriteFrame, sys, UITransform, Vec3, view } from 'cc';
 import { SDKEvent, SDKManager } from './SDKManager';
 import { HttpManager } from './HttpManager';
-import { GameExperiment } from './GameExperiment';
 
 const { ccclass, property } = _decorator;
 const LOGIN_REWARD_SHOWN_DATE_KEY = 'mahjong_match_login_reward_shown_date';
@@ -40,8 +39,6 @@ export class loading extends Component {
     private static readonly ARCHIVE_MAX_WAIT = 3;
     // 登录→取md5→下载存档→写回本地；永不 reject(无数据/网络/非微信都吞掉)
     private archiveReady: Promise<void> = Promise.resolve();
-    // 实验参数与云存档一起在进入 game 场景前完成，避免 UI 激活后再跳位置。
-    private experimentReady: Promise<void> = Promise.resolve();
     // 是否已进入游戏：进入后拒绝迟到的存档写入，避免串档
     private gameEntered: boolean = false;
     // 进游戏回调(存档就绪或超时都走它)，存成员便于 unschedule
@@ -57,12 +54,8 @@ export class loading extends Component {
         const maxScale = Math.max(scaleX, scaleY);
         this.bgNode.setScale(new Vec3(maxScale, maxScale, 1));
 
-        this.experimentReady = GameExperiment.preloadBottomUi();
-        // 等实验值确定后再登录和初始化上报，保证 login 事件也携带正确的 node。
-        void this.experimentReady.then(() => {
-            this.initSDK();
-            window.dnSDK?.onAppStart?.();
-        });
+        this.initSDK();
+        window.dnSDK?.onAppStart?.();
 
         // 显示固定提示名言
         this.showTip();
@@ -132,7 +125,7 @@ export class loading extends Component {
             director.runScene(scene);
         };
         this.enterCb = enter;
-        Promise.all([this.archiveReady, this.experimentReady]).then(enter);
+        this.archiveReady.then(enter);
         this.scheduleOnce(enter, loading.ARCHIVE_MAX_WAIT);
     }
 
@@ -222,4 +215,3 @@ export class loading extends Component {
         })
     }
 }
-

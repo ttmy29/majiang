@@ -377,13 +377,6 @@ export class MahjongItem extends Component {
         this.travelBoardStepY = stepY;
     }
 
-    setEditorPreviewVisible(visible: boolean) {
-        this.node.active = visible;
-        if (this.shadowNode?.isValid) {
-            this.shadowNode.active = visible && this._originalShadowActive;
-        }
-    }
-
     public setShadowVisible(visible: boolean) {
         if (this.shadowNode?.isValid) this.shadowNode.active = visible;
     }
