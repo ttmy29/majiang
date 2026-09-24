@@ -200,8 +200,8 @@ export class loading extends Component {
     private initSDK() {
         SDKManager.instance.init({
             apiUrl: 'https://shufen.shenzhenyuren.com/v1',
-            appId: 'yrRaAGjYBpxS98Mf1s3c',
-            secret: 'ZOZxZroOf3JSQ1bgrwluQqEKdEiXI1Lz',
+            appId: 'yrnOyBNiNmWSECwXLUbk',
+            secret: '5CiyqVBWdWpttslFjfbGPl4kn1fLA8Ez',
             timeout: 10000,
             enableLog: false  // 生产环境建议设为 false
         });

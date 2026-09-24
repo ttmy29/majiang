@@ -165,7 +165,7 @@ export class SDKManager {
 
         // 启动在线时长上报（每30秒上报一次）
         this.startOnlineTimeReport();
-        SDKManager.adsVideoId = "adunit-938e509f0347335b";
+        SDKManager.adsVideoId = "adunit-8f34f7dcca2232ec";
 
         if (sys.platform === sys.Platform.WECHAT_GAME) {
             SDKManager.rewardedVideoAd = wx.createRewardedVideoAd({ adUnitId: SDKManager.adsVideoId })
@@ -230,11 +230,11 @@ export class SDKManager {
             });
             window.dnSDK.setDebug(false);
             window.dnSDK = new window.dnSDK({
-                appid: "wx966af392065ece23",
+                appid: "wx5fae8b676e75dcae",
                 // 数据源ID，数字，必填
-                user_action_set_id: 1221758475,
+                user_action_set_id: 1224440996,
                 // 加密key，必填
-                secret_key: '489f62e7884371a1cae101389ebfdc5a',
+                secret_key: 'be3aa1854424aaaba8a77d69c916be95',
             });
             const initResult = window.dnSDK.getInitResult();
             if (!initResult.inited) {
