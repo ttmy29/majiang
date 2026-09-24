@@ -1,7 +1,7 @@
 import { StorageKey, StorageManager } from './StorageManager';
 import { ArchiveManager } from './ArchiveManager';
 import { Constants } from '../config/Constants';
-import { ensureLevelJson, getAvailableBoardIds, LevelJson, LevelTier } from '../config/LevelJsonLoader';
+import { ensureLevelJson, getAvailableBoardIds, LevelJson, LevelTier, shouldUseTestMainLevel } from '../config/LevelJsonLoader';
 import { ProgressManager } from './ProgressManager';
 
 export interface LevelStartPlan {
@@ -620,6 +620,13 @@ export class StreakManager {
         const forceReroll = !!opts?.forceReroll;
         const saved = this.loadDiffState();
         const sameLevel = !!saved && saved.level === level;
+
+        // 主线前 180 关固定使用同号盘面。
+        if (await shouldUseTestMainLevel(level)) {
+            const plan: LevelStartPlan = { tier: 'base', boardId: level };
+            this.saveDiffState({ level, tier: plan.tier, boardId: plan.boardId, failed: false });
+            return plan;
+        }
 
         const baseBoardIds = await getAvailableBoardIds('base');
         if (level < Constants.WinStreak.StartLevel || baseBoardIds.indexOf(level) >= 0) {

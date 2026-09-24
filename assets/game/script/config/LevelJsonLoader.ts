@@ -26,7 +26,7 @@ export interface LevelJson {
 }
 
 export type LevelTier = 'base' | 'easy' | 'normal' | 'hard';
-export type LevelVariant = LevelTier | 'activity';
+export type LevelVariant = LevelTier | 'test' | 'activity';
 
 interface VariantIndex {
     bundleName: string;
@@ -51,6 +51,8 @@ interface LevelAssetInfo {
 }
 
 const BASE_BUNDLE = 'config_levels_base';
+const TEST_BUNDLE = 'config_levels_test180';
+const FIXED_MAIN_LEVEL_MAX = 180;
 const ADVANCED_BUNDLE = 'config_levels_advanced';
 const ACTIVITY_BUNDLE = 'config_levels_activity';
 const BASE_MAX_LEVEL = 11;
@@ -58,6 +60,7 @@ const ACTIVITY_MAX_LEVEL = 93;
 
 const variantIndexes: Record<LevelVariant, VariantIndex> = {
     base: createVariantIndex(BASE_BUNDLE, ''),
+    test: createVariantIndex(TEST_BUNDLE, ''),
     easy: createVariantIndex(ADVANCED_BUNDLE, 'level_easy'),
     normal: createVariantIndex(ADVANCED_BUNDLE, 'level_hard'),
     hard: createVariantIndex(ADVANCED_BUNDLE, 'level_normal'),
@@ -66,6 +69,7 @@ const variantIndexes: Record<LevelVariant, VariantIndex> = {
 
 const variantBuckets: Record<LevelVariant, VariantBucket> = {
     base: createVariantBucket(),
+    test: createVariantBucket(),
     easy: createVariantBucket(),
     normal: createVariantBucket(),
     hard: createVariantBucket(),
@@ -140,6 +144,17 @@ function adjustCount(store: Map<string, number>, key: string, delta: number) {
     store.delete(key);
 }
 
+/** 主线前 180 关固定使用同号盘面。 */
+export async function shouldUseTestMainLevel(level: number): Promise<boolean> {
+    const normalizedLevel = normalizeLevel(level);
+    return normalizedLevel >= 1 && normalizedLevel <= FIXED_MAIN_LEVEL_MAX;
+}
+
+async function resolveMainLevelVariant(level: number, tier: LevelTier): Promise<LevelVariant> {
+    if (tier !== 'base') return tier;
+    return await shouldUseTestMainLevel(level) ? 'test' : 'base';
+}
+
 function readVariantIndex(bundle: AssetManager.Bundle, state: VariantIndex) {
     state.indexedLevels.clear();
     state.pathByLevel.clear();
@@ -182,7 +197,7 @@ async function ensureVariantIndex(variant: LevelVariant): Promise<VariantIndex> 
 
 async function resolveVariantLevelInfo(level: number, variant: LevelVariant): Promise<LevelAssetInfo | null> {
     const normalizedLevel = normalizeLevel(level);
-    if (variant === 'base' || variant === 'activity') {
+    if (variant === 'base' || variant === 'test' || variant === 'activity') {
         return {
             bundleName: variantIndexes[variant].bundleName,
             variant,
@@ -288,7 +303,7 @@ function releaseVariantLevel(variant: LevelVariant, bundleName: string, level: n
     if (!bucket.assets.has(cacheKey)) return;
 
     const bundle = assetManager.getBundle(bundleName);
-    const path = variant === 'base' || variant === 'activity'
+    const path = variant === 'base' || variant === 'test' || variant === 'activity'
         ? `pure_level${level}_config`
         : variantIndexes[variant].pathByLevel.get(level);
     if (bundle && path) {
@@ -363,9 +378,9 @@ export async function warmupForwardWindow(level: number, aheadCount = 10): Promi
 
     for (let offset = 0; offset <= aheadCount; offset++) {
         const targetLevel = normalizedLevel + offset;
-        if (targetLevel > BASE_MAX_LEVEL) break;
-
-        const info = await resolveVariantLevelInfo(targetLevel, 'base');
+        const variant = await resolveMainLevelVariant(targetLevel, 'base');
+        if (variant === 'base' && targetLevel > BASE_MAX_LEVEL) continue;
+        const info = await resolveVariantLevelInfo(targetLevel, variant);
         if (!info) continue;
         targets.set(getCacheKey(info.bundleName, info.level), info);
     }
@@ -389,11 +404,12 @@ export async function warmupActivityForwardWindow(level: number, aheadCount = 10
     await Promise.all(Array.from(targets.values(), (info) => ensureVariantAsset(info)));
 }
 
-export async function ensureLevelJson(level: number, tier: LevelTier = 'base'): Promise<LevelJson | null> {
+export async function ensureLevelJson(level: number, tier: LevelTier | 'test' = 'base'): Promise<LevelJson | null> {
     const normalizedLevel = normalizeLevel(level);
-    const info = await resolveVariantLevelInfo(normalizedLevel, tier);
+    const variant = tier === 'test' ? 'test' : await resolveMainLevelVariant(normalizedLevel, tier);
+    const info = await resolveVariantLevelInfo(normalizedLevel, variant);
     if (!info) {
-        console.warn(`LevelJsonLoader: missing ${tier} level ${normalizedLevel}`);
+        console.warn(`LevelJsonLoader: missing ${variant} level ${normalizedLevel}`);
         return null;
     }
 
@@ -419,7 +435,7 @@ export function releaseOutsideWindow(level: number, aheadCount = 10): void {
         const minLevel = normalizedLevel;
         const maxLevel = normalizedLevel + aheadCount;
 
-        (['base', 'easy', 'normal', 'hard'] as LevelTier[]).forEach((variant) => {
+        (['base', 'test', 'easy', 'normal', 'hard'] as LevelVariant[]).forEach((variant) => {
             const bundleName = variantIndexes[variant].bundleName;
             for (const cacheKey of Array.from(getBucket(variant).assets.keys())) {
                 const parsed = parseCacheKey(cacheKey);
@@ -457,7 +473,7 @@ export function releaseActivityOutsideWindow(level: number, aheadCount = 10): vo
 export function clearLevelBundleCaches(): void {
     cacheGeneration++;
 
-    const bundleNames = [BASE_BUNDLE, ADVANCED_BUNDLE, ACTIVITY_BUNDLE];
+    const bundleNames = [BASE_BUNDLE, TEST_BUNDLE, ADVANCED_BUNDLE, ACTIVITY_BUNDLE];
     for (const bundleName of bundleNames) {
         const bundle = assetManager.getBundle(bundleName);
         if (!bundle) continue;
