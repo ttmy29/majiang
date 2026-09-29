@@ -42,6 +42,7 @@ export class TravelRecoveryManager {
                 if (!pending || settled || currentRequest !== requestId || !node.isValid) return;
                 pending = false;
                 settled = true;
+                ProgressManager.addGlobalAdCount(1);
                 ProgressManager.refillTravelAttempts();
                 popup.close();
                 layers.showToast('旅行次数 +5');

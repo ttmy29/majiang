@@ -17,6 +17,9 @@ const storage = new Map();
 const popups = [];
 const emitted = [];
 const videoRequests = [];
+const analyticsReports = [];
+const dnTracks = [];
+const mockWindow = { dnSDK: { track: (name, data) => dnTracks.push({ name, data }) } };
 let homeCount = 0;
 function schedule(owner, delay, fn) { tasks.push({ owner, at: now + delay, fn }); }
 function advance(seconds) {
@@ -171,7 +174,7 @@ function deserializePrefab(name) {
     return node;
 }
 const StorageKey = { TravelFaceCycles: 'travelFaceCycles', TravelSnapshot: 'travelSnapshot', TravelLevel: 'travelLevel', TravelReplayMode: 'travelReplayMode',
-    TravelDailyUsage: 'travelDailyUsage', CurrentLevel: 'currentLevel' };
+    TravelDailyUsage: 'travelDailyUsage', CurrentLevel: 'currentLevel', GlobalAdCount: 'globalAdCount' };
 const AudioClipNames = new Proxy({}, { get: (_, key) => key });
 const layerManager = {
     showToast() {}, showStartLayer() { homeCount++; },
@@ -194,19 +197,22 @@ const imports = {
     } },
     './MahjongItem': { MahjongItem },
     './manager/ArchiveManager': { ArchiveManager: { instance: { scheduleUpload() {} } } },
+    './manager/DesktopShortcutManager': { DesktopShortcutManager: { instance: { initialize() {}, shouldShowRedPoint() { return false; } } } },
     './manager/AudioManager': { AudioClipNames, AudioManager: { instance: {
         playClick() {}, playOneShot(name) { sounds.push(name); },
         playOneShotDuckingBgm(name) { sounds.push(name); }, pause() {}, play() {},
     } } },
     './manager/LayerManager': { LayerManager: { instance: layerManager }, LayerType: { Start: 'startLayer' } },
+    './manager/SliderBarManager': { SliderBarManager: { instance: { initialize() {}, isKwai() { return false; } } } },
     './UigmLayer': { UigmLayer: { show() { return null; } } },
     './UIThreePopup': { ThreePopupEvent: { Closed: 'closed', ReviveRequested: 'revive-requested' }, UIThreePopup: FakeThreePopup },
     './manager/StorageManager': { StorageKey, StorageManager: { instance: {
         getItem: key => storage.has(key) ? storage.get(key) : null,
         setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key),
     } } },
-    '../../loading/SDKManager': { SDKManager: { instance: {
+    '../../loading/SDKManager': { SDKEvent: { level: 'level', prop: 'prop' }, SDKManager: { instance: {
         showVideoAd: (success, failure, key) => videoRequests.push({ success, failure, key }),
+        report: data => analyticsReports.push(data),
     } } },
     './manager/StreakManager': {},
     './util/Utils': {},
@@ -216,7 +222,7 @@ const imports = {
 function loadWebTravel() {
     const modules = new Map();
     const cache = new Map();
-    const context = vm.createContext({ console, System: { register(name, deps, factory) {
+    const context = vm.createContext({ console, window: mockWindow, System: { register(name, deps, factory) {
         if (typeof name !== 'string') {
             // Creator wraps shared chunk registrations in an anonymous package.
             deps(() => {}, {}).execute();
@@ -268,7 +274,7 @@ function load(file) {
         target: ts.ScriptTarget.ES2017, module: ts.ModuleKind.CommonJS, experimentalDecorators: true,
     } });
     const exports = {};
-    vm.runInNewContext(result.outputText, { exports, console, require(name) {
+    vm.runInNewContext(result.outputText, { exports, console, window: mockWindow, require(name) {
         assert.ok(imports[name], `unmocked import ${name}`); return imports[name];
     } }, { filename: file });
     return exports;
@@ -350,7 +356,7 @@ async function main() {
     const horizontalPitch = larger.boardStepX / (bodyWidth * larger.boardTileScale);
     const verticalPitch = larger.boardStepY / (bodyHeight * larger.boardTileScale);
     assert.ok(Math.abs(horizontalPitch - 1) < 1e-9, 'horizontal faces meet with no added gap');
-    assert.ok(Math.abs(verticalPitch - 164 / 180) < 1e-9, 'lower faces cover the upper body bevel without stretching the image');
+    assert.ok(Math.abs(verticalPitch - 174 / 180) < 1e-9, 'lower faces cover the upper body bevel without stretching the image');
     for (const tile of larger.tiles) {
         const hitArea = tile.node.getComponent(UITransform);
         assert.ok(Math.abs(hitArea.width - bodyWidth) < 1e-9, 'the touch rect excludes transparent image padding');
@@ -541,6 +547,9 @@ async function main() {
     videoRequests[0].failure();
     assert.equal(sounds.filter(sound => sound === 'pageOpen').length, 0, 'failed video has no unlock sound');
     assert.equal(game.capacity, 5); assert.equal(lock1.active, true);
+    assert.equal(analyticsReports.filter(event => event.cid === 'travel_prop_use').length, 0,
+        'failed ad does not report item use');
+    assert.equal(ProgressManager.loadGlobalAdCount(), 0, 'failed ad does not count');
     videoRequests[0].success();
     assert.equal(game.capacity, 5, 'a late success from a failed ad cannot unlock a slot');
     assert.equal(lock1.getComponent(Button).interactable, true);
@@ -550,18 +559,29 @@ async function main() {
     assert.equal(game.capacity, 6); assert.equal(lock1.active, false);
     assert.equal(lock2.getComponent(Button).interactable, true);
     assert.equal(JSON.parse(storage.get(StorageKey.TravelSnapshot)).capacity, 6);
+    assert.equal(JSON.parse(storage.get(StorageKey.TravelSnapshot)).adCount, 1);
+    assert.equal(ProgressManager.loadGlobalAdCount(), 1);
+    assert.ok(analyticsReports.some(event => event.cid === 'travel_prop_use' && event.propName === 'slot_unlock'
+        && event.level === 10001 && event.type === 2 && event.remaining === 1));
+    assert.ok(analyticsReports.some(event => event.event === 'level' && event.type === 4 && event.level === 10001));
+    assert.equal(dnTracks.filter(event => event.name === 'USE_ITEM').length, 1);
     lock2.events.get(Button.EventType.CLICK)();
     videoRequests[2].success();
     assert.equal(sounds.filter(sound => sound === 'pageOpen').length, 2, 'second unlock plays slot sound');
     assert.equal(game.capacity, 7); assert.equal(lock2.active, false);
     assert.equal(JSON.parse(storage.get(StorageKey.TravelSnapshot)).capacity, 7);
+    assert.equal(ProgressManager.loadGlobalAdCount(), 2);
+    assert.equal(analyticsReports.filter(event => event.cid === 'travel_prop_use' && event.propName === 'slot_unlock').length, 2);
     const unlockedSave = storage.get(StorageKey.TravelSnapshot);
     game = create(); storage.set(StorageKey.TravelSnapshot, unlockedSave); game.restoreSnapshot();
     game.refreshHud();
     assert.equal(game.capacity, 7);
+    assert.equal(game.adCount, 2, 'restored run keeps its completed video count');
     assert.equal(game.slotLocks[0].active, false); assert.equal(game.slotLocks[1].active, false);
+    const reportsBeforeDuplicateUnlock = analyticsReports.length;
     videoRequests[2].success();
     assert.equal(game.capacity, 7, 'duplicate SDK success does not over-expand tray');
+    assert.equal(analyticsReports.length, reportsBeforeDuplicateUnlock, 'duplicate SDK success does not report twice');
     game = create();
     assert.equal(game.capacity, 5); assert.equal(game.slotLocks[0].active, true);
     assert.equal(game.slotLocks[1].getComponent(Button).interactable, false);
@@ -569,6 +589,19 @@ async function main() {
     for (let id = 0; id < 5; id++) tap(game, id);
     assert.equal(game.slots.length, 5); assert.equal(game.state, 'fail', 'five slots trigger failure by default');
     console.log('PASS sequential video unlock, failure retry, duplicate guard and saved capacity');
+    analyticsReports.length = 0;
+    game = create();
+    assert.equal(game.undo(), false, 'empty tray cannot consume undo');
+    assert.equal(analyticsReports.length, 0, 'failed item action has no report');
+    tap(game, 0);
+    assert.equal(game.undo(), true);
+    game = create(); game.shuffle();
+    game = create(); game.magnet();
+    assert.deepEqual(analyticsReports.filter(event => event.cid === 'travel_prop_use').map(event =>
+        [event.propName, event.count, event.remaining, event.level]), [
+        ['undo', 1, 1, 10001], ['shuffle', 1, 0, 10001], ['magnet', 1, 0, 10001],
+    ], 'successful travel props report one consumption with remaining count');
+    console.log('PASS travel item use reports only after a successful action');
     game = create();
 
 
@@ -614,6 +647,8 @@ async function main() {
     assert.equal(popups[0].args[0].iq, 42.1);
     assert.equal(popups[0].args[0].time, 21.5);
     assert.equal(popups[0].args[0].comboTimes, 3);
+    assert.ok(dnTracks.some(event => event.name === 'LEVEL_PASS' && event.data.level_id === 10001
+        && event.data.duration === 22 && event.data.ad_cnt === 0));
     assert.equal(storage.get(StorageKey.TravelLevel), 2);
     assert.equal(storage.has(StorageKey.TravelSnapshot), false);
     assert.equal(ProgressManager.loadTravelRemaining(), 5, 'finishing level 1 does not consume an attempt');
@@ -689,6 +724,7 @@ async function main() {
     assert.equal(videoRequests.length, 1, 'pending revive ad cannot queue twice');
     videoRequests[0].failure();
     assert.equal(game.state, 'fail'); assert.equal(game.dialog, failedPopup);
+    assert.equal(ProgressManager.loadGlobalAdCount(), 0, 'failed revive video is not counted');
     assert.equal(failedPopup.getChildByPath('view/reviveButton').getComponent(Button).interactable, true);
     videoRequests[0].success();
     assert.equal(game.state, 'fail', 'late completion of a failed ad cannot revive');
@@ -696,6 +732,7 @@ async function main() {
     assert.equal(videoRequests.length, 2);
     videoRequests[1].success();
     assert.equal(game.state, 'playing'); assert.equal(game.dialog, null);
+    assert.equal(ProgressManager.loadGlobalAdCount(), 1, 'successful revive video is counted');
     assert.equal(game.slots.length, 0, 'revive returns the stored tiles to the board');
     assert.ok(game.tiles.slice(0, 5).every(tile => tile.state === 'board'));
     assert.equal(game.capacity, 6, 'first revive unlocks the sixth slot');
@@ -706,6 +743,7 @@ async function main() {
     assert.equal(game.undoLeft, 2); assert.equal(game.iqValue, 40);
     videoRequests[1].success();
     assert.equal(game.state, 'playing', 'duplicate ad callback cannot revive again');
+    assert.equal(ProgressManager.loadGlobalAdCount(), 1, 'duplicate revive callback is not counted twice');
     assert.equal(ProgressManager.loadTravelRemaining(), 5, 'revive does not consume an attempt');
     for (let i = 0; i < 6; i++) tap(game, i);
     assert.equal(game.state, 'fail');
@@ -1011,6 +1049,7 @@ async function main() {
     };
     // Attempts are charged on entry, not at victory; first level is free and revival stays in the same run.
     game = await loadSource(1);
+    assert.ok(dnTracks.some(event => event.name === 'LEVEL_ENTER' && event.data.level_id === 10001));
     assert.equal(ProgressManager.loadTravelRemaining(), 5, 'first level entry is free');
     game.finishLevel();
     assert.equal(ProgressManager.loadTravelRemaining(), 5, 'first level victory is free');
@@ -1106,7 +1145,7 @@ async function main() {
             assert.ok(Math.abs(touch.height * tile.node.scale.y - face.height * tile.node.scale.y * 180 / 188) < 1e-9,
                 'the touch area retains the full visible body including its bottom edge');
             assert.ok(Math.abs(touch.height * tile.node.scale.y - game.boardStepY
-                - face.height * tile.node.scale.y * 16 / 188) < 1e-9,
+                - face.height * tile.node.scale.y * 6 / 188) < 1e-9,
                 'adjacent rows overlap only the bottom bevel of the original artwork');
             assert.ok(Math.abs(tile.node.position.x) + touch.width * tile.node.scale.x / 2 <= size.width / 2);
             assert.ok(Math.abs(tile.node.position.y) + touch.height * tile.node.scale.y / 2 <= size.height / 2);
@@ -1128,7 +1167,7 @@ async function main() {
                     const aHeight = a.node.getComponent(UITransform).height * a.node.scale.y;
                     const bHeight = b.node.getComponent(UITransform).height * b.node.scale.y;
                     const overlap = (aHeight + bHeight) / 2 - Math.abs(a.node.position.y - b.node.position.y);
-                    assert.ok(Math.abs(overlap - aHeight * 16 / 180) < 1e-9,
+                    assert.ok(Math.abs(overlap - aHeight * 6 / 180) < 1e-9,
                         `level 5 same-layer tiles ${a.id}/${b.id} cover the upper tile's bottom bevel`);
                 }
             }

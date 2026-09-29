@@ -81,6 +81,7 @@ interface TravelSnapshot {
     clearCount?: number;
     comboTimes?: number;
     elapsedTime?: number;
+    adCount?: number;
 }
 
 /** gameLayerThree 预制体上的独立三消玩法，不使用主线的目标牌盒或主线快照。 */
@@ -127,6 +128,7 @@ export class UITravelLayer extends Component {
     private clearCount = 0;
     private comboTimes = 0;
     private elapsedTime = 0;
+    private adCount = 0;
     private boardStepX = BOARD_MAX_STEP;
     private boardStepY = BOARD_MAX_STEP;
     private boardTileScale = BOARD_MAX_STEP * BOARD_TILE_HEIGHT_RATIO / TILE_HEIGHT;
@@ -440,9 +442,34 @@ export class UITravelLayer extends Component {
         return first + Math.floor(Math.random() * (MAX_TRAVEL_LEVEL - first + 1));
     }
 
-    private reportTravelLevel(type: 1 | 2 | 3, reason?: string): void {
+    private travelLevelId(): number {
+        return TRAVEL_LEVEL_ID_START + this.level - 1;
+    }
+
+    private reportTravelPropUse(propName: 'undo' | 'shuffle' | 'magnet' | 'slot_unlock', remaining: number): void {
+        // 每次实际生效才上报一次；剩余次数仍通过 TravelSnapshot 同步到云存档。
+        const sdk = SDKManager.instance;
+        if (typeof sdk?.report === 'function') sdk.report({
+            event: SDKEvent.prop,
+            cid: 'travel_prop_use',
+            type: 2,
+            level: this.travelLevelId(),
+            propName,
+            count: 1,
+            remaining,
+        });
+    }
+
+    private recordCompletedTravelAd(): void {
+        this.adCount++;
+        ProgressManager.addGlobalAdCount(1);
+        ArchiveManager.instance.scheduleUpload();
+        this.reportTravelLevel(4);
+    }
+
+    private reportTravelLevel(type: 1 | 2 | 3 | 4, reason?: string): void {
         // 旅行关卡独立于主线和活动关卡，使用 10001 起的连续编号区分数据。
-        const level = TRAVEL_LEVEL_ID_START + this.level - 1;
+        const level = this.travelLevelId();
         const data: Record<string, unknown> = {
             event: SDKEvent?.level ?? 'level',
             type,
@@ -498,11 +525,16 @@ export class UITravelLayer extends Component {
         this.clearCount = 0;
         this.comboTimes = 0;
         this.elapsedTime = 0;
+        this.adCount = 0;
         const restored = resume && this.restoreSnapshot();
         this.dialog?.destroy();
         this.dialog = null;
         this.state = 'playing';
         this.reportTravelLevel(1);
+        window.dnSDK?.track?.('LEVEL_ENTER', {
+            enter_level_name: `旅行${this.level}`,
+            level_id: this.travelLevelId(),
+        });
         const iqLabel = this.node.getChildByName('iqLabel');
         if (iqLabel) iqLabel.active = true;
         this.renderBoard();
@@ -975,6 +1007,7 @@ export class UITravelLayer extends Component {
         tile.item?.enableTileTouch();
         MahjongItem.refreshLayerDisplayOrder(parent);
         this.undoLeft--;
+        this.reportTravelPropUse('undo', this.undoLeft);
         this.state = 'playing';
         this.refreshTray();
         this.refreshBlocked();
@@ -1025,6 +1058,7 @@ export class UITravelLayer extends Component {
             this.refreshTileFace(tile);
         });
         this.shuffleLeft--;
+        this.reportTravelPropUse('shuffle', this.shuffleLeft);
         this.refreshBlocked();
         this.refreshHud();
         this.saveSnapshot();
@@ -1039,6 +1073,7 @@ export class UITravelLayer extends Component {
             const candidates = visible.filter(tile => tile.type === type);
             if (needed < 1 || candidates.length < needed) continue;
             this.magnetLeft--;
+            this.reportTravelPropUse('magnet', this.magnetLeft);
             this.collectTiles(candidates.slice(0, needed));
             return;
         }
@@ -1065,6 +1100,9 @@ export class UITravelLayer extends Component {
             this.slotUnlockPending = false;
             this.capacity++;
             this.boxLeft = 0;
+            this.recordCompletedTravelAd();
+            this.reportTravelPropUse('slot_unlock', UNLOCKED_CAPACITY - this.capacity);
+            window.dnSDK?.track?.('USE_ITEM', { item_source: 2 });
             AudioManager.instance.playOneShot(AudioClipNames.pageOpen);
             this.refreshTray();
             this.refreshHud();
@@ -1254,6 +1292,11 @@ export class UITravelLayer extends Component {
         this.winSettled = true;
         this.state = 'win';
         this.reportTravelLevel(3);
+        window.dnSDK?.track?.('LEVEL_PASS', {
+            duration: Math.max(0, Math.ceil(this.elapsedTime)),
+            level_id: this.travelLevelId(),
+            ad_cnt: this.adCount,
+        });
         this.resetFeedback();
         this.refreshHud();
         const iqLabel = this.node.getChildByName('iqLabel');
@@ -1345,6 +1388,7 @@ export class UITravelLayer extends Component {
                 adPending = false;
                 this.dialog = null;
                 popup.close();
+                this.recordCompletedTravelAd();
                 this.continueAfterFailure();
             }, () => {
                 if (!adPending || currentRequest !== requestId || !dialog.isValid
@@ -1418,6 +1462,7 @@ export class UITravelLayer extends Component {
             clearCount: this.clearCount,
             comboTimes: this.comboTimes,
             elapsedTime: this.elapsedTime,
+            adCount: this.adCount,
         };
         StorageManager.instance.setItem(StorageKey.TravelSnapshot, JSON.stringify(snapshot));
         ArchiveManager.instance.scheduleUpload();
@@ -1467,6 +1512,7 @@ export class UITravelLayer extends Component {
             for (let i = 0; i < cleared; i++) this.iqValue += Math.min(0.4 + i * 0.3, 3.1);
             this.iqValue = Math.round(this.iqValue * 10) / 10;
             this.elapsedTime = Number.isFinite(snap.elapsedTime) ? Math.max(0, snap.elapsedTime!) : 0;
+            this.adCount = Number.isSafeInteger(snap.adCount) ? Math.max(0, snap.adCount!) : 0;
             return true;
         } catch (error) {
             console.warn('UITravelLayer: invalid travel snapshot', error);

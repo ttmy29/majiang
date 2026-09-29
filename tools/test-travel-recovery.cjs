@@ -9,6 +9,7 @@ let remaining = 0;
 let popup = null;
 const videos = [];
 let grantCalls = 0;
+let adCount = 0;
 class Button { constructor() { this.interactable = true; } }
 class Node {
     static EventType = { TOUCH_END: 'touch-end' };
@@ -43,7 +44,10 @@ const mocks = {
     cc: { Button, Node },
     './AudioManager': { AudioManager: { instance: { playClick() { actions.push('click'); } } } },
     './LayerManager': { LayerManager: { instance: layer } },
-    './ProgressManager': { ProgressManager: { refillTravelAttempts() { grantCalls++; remaining = 5; } } },
+    './ProgressManager': { ProgressManager: {
+        addGlobalAdCount() { adCount++; },
+        refillTravelAttempts() { grantCalls++; remaining = 5; },
+    } },
     '../../../loading/SDKManager': { SDKManager: { instance: { showVideoAd(success, failure, key) {
         videos.push({ success, failure, key });
     } } } },
@@ -69,6 +73,7 @@ first.emit(ThreePopupEvent.RecoverRequested);
 assert.equal(videos.length, 1, 'pending video cannot be queued twice');
 videos[0].failure();
 assert.equal(remaining, 0, 'early close does not reward');
+assert.equal(adCount, 0, 'failed video does not count');
 assert.equal(first.isValid, true, 'failed ad keeps popup open');
 assert.equal(first.getChildByPath('view/recoverButton').button.interactable, true);
 videos[0].success();
@@ -77,10 +82,12 @@ first.emit(ThreePopupEvent.RecoverRequested);
 assert.equal(videos.length, 2);
 videos[1].success();
 assert.equal(remaining, 5);
+assert.equal(adCount, 1, 'completed recovery video counts once');
 assert.equal(first.isValid, false);
 assert.equal(recovered, 1);
 videos[1].success();
 assert.equal(grantCalls, 1, 'duplicate success cannot grant twice');
+assert.equal(adCount, 1, 'duplicate success cannot count twice');
 assert.equal(recovered, 1);
 remaining = 0;
 const second = TravelRecoveryManager.show(() => recovered++);
