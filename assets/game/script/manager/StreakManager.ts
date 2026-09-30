@@ -621,7 +621,7 @@ export class StreakManager {
         const saved = this.loadDiffState();
         const sameLevel = !!saved && saved.level === level;
 
-        // 主线前 180 关固定使用同号盘面。
+        // 430 关固定盘面优先；缺号时沿用原有 180 关或难度盘面映射。
         if (await shouldUseTestMainLevel(level)) {
             const plan: LevelStartPlan = { tier: 'base', boardId: level };
             this.saveDiffState({ level, tier: plan.tier, boardId: plan.boardId, failed: false });

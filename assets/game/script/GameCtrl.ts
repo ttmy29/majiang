@@ -562,7 +562,7 @@ export class GameCtrl extends Component {
             releaseActivityOutsideWindow(boardId, 10);
             return true;
         }
-        // 前 180 关固定使用 config_levels_test180 的同号盘面；之后按原关卡映射流程出题。
+        // 同号关优先使用 config_levels_test430；缺号时沿用原有关卡配置流程。
         // 连胜仍控制难度档，同关盘面会复用，失败重开会按清零后的连胜重新降档。
         const plan = await StreakManager.resolveLevelPlanForStart(level, { forceReroll });
         const json = await ensureLevelJson(plan.boardId, plan.tier);
