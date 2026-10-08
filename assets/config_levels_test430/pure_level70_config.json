@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 70,
   "level_json": "level_170",
   "index_config": {
@@ -18,47 +18,47 @@
     "task_count": 24,
     "chain_count": 0,
     "rows_per_layer": [
-      15,
-      15,
-      15,
-      15,
-      15,
-      15,
-      15,
-      15
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16
     ],
     "cols_per_row_minmax": [
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ]
     ],
     "tile_counts": {
@@ -79,12 +79,42 @@
       "6002": 6
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
+    "pressure_tuning": "普通困难_V25_distribution_20261008",
     "pressure_peak": 5,
-    "pressure_windows": 6,
-    "pressure_average": 2.39,
+    "pressure_windows": 7,
+    "pressure_average": 2.5672,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 12,
+      "1": 12,
+      "2": 10,
+      "3": 10,
+      "4": 10,
+      "5": 8,
+      "6": 8,
+      "7": 2
+    },
+    "iron_count": 0,
+    "flip_count": 0,
+    "planned_difficulty": "普通困难",
+    "flow_version": "V26_51_100_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 3,
+    "random_full0_rate_1500": 0.35867,
+    "wrong_route_first_full_ratio": 0.29167,
+    "wrong_route_failure_progress_ratio": 0.31944,
+    "failure_point_count": 6,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ],
+    "constructive_policy": "later"
   },
   "positions": [
     {
