@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 46,
   "level_json": "level_96",
   "index_config": {
@@ -18,32 +18,32 @@
     "task_count": 31,
     "chain_count": 3,
     "rows_per_layer": [
-      12,
-      12,
-      12,
-      12,
-      12
+      13,
+      13,
+      13,
+      13,
+      13
     ],
     "cols_per_row_minmax": [
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ]
     ],
     "tile_counts": {
@@ -64,19 +64,46 @@
       "6004": 6
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
-    "pressure_peak": 4,
-    "pressure_windows": 4,
-    "pressure_average": 1.42,
+    "pressure_tuning": "普通_distribution_adjustment_20260930",
+    "pressure_peak": 5,
+    "pressure_windows": 6,
+    "pressure_average": 2.4493,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 25,
+      "1": 28,
+      "2": 20,
+      "3": 16,
+      "4": 4
+    },
+    "iron_count": 0,
+    "flip_count": 0,
+    "planned_difficulty": "普通",
+    "flow_version": "V25_first50_lower_normal_four_hard_profiles",
+    "fixed_success_count": 4,
+    "random_full0_rate_2000": 0.4205,
+    "wrong_route_first_full_ratio": 0.19355,
+    "wrong_route_failure_progress_ratio": 0.33333,
+    "failure_point_count": 6,
+    "failure_point_bins": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "constructive_policy": "cheapest",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null
   },
   "positions": [
     {
       "z_layer": 0,
       "x_col": 0,
       "y_row": 0,
-      "tile_id": 1001
+      "tile_id": 6004
     },
     {
       "z_layer": 0,
@@ -88,7 +115,7 @@
       "z_layer": 0,
       "x_col": 4,
       "y_row": 0,
-      "tile_id": 3001
+      "tile_id": 2007
     },
     {
       "z_layer": 0,
@@ -100,7 +127,7 @@
       "z_layer": 0,
       "x_col": 10,
       "y_row": 0,
-      "tile_id": 2007
+      "tile_id": 5002
     },
     {
       "z_layer": 0,
@@ -208,7 +235,7 @@
       "z_layer": 0,
       "x_col": 10,
       "y_row": 9,
-      "tile_id": 5002
+      "tile_id": 1006
     },
     {
       "z_layer": 0,
@@ -226,7 +253,7 @@
       "z_layer": 1,
       "x_col": 1,
       "y_row": 0,
-      "tile_id": 2007
+      "tile_id": 3001
     },
     {
       "z_layer": 1,
@@ -286,7 +313,7 @@
       "z_layer": 1,
       "x_col": 9,
       "y_row": 3,
-      "tile_id": 4002
+      "tile_id": 2003
     },
     {
       "z_layer": 1,
@@ -412,13 +439,13 @@
       "z_layer": 2,
       "x_col": 8,
       "y_row": 0,
-      "tile_id": 1006
+      "tile_id": 3008
     },
     {
       "z_layer": 2,
       "x_col": 10,
       "y_row": 0,
-      "tile_id": 6004
+      "tile_id": 1001
     },
     {
       "z_layer": 2,
@@ -436,7 +463,7 @@
       "z_layer": 2,
       "x_col": 6,
       "y_row": 3,
-      "tile_id": 1006
+      "tile_id": 5002
     },
     {
       "z_layer": 2,
@@ -454,7 +481,7 @@
       "z_layer": 2,
       "x_col": 2,
       "y_row": 6,
-      "tile_id": 5001
+      "tile_id": 3008
     },
     {
       "z_layer": 2,
@@ -538,7 +565,7 @@
       "z_layer": 3,
       "x_col": 3,
       "y_row": 3,
-      "tile_id": 3008
+      "tile_id": 1006
     },
     {
       "z_layer": 3,
@@ -574,7 +601,7 @@
       "z_layer": 3,
       "x_col": 7,
       "y_row": 6,
-      "tile_id": 5002
+      "tile_id": 2007
     },
     {
       "z_layer": 3,
@@ -586,13 +613,13 @@
       "z_layer": 3,
       "x_col": 3,
       "y_row": 9,
-      "tile_id": 3008
+      "tile_id": 5001
     },
     {
       "z_layer": 3,
       "x_col": 5,
       "y_row": 9,
-      "tile_id": 2003
+      "tile_id": 4002
     },
     {
       "z_layer": 3,
@@ -636,17 +663,17 @@
     "data": [
       [
         [
-          1001,
+          6004,
           0,
           1006,
           0,
-          3001,
+          2007,
           0,
           0,
           0,
           5001,
           0,
-          2007,
+          5002,
           0,
           2001,
           0
@@ -790,7 +817,7 @@
           0,
           5002,
           0,
-          5002,
+          1006,
           0,
           1009,
           0
@@ -847,7 +874,7 @@
       [
         [
           0,
-          2007,
+          3001,
           0,
           4003,
           0,
@@ -903,7 +930,7 @@
           0,
           0,
           0,
-          4002,
+          2003,
           0,
           3001,
           0,
@@ -1064,9 +1091,9 @@
           0,
           1009,
           0,
-          1006,
+          3008,
           0,
-          6004,
+          1001,
           0,
           0,
           0
@@ -1110,7 +1137,7 @@
           0,
           1001,
           0,
-          1006,
+          5002,
           0,
           1001,
           0,
@@ -1154,7 +1181,7 @@
         [
           0,
           0,
-          5001,
+          3008,
           0,
           1001,
           0,
@@ -1317,7 +1344,7 @@
           0,
           0,
           0,
-          3008,
+          1006,
           0,
           3002,
           0,
@@ -1369,7 +1396,7 @@
           0,
           4003,
           0,
-          5002,
+          2007,
           0,
           3008,
           0,
@@ -1413,9 +1440,9 @@
           0,
           0,
           0,
-          3008,
+          5001,
           0,
-          2003,
+          4002,
           0,
           5002,
           0,
@@ -1694,29 +1721,29 @@
         6002,
         5002,
         4003,
-        2003,
         1001,
+        2003,
         3002,
         2007,
         1009,
-        5002,
         3008,
+        5002,
         3001,
         4002,
         1006,
-        2001,
+        3001,
         6002,
         1001,
         6004,
         5002,
         1006,
-        3002,
-        3001,
-        1009,
-        5001,
-        2007,
         6004,
+        3002,
+        2007,
+        2001,
+        1009,
         2003,
+        5001,
         4003
       ]
     ],
