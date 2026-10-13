@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 137,
   "level_json": "level_210",
   "index_config": {
@@ -18,37 +18,37 @@
     "task_count": 28,
     "chain_count": 0,
     "rows_per_layer": [
-      19,
-      19,
-      19,
-      19,
-      19,
-      19
+      20,
+      20,
+      20,
+      20,
+      20,
+      20
     ],
     "cols_per_row_minmax": [
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ]
     ],
     "tile_counts": {
@@ -72,19 +72,45 @@
       "6003": 3
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
-    "pressure_peak": 4,
+    "pressure_tuning": "普通_V25_distribution_20261013",
+    "pressure_peak": 5,
     "pressure_windows": 5,
-    "pressure_average": 1.71,
+    "pressure_average": 2.4789,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 16,
+      "1": 16,
+      "2": 16,
+      "3": 16,
+      "4": 12,
+      "5": 8
+    },
+    "iron_count": 0,
+    "flip_count": 0,
+    "planned_difficulty": "普通",
+    "flow_version": "V27_101_151_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 4,
+    "random_full0_rate_1500": 0.418,
+    "wrong_route_first_full_ratio": 0.34524,
+    "wrong_route_failure_progress_ratio": 0.39286,
+    "failure_point_count": 4,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      6
+    ],
+    "constructive_policy": "poor"
   },
   "positions": [
     {
       "z_layer": 0,
       "x_col": 0,
       "y_row": 3,
-      "tile_id": 4005
+      "tile_id": 4003
     },
     {
       "z_layer": 0,
@@ -132,7 +158,7 @@
       "z_layer": 0,
       "x_col": 2,
       "y_row": 11,
-      "tile_id": 4003
+      "tile_id": 4005
     },
     {
       "z_layer": 0,
@@ -204,7 +230,7 @@
       "z_layer": 1,
       "x_col": 3,
       "y_row": 4,
-      "tile_id": 5003
+      "tile_id": 3003
     },
     {
       "z_layer": 1,
@@ -216,7 +242,7 @@
       "z_layer": 1,
       "x_col": 3,
       "y_row": 6,
-      "tile_id": 2003
+      "tile_id": 1005
     },
     {
       "z_layer": 1,
@@ -246,7 +272,7 @@
       "z_layer": 1,
       "x_col": 11,
       "y_row": 14,
-      "tile_id": 1005
+      "tile_id": 2003
     },
     {
       "z_layer": 1,
@@ -288,7 +314,7 @@
       "z_layer": 2,
       "x_col": 10,
       "y_row": 1,
-      "tile_id": 2003
+      "tile_id": 5003
     },
     {
       "z_layer": 2,
@@ -414,7 +440,7 @@
       "z_layer": 3,
       "x_col": 9,
       "y_row": 4,
-      "tile_id": 1002
+      "tile_id": 2009
     },
     {
       "z_layer": 3,
@@ -444,7 +470,7 @@
       "z_layer": 3,
       "x_col": 3,
       "y_row": 18,
-      "tile_id": 3003
+      "tile_id": 2003
     },
     {
       "z_layer": 3,
@@ -534,7 +560,7 @@
       "z_layer": 4,
       "x_col": 10,
       "y_row": 17,
-      "tile_id": 2009
+      "tile_id": 1002
     },
     {
       "z_layer": 5,
@@ -644,7 +670,7 @@
           0
         ],
         [
-          4005,
+          4003,
           0,
           6001,
           0,
@@ -790,7 +816,7 @@
         [
           0,
           0,
-          4003,
+          4005,
           0,
           0,
           0,
@@ -1027,7 +1053,7 @@
           0,
           0,
           0,
-          5003,
+          3003,
           0,
           0,
           0,
@@ -1063,7 +1089,7 @@
           0,
           0,
           0,
-          2003,
+          1005,
           0,
           0,
           0,
@@ -1215,7 +1241,7 @@
           0,
           0,
           0,
-          1005,
+          2003,
           0,
           0,
           0,
@@ -1342,7 +1368,7 @@
           0,
           0,
           0,
-          2003,
+          5003,
           0,
           4003,
           0,
@@ -1757,7 +1783,7 @@
           0,
           0,
           0,
-          1002,
+          2009,
           0,
           0,
           0,
@@ -2003,7 +2029,7 @@
           0,
           0,
           0,
-          3003,
+          2003,
           0,
           5004,
           0,
@@ -2354,7 +2380,7 @@
           0,
           3008,
           0,
-          2009,
+          1002,
           0,
           0,
           0,
@@ -2766,29 +2792,29 @@
         6001,
         4004,
         1004,
-        5004,
-        3008,
         3009,
+        3008,
+        5004,
         2009,
         5002,
         4003,
         2008,
-        3003,
+        4005,
         6002,
         5003,
         2003,
-        4005,
+        3003,
         6003,
-        1002,
-        3008,
-        4003,
         2008,
+        1002,
+        4003,
+        6002,
         6001,
         1005,
         4005,
         2003,
         2009,
-        6002,
+        3008,
         1005,
         5003
       ]

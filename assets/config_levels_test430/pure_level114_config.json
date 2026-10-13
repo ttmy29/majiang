@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 114,
   "level_json": "level_199",
   "index_config": {
@@ -18,37 +18,37 @@
     "task_count": 30,
     "chain_count": 0,
     "rows_per_layer": [
-      17,
-      17,
-      17,
-      17,
-      17,
-      17
+      18,
+      18,
+      18,
+      18,
+      18,
+      18
     ],
     "cols_per_row_minmax": [
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ]
     ],
     "tile_counts": {
@@ -69,12 +69,38 @@
       "6003": 6
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
-    "pressure_peak": 4,
-    "pressure_windows": 6,
-    "pressure_average": 1.68,
+    "pressure_tuning": "普通_V25_distribution_20261013",
+    "pressure_peak": 5,
+    "pressure_windows": 7,
+    "pressure_average": 2.0658,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 21,
+      "1": 20,
+      "2": 19,
+      "3": 14,
+      "4": 8,
+      "5": 8
+    },
+    "iron_count": 0,
+    "flip_count": 0,
+    "planned_difficulty": "普通",
+    "flow_version": "V27_101_151_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 3,
+    "random_full0_rate_1500": 0.36733,
+    "wrong_route_first_full_ratio": 0.17778,
+    "wrong_route_failure_progress_ratio": 0.22222,
+    "failure_point_count": 4,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "constructive_policy": "poor"
   },
   "positions": [
     {
@@ -249,7 +275,7 @@
       "z_layer": 1,
       "x_col": 1,
       "y_row": 5,
-      "tile_id": 6002
+      "tile_id": 3003
     },
     {
       "z_layer": 1,
@@ -285,7 +311,7 @@
       "z_layer": 1,
       "x_col": 11,
       "y_row": 13,
-      "tile_id": 2009
+      "tile_id": 1002
     },
     {
       "z_layer": 1,
@@ -315,7 +341,7 @@
       "z_layer": 1,
       "x_col": 9,
       "y_row": 15,
-      "tile_id": 1002
+      "tile_id": 5002
     },
     {
       "z_layer": 1,
@@ -339,13 +365,13 @@
       "z_layer": 2,
       "x_col": 6,
       "y_row": 2,
-      "tile_id": 2009
+      "tile_id": 4002
     },
     {
       "z_layer": 2,
       "x_col": 8,
       "y_row": 2,
-      "tile_id": 3003
+      "tile_id": 6002
     },
     {
       "z_layer": 2,
@@ -369,7 +395,7 @@
       "z_layer": 2,
       "x_col": 2,
       "y_row": 8,
-      "tile_id": 5002
+      "tile_id": 2009
     },
     {
       "z_layer": 2,
@@ -411,7 +437,7 @@
       "z_layer": 2,
       "x_col": 2,
       "y_row": 14,
-      "tile_id": 5002
+      "tile_id": 4007
     },
     {
       "z_layer": 2,
@@ -435,7 +461,7 @@
       "z_layer": 2,
       "x_col": 10,
       "y_row": 14,
-      "tile_id": 4007
+      "tile_id": 5002
     },
     {
       "z_layer": 3,
@@ -489,7 +515,7 @@
       "z_layer": 3,
       "x_col": 9,
       "y_row": 9,
-      "tile_id": 2007
+      "tile_id": 6002
     },
     {
       "z_layer": 3,
@@ -501,7 +527,7 @@
       "z_layer": 3,
       "x_col": 3,
       "y_row": 13,
-      "tile_id": 4002
+      "tile_id": 2001
     },
     {
       "z_layer": 3,
@@ -519,7 +545,7 @@
       "z_layer": 3,
       "x_col": 9,
       "y_row": 13,
-      "tile_id": 6002
+      "tile_id": 2007
     },
     {
       "z_layer": 4,
@@ -561,7 +587,7 @@
       "z_layer": 4,
       "x_col": 6,
       "y_row": 12,
-      "tile_id": 2001
+      "tile_id": 2009
     },
     {
       "z_layer": 4,
@@ -994,7 +1020,7 @@
         ],
         [
           0,
-          6002,
+          3003,
           0,
           0,
           0,
@@ -1132,7 +1158,7 @@
           0,
           0,
           0,
-          2009,
+          1002,
           0,
           0
         ],
@@ -1162,7 +1188,7 @@
           0,
           2001,
           0,
-          1002,
+          5002,
           0,
           1002,
           0,
@@ -1241,9 +1267,9 @@
           0,
           2001,
           0,
-          2009,
+          4002,
           0,
-          3003,
+          6002,
           0,
           3005,
           0,
@@ -1333,7 +1359,7 @@
         [
           0,
           0,
-          5002,
+          2009,
           0,
           1004,
           0,
@@ -1429,7 +1455,7 @@
         [
           0,
           0,
-          5002,
+          4007,
           0,
           6002,
           0,
@@ -1437,7 +1463,7 @@
           0,
           2001,
           0,
-          4007,
+          5002,
           0,
           0,
           0
@@ -1646,7 +1672,7 @@
           0,
           3005,
           0,
-          2007,
+          6002,
           0,
           0,
           0,
@@ -1704,13 +1730,13 @@
           0,
           0,
           0,
-          4002,
+          2001,
           0,
           6002,
           0,
           6003,
           0,
-          6002,
+          2007,
           0,
           0,
           0,
@@ -1981,7 +2007,7 @@
           0,
           1008,
           0,
-          2001,
+          2009,
           0,
           1002,
           0,
@@ -2366,20 +2392,20 @@
       [
         6003,
         2009,
-        5001,
         1002,
-        1008,
-        5002,
+        5001,
         4002,
-        3005,
+        5002,
         2007,
+        3005,
+        1008,
+        1004,
         6002,
-        2001,
         3009,
         1004,
         4007,
         3003,
-        1004,
+        2001,
         4007,
         1008,
         6002,
@@ -2391,9 +2417,9 @@
         4002,
         3003,
         2007,
-        5002,
         3005,
-        5001
+        5001,
+        5002
       ]
     ],
     "taskNum": [

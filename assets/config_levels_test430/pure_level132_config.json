@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 132,
   "level_json": "level_207",
   "index_config": {
@@ -18,37 +18,37 @@
     "task_count": 25,
     "chain_count": 2,
     "rows_per_layer": [
-      15,
-      15,
-      15,
-      15,
-      15,
-      15
+      16,
+      16,
+      16,
+      16,
+      16,
+      16
     ],
     "cols_per_row_minmax": [
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ]
     ],
     "tile_counts": {
@@ -67,12 +67,39 @@
       "6004": 6
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
-    "pressure_peak": 4,
-    "pressure_windows": 6,
-    "pressure_average": 1.66,
+    "pressure_tuning": "普通_V25_distribution_20261013",
+    "pressure_peak": 5,
+    "pressure_windows": 3,
+    "pressure_average": 2.0484,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 20,
+      "1": 18,
+      "2": 14,
+      "3": 10,
+      "4": 8,
+      "5": 5
+    },
+    "iron_count": 4,
+    "flip_count": 0,
+    "planned_difficulty": "普通",
+    "flow_version": "V27_101_151_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 4,
+    "random_full0_rate_1500": 0.20133,
+    "wrong_route_first_full_ratio": 0.24,
+    "wrong_route_failure_progress_ratio": 0.29333,
+    "failure_point_count": 5,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "constructive_policy": "later"
   },
   "positions": [
     {
