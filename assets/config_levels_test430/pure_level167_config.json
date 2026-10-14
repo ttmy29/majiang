@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 167,
   "level_json": "level_147",
   "index_config": {
@@ -18,42 +18,42 @@
     "task_count": 24,
     "chain_count": 6,
     "rows_per_layer": [
-      17,
-      17,
-      17,
-      17,
-      17,
-      17,
-      17
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18
     ],
     "cols_per_row_minmax": [
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ]
     ],
     "tile_counts": {
@@ -75,19 +75,45 @@
     "iron_count": 2,
     "flip_count": 0,
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
-    "pressure_peak": 4,
+    "pressure_tuning": "普通困难_V25_distribution_20261014",
+    "pressure_peak": 5,
     "pressure_windows": 5,
-    "pressure_average": 1.92,
+    "pressure_average": 2.5192,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 12,
+      "1": 12,
+      "2": 12,
+      "3": 12,
+      "4": 12,
+      "5": 8,
+      "6": 4
+    },
+    "planned_difficulty": "普通困难",
+    "flow_version": "V28_151_200_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 3,
+    "random_full0_rate_1500": 0.324,
+    "wrong_route_first_full_ratio": 0.29167,
+    "wrong_route_failure_progress_ratio": 0.54167,
+    "failure_point_count": 5,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "constructive_policy": "earlier"
   },
   "positions": [
     {
       "z_layer": 0,
       "x_col": 0,
       "y_row": 0,
-      "tile_id": 3009
+      "tile_id": 2004
     },
     {
       "z_layer": 0,
@@ -117,13 +143,13 @@
       "z_layer": 0,
       "x_col": 0,
       "y_row": 4,
-      "tile_id": 1004
+      "tile_id": 1005
     },
     {
       "z_layer": 0,
       "x_col": 14,
       "y_row": 12,
-      "tile_id": 4007
+      "tile_id": 3009
     },
     {
       "z_layer": 0,
@@ -141,7 +167,7 @@
       "z_layer": 0,
       "x_col": 2,
       "y_row": 16,
-      "tile_id": 3009
+      "tile_id": 4007
     },
     {
       "z_layer": 0,
@@ -171,13 +197,13 @@
       "z_layer": 1,
       "x_col": 11,
       "y_row": 1,
-      "tile_id": 1005
+      "tile_id": 1004
     },
     {
       "z_layer": 1,
       "x_col": 13,
       "y_row": 1,
-      "tile_id": 2004
+      "tile_id": 3009
     },
     {
       "z_layer": 1,
@@ -243,13 +269,13 @@
       "z_layer": 2,
       "x_col": 10,
       "y_row": 2,
-      "tile_id": 5004
+      "tile_id": 2001
     },
     {
       "z_layer": 2,
       "x_col": 12,
       "y_row": 2,
-      "tile_id": 6002
+      "tile_id": 2001
     },
     {
       "z_layer": 2,
@@ -273,7 +299,7 @@
       "z_layer": 2,
       "x_col": 12,
       "y_row": 12,
-      "tile_id": 4006
+      "tile_id": 6002
     },
     {
       "z_layer": 2,
@@ -339,7 +365,7 @@
       "z_layer": 3,
       "x_col": 11,
       "y_row": 9,
-      "tile_id": 2001
+      "tile_id": 2004
     },
     {
       "z_layer": 3,
@@ -351,7 +377,7 @@
       "z_layer": 3,
       "x_col": 3,
       "y_row": 13,
-      "tile_id": 2001
+      "tile_id": 4006
     },
     {
       "z_layer": 3,
@@ -411,7 +437,7 @@
       "z_layer": 4,
       "x_col": 10,
       "y_row": 10,
-      "tile_id": 2004
+      "tile_id": 5004
     },
     {
       "z_layer": 4,
@@ -459,7 +485,7 @@
       "z_layer": 5,
       "x_col": 7,
       "y_row": 5,
-      "tile_id": 1004
+      "tile_id": 4006
     },
     {
       "z_layer": 5,
@@ -507,7 +533,7 @@
       "z_layer": 6,
       "x_col": 6,
       "y_row": 12,
-      "tile_id": 4006
+      "tile_id": 1004
     },
     {
       "z_layer": 6,
@@ -521,7 +547,7 @@
     "data": [
       [
         [
-          3009,
+          2004,
           0,
           0,
           0,
@@ -593,7 +619,7 @@
           0
         ],
         [
-          1004,
+          1005,
           0,
           0,
           0,
@@ -750,68 +776,68 @@
           0,
           0,
           0,
-          0,
-          4007,
-          0
-        ],
-        [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          4007,
-          0
-        ],
-        [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          4007,
           0,
           3009,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          4007,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          4007,
+          0,
+          4007,
           0,
           6002,
           0,
@@ -876,9 +902,9 @@
           0,
           1005,
           0,
-          1005,
+          1004,
           0,
-          2004,
+          3009,
           0,
           0
         ],
@@ -1219,9 +1245,9 @@
           0,
           5004,
           0,
-          5004,
+          2001,
           0,
-          6002,
+          2001,
           0,
           0,
           0
@@ -1401,7 +1427,7 @@
           0,
           0,
           0,
-          4006,
+          6002,
           0,
           0,
           0
@@ -1672,7 +1698,7 @@
           0,
           0,
           0,
-          2001,
+          2004,
           0,
           0,
           0,
@@ -1736,7 +1762,7 @@
           0,
           0,
           0,
-          2001,
+          4006,
           0,
           1005,
           0,
@@ -2015,7 +2041,7 @@
           0,
           0,
           0,
-          2004,
+          5004,
           0,
           0,
           0,
@@ -2248,7 +2274,7 @@
           0,
           1004,
           0,
-          1004,
+          4006,
           0,
           6003,
           0,
@@ -2699,7 +2725,7 @@
           0,
           0,
           0,
-          4006,
+          1004,
           0,
           4006,
           0,

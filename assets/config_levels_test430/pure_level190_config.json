@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 190,
   "level_json": "level_83",
   "index_config": {
@@ -18,32 +18,32 @@
     "task_count": 32,
     "chain_count": 0,
     "rows_per_layer": [
-      11,
-      11,
-      11,
-      11,
-      11
+      12,
+      12,
+      12,
+      12,
+      12
     ],
     "cols_per_row_minmax": [
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ]
     ],
     "tile_counts": {
@@ -64,19 +64,45 @@
       "6004": 6
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
-    "pressure_peak": 4,
-    "pressure_windows": 5,
-    "pressure_average": 1.72,
+    "pressure_tuning": "普通困难_V25_distribution_20261014",
+    "pressure_peak": 5,
+    "pressure_windows": 8,
+    "pressure_average": 2.3099,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 30,
+      "1": 24,
+      "2": 19,
+      "3": 14,
+      "4": 9
+    },
+    "iron_count": 0,
+    "flip_count": 0,
+    "planned_difficulty": "普通困难",
+    "flow_version": "V28_151_200_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 3,
+    "random_full0_rate_1500": 0.04,
+    "wrong_route_first_full_ratio": 0.26042,
+    "wrong_route_failure_progress_ratio": 0.33333,
+    "failure_point_count": 5,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "constructive_policy": "cheapest"
   },
   "positions": [
     {
       "z_layer": 0,
       "x_col": 0,
       "y_row": 0,
-      "tile_id": 1009
+      "tile_id": 6004
     },
     {
       "z_layer": 0,
@@ -172,7 +198,7 @@
       "z_layer": 0,
       "x_col": 4,
       "y_row": 4,
-      "tile_id": 6001
+      "tile_id": 2001
     },
     {
       "z_layer": 0,
@@ -184,7 +210,7 @@
       "z_layer": 0,
       "x_col": 8,
       "y_row": 4,
-      "tile_id": 1009
+      "tile_id": 5002
     },
     {
       "z_layer": 0,
@@ -208,7 +234,7 @@
       "z_layer": 0,
       "x_col": 4,
       "y_row": 6,
-      "tile_id": 2002
+      "tile_id": 5004
     },
     {
       "z_layer": 0,
@@ -226,7 +252,7 @@
       "z_layer": 0,
       "x_col": 10,
       "y_row": 6,
-      "tile_id": 2002
+      "tile_id": 2004
     },
     {
       "z_layer": 0,
@@ -256,7 +282,7 @@
       "z_layer": 1,
       "x_col": 1,
       "y_row": 1,
-      "tile_id": 4006
+      "tile_id": 1003
     },
     {
       "z_layer": 1,
@@ -268,13 +294,13 @@
       "z_layer": 1,
       "x_col": 5,
       "y_row": 1,
-      "tile_id": 5002
+      "tile_id": 1009
     },
     {
       "z_layer": 1,
       "x_col": 7,
       "y_row": 1,
-      "tile_id": 2004
+      "tile_id": 2002
     },
     {
       "z_layer": 1,
@@ -292,7 +318,7 @@
       "z_layer": 1,
       "x_col": 1,
       "y_row": 3,
-      "tile_id": 1001
+      "tile_id": 2002
     },
     {
       "z_layer": 1,
@@ -364,7 +390,7 @@
       "z_layer": 1,
       "x_col": 3,
       "y_row": 7,
-      "tile_id": 3005
+      "tile_id": 5002
     },
     {
       "z_layer": 1,
@@ -382,7 +408,7 @@
       "z_layer": 1,
       "x_col": 9,
       "y_row": 7,
-      "tile_id": 2001
+      "tile_id": 6001
     },
     {
       "z_layer": 1,
@@ -394,19 +420,19 @@
       "z_layer": 1,
       "x_col": 7,
       "y_row": 9,
-      "tile_id": 6004
+      "tile_id": 1009
     },
     {
       "z_layer": 2,
       "x_col": 2,
       "y_row": 2,
-      "tile_id": 2001
+      "tile_id": 1009
     },
     {
       "z_layer": 2,
       "x_col": 4,
       "y_row": 2,
-      "tile_id": 5004
+      "tile_id": 3003
     },
     {
       "z_layer": 2,
@@ -490,7 +516,7 @@
       "z_layer": 2,
       "x_col": 4,
       "y_row": 8,
-      "tile_id": 2002
+      "tile_id": 4006
     },
     {
       "z_layer": 2,
@@ -508,7 +534,7 @@
       "z_layer": 2,
       "x_col": 6,
       "y_row": 10,
-      "tile_id": 5002
+      "tile_id": 3005
     },
     {
       "z_layer": 3,
@@ -520,13 +546,13 @@
       "z_layer": 3,
       "x_col": 5,
       "y_row": 3,
-      "tile_id": 1009
+      "tile_id": 2004
     },
     {
       "z_layer": 3,
       "x_col": 7,
       "y_row": 3,
-      "tile_id": 1003
+      "tile_id": 1001
     },
     {
       "z_layer": 3,
@@ -538,7 +564,7 @@
       "z_layer": 3,
       "x_col": 3,
       "y_row": 5,
-      "tile_id": 3003
+      "tile_id": 5004
     },
     {
       "z_layer": 3,
@@ -574,7 +600,7 @@
       "z_layer": 3,
       "x_col": 7,
       "y_row": 7,
-      "tile_id": 1009
+      "tile_id": 2001
     },
     {
       "z_layer": 3,
@@ -598,13 +624,13 @@
       "z_layer": 4,
       "x_col": 4,
       "y_row": 4,
-      "tile_id": 2004
+      "tile_id": 6004
     },
     {
       "z_layer": 4,
       "x_col": 6,
       "y_row": 4,
-      "tile_id": 6004
+      "tile_id": 2004
     },
     {
       "z_layer": 4,
@@ -628,7 +654,7 @@
       "z_layer": 4,
       "x_col": 8,
       "y_row": 6,
-      "tile_id": 5004
+      "tile_id": 2002
     },
     {
       "z_layer": 4,
@@ -640,7 +666,7 @@
       "z_layer": 4,
       "x_col": 6,
       "y_row": 8,
-      "tile_id": 2004
+      "tile_id": 1009
     },
     {
       "z_layer": 4,
@@ -654,7 +680,7 @@
     "data": [
       [
         [
-          1009,
+          6004,
           0,
           4004,
           0,
@@ -722,11 +748,11 @@
           0,
           3002,
           0,
-          6001,
+          2001,
           0,
           3002,
           0,
-          1009,
+          5002,
           0,
           3005,
           0,
@@ -754,13 +780,13 @@
           0,
           4006,
           0,
-          2002,
+          5004,
           0,
           4006,
           0,
           4006,
           0,
-          2002,
+          2004,
           0,
           0,
           0
@@ -865,13 +891,13 @@
         ],
         [
           0,
-          4006,
+          1003,
           0,
           5004,
           0,
-          5002,
+          1009,
           0,
-          2004,
+          2002,
           0,
           2004,
           0,
@@ -897,7 +923,7 @@
         ],
         [
           0,
-          1001,
+          2002,
           0,
           5004,
           0,
@@ -963,13 +989,13 @@
           0,
           0,
           0,
-          3005,
+          5002,
           0,
           3005,
           0,
           3003,
           0,
-          2001,
+          6001,
           0,
           0,
           0,
@@ -999,7 +1025,7 @@
           0,
           4006,
           0,
-          6004,
+          1009,
           0,
           0,
           0,
@@ -1076,9 +1102,9 @@
         [
           0,
           0,
-          2001,
+          1009,
           0,
-          5004,
+          3003,
           0,
           6004,
           0,
@@ -1174,7 +1200,7 @@
           0,
           0,
           0,
-          2002,
+          4006,
           0,
           5002,
           0,
@@ -1208,7 +1234,7 @@
           0,
           0,
           0,
-          5002,
+          3005,
           0,
           0,
           0,
@@ -1289,9 +1315,9 @@
           0,
           1009,
           0,
-          1009,
+          2004,
           0,
-          1003,
+          1001,
           0,
           2004,
           0,
@@ -1319,7 +1345,7 @@
           0,
           0,
           0,
-          3003,
+          5004,
           0,
           3003,
           0,
@@ -1355,7 +1381,7 @@
           0,
           1003,
           0,
-          1009,
+          2001,
           0,
           1003,
           0,
@@ -1498,9 +1524,9 @@
           0,
           0,
           0,
-          2004,
-          0,
           6004,
+          0,
+          2004,
           0,
           4004,
           0,
@@ -1534,7 +1560,7 @@
           0,
           4004,
           0,
-          5004,
+          2002,
           0,
           0,
           0,
@@ -1564,7 +1590,7 @@
           0,
           6001,
           0,
-          2004,
+          1009,
           0,
           6004,
           0,
@@ -1634,21 +1660,21 @@
         3002,
         2001,
         3005,
-        6001,
+        1001,
         2002,
         5004,
+        6001,
         2001,
-        1001,
         5002,
         4006,
+        3003,
         6001,
         6004,
-        3005,
         5004,
-        3003,
+        3005,
         2002,
         4006,
-        1001,
+        6001,
         5002,
         3002,
         4006,
@@ -1656,7 +1682,7 @@
         1003,
         4004,
         1009,
-        6001
+        1001
       ]
     ],
     "taskNum": [

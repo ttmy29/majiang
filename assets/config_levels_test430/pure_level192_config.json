@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 192,
   "level_json": "level_237",
   "index_config": {
@@ -18,32 +18,32 @@
     "task_count": 27,
     "chain_count": 2,
     "rows_per_layer": [
-      13,
-      13,
-      13,
-      13,
-      13
+      14,
+      14,
+      14,
+      14,
+      14
     ],
     "cols_per_row_minmax": [
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ],
       [
-        15,
-        15
+        16,
+        16
       ]
     ],
     "tile_counts": {
@@ -64,12 +64,38 @@
       "6004": 6
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
-    "pressure_peak": 4,
+    "pressure_tuning": "普通_V25_distribution_20261014",
+    "pressure_peak": 5,
     "pressure_windows": 5,
-    "pressure_average": 1.51,
+    "pressure_average": 2.0714,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 12,
+      "1": 18,
+      "2": 16,
+      "3": 15,
+      "4": 20
+    },
+    "iron_count": 0,
+    "flip_count": 0,
+    "planned_difficulty": "普通",
+    "flow_version": "V28_151_200_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 3,
+    "random_full0_rate_1500": 0.21333,
+    "wrong_route_first_full_ratio": 0.32099,
+    "wrong_route_failure_progress_ratio": 0.54938,
+    "failure_point_count": 5,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "constructive_policy": "cheapest"
   },
   "positions": [
     {
@@ -160,7 +186,7 @@
       "z_layer": 1,
       "x_col": 7,
       "y_row": 3,
-      "tile_id": 6004
+      "tile_id": 4006
     },
     {
       "z_layer": 1,
@@ -172,7 +198,7 @@
       "z_layer": 1,
       "x_col": 11,
       "y_row": 3,
-      "tile_id": 4006
+      "tile_id": 6004
     },
     {
       "z_layer": 1,
@@ -879,11 +905,11 @@
           0,
           3006,
           0,
-          6004,
+          4006,
           0,
           2005,
           0,
-          4006,
+          6004,
           0,
           0,
           0,
@@ -1849,9 +1875,9 @@
         1003,
         5002,
         5003,
-        3002,
-        2006,
         4005,
+        2006,
+        3002,
         2005,
         3006,
         1007,
