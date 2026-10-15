@@ -7213,6 +7213,10 @@
     "scrollViewNode": {
       "__id__": 92
     },
+    "selfRankBackground": {
+      "__uuid__": "dc025459-e118-4a52-b0d8-bbd62b6c958a@f9941",
+      "__expectedType__": "cc.SpriteFrame"
+    },
     "tierSpriteArr": [
       {
         "__uuid__": "4df071ce-a248-4057-b133-05bfbfaa6ff6@f9941",

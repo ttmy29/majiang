@@ -1,4 +1,4 @@
-import { _decorator, assetManager, Button, Component, EventTouch, ImageAsset, instantiate, Label, Layout, Node, ScrollView, Sprite, SpriteFrame, SubContextView, sys, Texture2D, tween, Tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, assetManager, Button, Component, EventTouch, ImageAsset, instantiate, Label, Layout, Node, ScrollView, Sprite, SpriteFrame, SubContextView, sys, Texture2D, tween, Tween, UIOpacity, UITransform, Vec3, Widget } from 'cc';
 import { AudioManager } from './manager/AudioManager';
 import { SDKManager } from '../../loading/SDKManager';
 import type { JHRankBoard, JHRankEntry } from '../../loading/SDKManager';
@@ -37,6 +37,8 @@ export class UIRankLayer extends Component {
     scrollViewNode: Node = null!;
     @property({ type: [SpriteFrame] })
     public tierSpriteArr: SpriteFrame[] = [];
+    @property(SpriteFrame)
+    selfRankBackground: SpriteFrame | null = null;
 
     private openedByInit = false;
     private isClosing = false;
@@ -46,6 +48,8 @@ export class UIRankLayer extends Component {
     private boundTabButtons: Array<{ node: Node; callback: () => void }> = [];
     private friendRankNode: Node | null = null;
     private friendRankView: SubContextView | null = null;
+    private selfRankFooterNode: Node | null = null;
+    private friendRankTouchY: number | null = null;
     private rankRequestToken = 0;
     private requestingWechatProfile = false;
     private static readonly WECHAT_RANK_PROFILE_KEY = 'mahjong_match_rank_profile';
@@ -73,6 +77,7 @@ export class UIRankLayer extends Component {
     protected onLoad(): void {
         this.initNodeRefs();
         this.initTopRankNodes();
+        this.initSelfRankFooter();
         this.bindTabButtons();
         this.bindCloseButton();
         this.bindRankScrollView();
@@ -107,6 +112,7 @@ export class UIRankLayer extends Component {
     }
 
     protected onDestroy(): void {
+        this.rankRequestToken++;
         if (this.closeButtonNode?.isValid) {
             this.closeButtonNode.off(Button.EventType.CLICK, this.onButonCloseClick, this);
         }
@@ -170,12 +176,37 @@ export class UIRankLayer extends Component {
 
         // top.png 的领奖台位置固定，预制体中的三个占位节点由脚本对齐到对应领奖台。
         const positions = [
-            new Vec3(0, 133.077, 0),
-            new Vec3(-179, 98, 0),
-            new Vec3(179, 82, 0),
+            new Vec3(0, 146.077, 0),
+            new Vec3(-179, 111, 0),
+            new Vec3(179, 95, 0),
         ];
         this.topRankNodes.forEach((rankNode, index) => {
-            if (rankNode) rankNode.setPosition(positions[index]);
+            if (!rankNode) return;
+            rankNode.setPosition(positions[index]);
+            for (const childName of ['headBg', 'defaultHead']) {
+                rankNode.getChildByName(childName)?.getComponent(UITransform)?.setContentSize(78, 78);
+            }
+
+            const name = rankNode.getChildByName('name');
+            if (!name) return;
+            let count = rankNode.getChildByName('count');
+            if (!count) {
+                count = instantiate(name);
+                count.name = 'count';
+                rankNode.addChild(count);
+            }
+            name.setPosition(0, index === 0 ? -66 : -58, 0);
+            count.setPosition(0, index === 0 ? -94 : -86, 0);
+            for (const textNode of [name, count]) {
+                textNode.getComponent(UITransform)?.setContentSize(160, 28);
+                const label = textNode.getComponent(Label);
+                if (label) {
+                    label.fontSize = 23.04;
+                    label.lineHeight = 28;
+                    label.overflow = Label.Overflow.SHRINK;
+                    label.enableWrapText = false;
+                }
+            }
         });
         this.renderTopRankItems([]);
     }
@@ -234,6 +265,7 @@ export class UIRankLayer extends Component {
         this.contentNode.active = true;
         this.clearContentNode();
         this.renderTopRankItems([]);
+        this.renderSelfRankFooter(null);
         this.itemNode.active = false;
 
         if (!this.isWechatGamePlatform()) {
@@ -247,18 +279,24 @@ export class UIRankLayer extends Component {
                 if (requestToken !== this.rankRequestToken) return;
                 const entries = this.resolveServerRankEntries(board);
                 this.logServerRankResponse(index, rankName, board, entries);
-                let rankData = this.limitServerRankData(index, this.toRankItemData(entries, board.myInfo));
-                if (rankData.length <= 0) rankData = this.createDefaultSelfRankData(index);
-                this.renderRankList(index, rankData);
+                const rankData = this.limitServerRankData(index, this.toRankItemData(entries, board.myInfo));
+                const selfRank = board.myInfo
+                    ? { ...this.toRankItemData([board.myInfo], board.myInfo)[0], rank: board.myInfo.rank }
+                    : rankData.find((item) => item.isSelf) ?? null;
+                this.renderRankList(index, rankData, selfRank);
             })
             .catch((err) => {
                 if (requestToken !== this.rankRequestToken) return;
                 console.warn('UIRankLayer: fetch JH rank failed', err);
-                this.renderRankList(index, this.createDefaultSelfRankData(index));
+                this.renderRankList(index, [], null);
             });
     }
 
-    private renderRankList(index: number, rankData: RankItemData[]) {
+    private renderRankList(
+        index: number,
+        rankData: RankItemData[],
+        selfRank: RankItemData | null = rankData.find((item) => item.isSelf) ?? null,
+    ) {
         if (!this.contentNode || !this.itemNode) return;
 
         this.nowIndex = index;
@@ -271,6 +309,7 @@ export class UIRankLayer extends Component {
         const listRankData = sortedRankData.filter(item => !topRankSet.has(item));
 
         this.renderTopRankItems(topRankData);
+        this.renderSelfRankFooter(selfRank);
         this.rankData = listRankData;
         this.prepareVirtualRankList(listRankData.length);
         this.resizeContentNode(listRankData.length);
@@ -291,6 +330,7 @@ export class UIRankLayer extends Component {
             if (!data) return;
 
             this.setLabelString(rankNode.getChildByName('name'), data.name);
+            this.setLabelString(rankNode.getChildByName('count'), this.nowIndex === 2 ? `${data.count}连胜` : `第${data.count}关`);
             this.setAvatar(rankNode, data.avatar);
         });
     }
@@ -389,11 +429,96 @@ export class UIRankLayer extends Component {
     }
 
     private prepareRankItemNode(item: Node) {
+        item.getComponent(UITransform)?.setContentSize(819, 139);
+        for (const name of ['bg1', 'bg2']) {
+            item.getChildByName(name)?.getComponent(UITransform)?.setContentSize(819, 139);
+        }
+        for (const name of ['headBg', 'defaultHead']) {
+            item.getChildByName(name)?.setPosition(-209.5, 0, 0);
+        }
+        item.getChildByName('num')?.setPosition(-331.375, 0, 0);
+        this.configureRankLabel(item.getChildByName('name'), -104.5, 290, Label.HorizontalAlign.LEFT);
+        this.configureRankLabel(item.getChildByName('count'), 388.5, 180, Label.HorizontalAlign.RIGHT);
         const labelNames = ['num', 'name', 'count', 'tierLabel'];
         for (const name of labelNames) {
             const label = item.getChildByName(name)?.getComponent(Label);
             if (label) label.cacheMode = Label.CacheMode.BITMAP;
         }
+    }
+
+    private configureRankLabel(node: Node | null, x: number, width: number, alignment: number) {
+        if (!node) return;
+        const transform = node.getComponent(UITransform);
+        transform?.setAnchorPoint(alignment === Label.HorizontalAlign.LEFT ? 0 : alignment === Label.HorizontalAlign.RIGHT ? 1 : 0.5, 0.5);
+        transform?.setContentSize(width, 70);
+        node.setPosition(x, 0, 0);
+        const label = node.getComponent(Label);
+        if (label) {
+            label.horizontalAlign = alignment;
+            label.overflow = Label.Overflow.SHRINK;
+            label.enableWrapText = false;
+        }
+    }
+
+    private initSelfRankFooter() {
+        if (!this.itemNode || !this.viewNode) return;
+        this.prepareRankItemNode(this.itemNode);
+        const layout = this.contentNode?.getComponent(Layout);
+        if (layout) layout.spacingY = 6;
+        if (this.contentNode) this.contentNode.setPosition(0, this.contentNode.position.y, 0);
+        const viewport = this.getScrollViewComponent()?.view?.node;
+        const widget = viewport?.getComponent(Widget);
+        if (widget) {
+            widget.bottom = 205;
+            widget.updateAlignment();
+        }
+
+        const footer = instantiate(this.itemNode);
+        footer.name = 'selfRankFooter';
+        footer.setScale(0.64, 0.64, 1);
+        footer.setPosition(0, -514, 0);
+        footer.active = true;
+        this.viewNode.addChild(footer);
+        this.selfRankFooterNode = footer;
+        for (const name of ['bg2', 'headBg', 'defaultHead', 'tierIcon']) {
+            const node = footer.getChildByName(name);
+            if (node) node.active = false;
+        }
+        const background = footer.getChildByName('bg1')?.getComponent(Sprite);
+        if (background && this.selfRankBackground) background.spriteFrame = this.selfRankBackground;
+        this.configureRankLabel(footer.getChildByName('name'), -396, 205, Label.HorizontalAlign.LEFT);
+        this.configureRankLabel(footer.getChildByName('tierLabel'), -15, 240, Label.HorizontalAlign.LEFT);
+        this.configureRankLabel(footer.getChildByName('count'), 388.5, 160, Label.HorizontalAlign.RIGHT);
+        this.configureRankLabel(footer.getChildByName('num'), -110, 130, Label.HorizontalAlign.CENTER);
+        for (const name of ['name', 'tierLabel', 'count', 'num']) {
+            const label = footer.getChildByName(name)?.getComponent(Label);
+            if (label) label.fontSize = 44;
+        }
+        for (let rank = 1; rank <= 3; rank++) {
+            const medal = footer.getChildByName(`${rank}`);
+            medal?.setPosition(-110, 0, 0);
+            medal?.getComponent(UITransform)?.setContentSize(125, 83);
+        }
+        this.setLabelString(footer.getChildByName('name'), '我的排名');
+    }
+
+    private renderSelfRankFooter(data: RankItemData | null) {
+        const footer = this.selfRankFooterNode;
+        if (!footer?.isValid) return;
+        footer.active = true;
+        const rank = data?.rank ?? 0;
+        for (let medal = 1; medal <= 3; medal++) {
+            const node = footer.getChildByName(`${medal}`);
+            if (node) node.active = rank === medal;
+        }
+        const rankNode = footer.getChildByName('num');
+        if (rankNode) rankNode.active = rank < 1 || rank > 3;
+        this.setLabelString(rankNode, rank > 0 ? `${rank}` : '未上榜');
+        const scoreLabel = footer.getChildByName('tierLabel');
+        if (scoreLabel) scoreLabel.active = true;
+        this.setLabelString(scoreLabel, this.nowIndex === 2 ? '最高连胜' : '通过关卡');
+        const count = data?.count ?? this.getLocalServerRankScore(this.nowIndex);
+        this.setLabelString(footer.getChildByName('count'), `${count}${this.nowIndex === 2 ? '胜' : '关'}`);
     }
 
     private getAvailableRankItem(): Node | null {
@@ -484,7 +609,7 @@ export class UIRankLayer extends Component {
     private resolveServerRankEntries(board: JHRankBoard): JHRankEntry[] {
         const entries = (board?.topEntries || []).filter((entry) => !!entry && (entry.rank > 0 || entry.count > 0));
         if (entries.length > 0) return entries;
-        return board?.myInfo ? [board.myInfo] : [];
+        return board?.myInfo?.rank > 0 ? [board.myInfo] : [];
     }
 
     private logServerRankResponse(index: number, rankName: string, board: JHRankBoard, entries: JHRankEntry[]) {
@@ -516,18 +641,6 @@ export class UIRankLayer extends Component {
         return rankData.slice(0, UIRankLayer.SERVER_RANK_DISPLAY_LIMIT);
     }
 
-    private createDefaultSelfRankData(index: number): RankItemData[] {
-        if (index !== 2 && index !== 3) return [];
-        const profile = this.getCachedWechatRankProfile();
-        return [{
-            rank: 1,
-            name: profile?.nickname || this.getFallbackRankName(),
-            count: this.getLocalServerRankScore(index),
-            avatar: profile?.avatarUrl || '',
-            isSelf: true,
-        }];
-    }
-
     private getLocalServerRankScore(index: number): number {
         const rankName = this.getServerRankName(index);
         const value = rankName === SDKManager.instance.getJhRankName('winStreak')
@@ -554,6 +667,7 @@ export class UIRankLayer extends Component {
         if (this.contentNode) this.contentNode.active = false;
         this.setTopRankNodesActive(false);
         if (this.friendRankNode) this.friendRankNode.active = true;
+        if (this.selfRankFooterNode) this.selfRankFooterNode.active = false;
 
         SDKManager.instance.markWechatFriendRankOpened();
         SDKManager.instance.uploadWechatRankScores(ProgressManager.loadLevel(), StreakManager.getStreak());
@@ -601,6 +715,7 @@ export class UIRankLayer extends Component {
     }
 
     private hideFriendRank() {
+        this.friendRankTouchY = null;
         if (this.friendRankNode?.isValid) {
             this.friendRankNode.active = false;
         }
@@ -706,6 +821,10 @@ export class UIRankLayer extends Component {
 
         const friendRankView = friendRankNode.addComponent(SubContextView);
         friendRankView.fps = 30;
+        friendRankNode.on(Node.EventType.TOUCH_START, this.onFriendRankTouchStart, this);
+        friendRankNode.on(Node.EventType.TOUCH_MOVE, this.onFriendRankTouchMove, this);
+        friendRankNode.on(Node.EventType.TOUCH_END, this.onFriendRankTouchEnd, this);
+        friendRankNode.on(Node.EventType.TOUCH_CANCEL, this.onFriendRankTouchEnd, this);
 
         const designSize = (friendRankView as any)._designResolutionSize;
         if (designSize && typeof designSize.set === 'function') {
@@ -719,6 +838,34 @@ export class UIRankLayer extends Component {
         this.friendRankView = friendRankView;
         friendRankNode.active = true;
         return true;
+    }
+
+    private getFriendRankTouchPosition(event: EventTouch): Vec3 | null {
+        const transform = this.friendRankNode?.getComponent(UITransform);
+        if (!transform) return null;
+        const location = event.getUILocation();
+        return transform.convertToNodeSpaceAR(new Vec3(location.x, location.y, 0));
+    }
+
+    private onFriendRankTouchStart(event: EventTouch) {
+        const position = this.getFriendRankTouchPosition(event);
+        const transform = this.friendRankNode?.getComponent(UITransform);
+        if (!position || !transform) return;
+        const y = transform.height / 2 - position.y;
+        this.friendRankTouchY = y >= 544 && y < 912 ? position.y : null;
+    }
+
+    private onFriendRankTouchMove(event: EventTouch) {
+        if (this.friendRankTouchY === null) return;
+        const position = this.getFriendRankTouchPosition(event);
+        if (!position) return;
+        this.postOpenDataMessage({ type: 'scrollRank', deltaY: position.y - this.friendRankTouchY });
+        this.friendRankTouchY = position.y;
+        event.propagationStopped = true;
+    }
+
+    private onFriendRankTouchEnd() {
+        this.friendRankTouchY = null;
     }
 
     private setTopRankNodesActive(active: boolean) {
@@ -798,6 +945,7 @@ export class UIRankLayer extends Component {
             rank: i + 1,
             name,
             count: counts[i],
+            isSelf: i === 0,
         }));
     }
 
@@ -807,7 +955,7 @@ export class UIRankLayer extends Component {
         this.setAvatar(item, data.avatar);
         this.setLabelString(item.getChildByName('num'), `${data.rank}`);
         this.setLabelString(item.getChildByName('name'), data.name);
-        this.setLabelString(item.getChildByName('count'), `${data.count}`);
+        this.setLabelString(item.getChildByName('count'), this.nowIndex === 2 ? `${data.count}连胜` : `第${data.count}关`);
         this.setTier(item);
     }
 
@@ -978,7 +1126,7 @@ export class UIRankLayer extends Component {
 
     private normalizeRemoteAvatarUrl(avatarUrl?: string): string {
         const url = typeof avatarUrl === 'string' ? avatarUrl.trim() : '';
-        if (!url) return '';
+        if (!url || url.toLowerCase().includes('1.jpg')) return '';
         if (/^https?:\/\//i.test(url)) return url;
         if (url.indexOf('//') === 0) return `https:${url}`;
         return '';

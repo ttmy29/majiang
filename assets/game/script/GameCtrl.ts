@@ -2633,7 +2633,10 @@ export class GameCtrl extends Component {
         if (!winStreakNode) {
             const claimed = StreakManager.claimRewards(settlement.claimableRewards);
             if (claimed.length > 0) {
-                LayerManager.instance.showToast(`已领取${StreakManager.getRewardDescription(claimed[0])}`);
+                const rewardText = claimed
+                    .map((reward) => `${StreakManager.getRewardName(reward.type)} *${reward.amount}`)
+                    .join('、');
+                LayerManager.instance.showToast(`获得${rewardText}`);
             }
             continueToNextLevel();
         }

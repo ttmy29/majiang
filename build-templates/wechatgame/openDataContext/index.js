@@ -29,20 +29,27 @@ var rankBgPaths = {
 var rankMedalPaths = ['openDataContext/1.png', 'openDataContext/2.png', 'openDataContext/3.png'];
 var headBgPath = 'openDataContext/headBg.png';
 var defaultHeadPath = 'openDataContext/defaultHead.png';
+var selfRankBgPath = 'openDataContext/selfRankBg.png';
+var currentSelfRank = null;
+var rankScrollOffset = 0;
+var rankViewActive = false;
+var rankRequestToken = 0;
+var selfRankFooterTop = 919.52;
 var rankItemBase = {
     viewportWidth: 640,
-    left: 25.6,
-    width: 576,
-    height: 74,
-    gap: 2,
-    top: 520,
-    rankX: 49.18976,
+    left: 57.92,
+    width: 524.16,
+    height: 88.96,
+    gap: 3.84,
+    top: 544,
+    rankX: 50,
     medalX: 49.89184,
     avatarX: 128.048,
-    nameX: 221.43296,
+    nameX: 195.2,
+    nameWidth: 185.6,
     tierIconX: 328.78016,
     tierNameX: 387.74912,
-    scoreX: 490.77312,
+    scoreX: 510.72,
     medalWidth: 80.384,
     medalHeights: [52.736, 53.248, 52.736],
     avatarSize: 64.64,
@@ -54,9 +61,9 @@ var rankItemBase = {
     textOutlineWidth: 1.28,
 };
 var topRankBase = [
-    { centerX: 320, centerY: 317, nameY: 393, avatarSize: 101 },
-    { centerX: 141, centerY: 352, nameY: 428, avatarSize: 101 },
-    { centerX: 499, centerY: 368, nameY: 444, avatarSize: 101 },
+    { centerX: 320, centerY: 304, nameY: 370, scoreY: 398, avatarSize: 78 },
+    { centerX: 141, centerY: 339, nameY: 397, scoreY: 425, avatarSize: 78 },
+    { centerX: 499, centerY: 355, nameY: 413, scoreY: 441, avatarSize: 78 },
 ];
 
 function clearCanvas() {
@@ -142,7 +149,7 @@ function normalizeRankData(rawData, key) {
 
     return data.filter(function(item) {
         return item.rankScore > 0;
-    }).slice(0, 10);
+    });
 }
 
 function normalizeFallbackSelf(data) {
@@ -159,11 +166,6 @@ function normalizeFallbackSelf(data) {
         isSelf: true,
         isSelfFallback: true,
     };
-}
-
-function getFallbackRankData() {
-    var self = normalizeFallbackSelf(currentFallbackSelf);
-    return self ? [self] : [];
 }
 
 function getRankUserId(item) {
@@ -189,6 +191,7 @@ function mergeFallbackSelf(rankData) {
     for (var i = 0; i < data.length; i++) {
         if (data[i].isSelf || data[i].isSelfFallback || isSameRankUser(data[i], self)) {
             data[i].isSelf = true;
+            data[i].rankScore = Math.max(data[i].rankScore, self.rankScore);
             hasSelf = true;
         }
     }
@@ -198,20 +201,17 @@ function mergeFallbackSelf(rankData) {
         return b.rankScore - a.rankScore;
     });
 
-    var selfIndex = data.indexOf(self);
-    if (selfIndex >= 10) {
-        return data.slice(0, 9).concat([self]);
+    currentSelfRank = null;
+    for (var rank = 0; rank < data.length; rank++) {
+        data[rank].rank = rank + 1;
+        if (isSelfRankItem(data[rank])) currentSelfRank = data[rank];
     }
     return data.slice(0, 10);
 }
 
 function drawFallbackOrEmpty() {
-    var fallbackData = getFallbackRankData();
-    if (fallbackData.length) {
-        drawRankList(fallbackData);
-    } else {
-        drawEmpty();
-    }
+    currentSelfRank = normalizeFallbackSelf(currentFallbackSelf);
+    drawRankList([]);
 }
 
 function traceRoundRect(x, y, width, height, radius) {
@@ -281,10 +281,15 @@ function drawText(text, x, y, size, color, align, bold) {
     ctx.fillText(text, x, y);
 }
 
-function drawRankText(text, x, y, size, outlineWidth) {
+function drawRankText(text, x, y, size, outlineWidth, align, maxWidth) {
     ctx.font = size + 'px Arial';
-    ctx.textAlign = 'center';
+    ctx.textAlign = align || 'center';
     ctx.textBaseline = 'middle';
+    if (maxWidth && ctx.measureText) {
+        while (text.length > 1 && ctx.measureText(text).width > maxWidth) {
+            text = text.slice(0, -2) + '…';
+        }
+    }
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#8b3a1a';
     ctx.lineWidth = outlineWidth * 2;
@@ -340,6 +345,7 @@ function clipText(text, maxChars) {
 }
 
 function drawAvatar(url, x, y, size, fallbackText) {
+    if (typeof url !== 'string' || url.toLowerCase().indexOf('1.jpg') !== -1) url = '';
     var radius = Math.max(8, size * 0.18);
     if (!drawImageAsset(headBgPath, x, y, size, size)) {
         drawRoundRect(x, y, size, size, radius, '#f2d29b');
@@ -404,18 +410,62 @@ function drawTopRankList(data, scale) {
             centerX,
             layout.nameY * scale,
             rankItemBase.textFontSize * scale,
-            rankItemBase.textOutlineWidth * scale
+            rankItemBase.textOutlineWidth * scale,
+            'center',
+            160 * scale
+        );
+        drawRankText(
+            currentKey === 'winsk' ? String(item.rankScore) + '连胜' : '第' + String(item.rankScore) + '关',
+            centerX,
+            layout.scoreY * scale,
+            rankItemBase.textFontSize * scale,
+            rankItemBase.textOutlineWidth * scale,
+            'center',
+            160 * scale
         );
     }
 }
 
+function drawSelfRankFooter(data, scale) {
+    var self = currentSelfRank;
+    if (!self) {
+        for (var i = 0; i < data.length; i++) {
+            if (isSelfRankItem(data[i])) self = data[i];
+        }
+    }
+    var x = rankItemBase.left * scale;
+    var y = selfRankFooterTop * scale;
+    var width = rankItemBase.width * scale;
+    var height = rankItemBase.height * scale;
+    var centerY = y + height / 2;
+    var fontSize = 28.16 * scale;
+    var outline = rankItemBase.textOutlineWidth * scale;
+    if (!drawImageAsset(selfRankBgPath, x, y, width, height)) {
+        drawRoundRect(x, y, width, height, 12 * scale, '#7eac5c');
+    }
+    drawRankText('我的排名', x + 8.64 * scale, centerY, fontSize, outline, 'left');
+    var rank = self && self.rank > 0 ? self.rank : 0;
+    var rankX = x + 191.68 * scale;
+    if (rank >= 1 && rank <= 3) {
+        if (!drawImageAsset(rankMedalPaths[rank - 1], rankX - 40 * scale, centerY - 26.56 * scale, 80 * scale, 53.12 * scale)) {
+            drawRankText(String(rank), rankX, centerY, fontSize, outline);
+        }
+    } else {
+        drawRankText(rank > 0 ? String(rank) : '未上榜', rankX, centerY, fontSize, outline);
+    }
+    drawRankText(currentScoreLabel, x + 252.48 * scale, centerY, fontSize, outline, 'left');
+    var score = self ? self.rankScore : Number(currentFallbackSelf && currentFallbackSelf.rankScore) || 0;
+    drawRankText(String(score) + (currentKey === 'winsk' ? '胜' : '关'), x + 510.72 * scale, centerY, fontSize, outline, 'right');
+}
+
 function drawRankList(data) {
-    if (!ctx || !sharedCanvas) return;
+    if (!ctx || !sharedCanvas || !rankViewActive) return;
     lastRankData = data || [];
     clearCanvas();
 
     if (!lastRankData.length) {
         drawEmpty();
+        drawSelfRankFooter([], sharedCanvas.width / rankItemBase.viewportWidth);
         return;
     }
 
@@ -424,7 +474,7 @@ function drawRankList(data) {
     var rowWidth = rankItemBase.width * rowScale;
     var rowHeight = rankItemBase.height * rowScale;
     var rowGap = rankItemBase.gap * rowScale;
-    var startY = rankItemBase.top * rowScale;
+    var startY = (rankItemBase.top - rankScrollOffset) * rowScale;
     var rowX = rankItemBase.left * rowScale;
     var avatarSize = rankItemBase.avatarSize * rowScale;
     var medalWidth = rankItemBase.medalWidth * rowScale;
@@ -433,6 +483,10 @@ function drawRankList(data) {
     var textOutlineWidth = rankItemBase.textOutlineWidth * rowScale;
     drawTopRankList(lastRankData, rowScale);
 
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rowX, rankItemBase.top * rowScale, rowWidth, (selfRankFooterTop - 8 - rankItemBase.top) * rowScale);
+    ctx.clip();
     for (var i = 3; i < lastRankData.length; i++) {
         var item = lastRankData[i];
         var y = startY + (i - 3) * (rowHeight + rowGap);
@@ -444,15 +498,18 @@ function drawRankList(data) {
         var scoreX = rowX + rankItemBase.scoreX * rowScale;
         drawRankBackground(isSelfRankItem(item), rowX, y, rowWidth, rowHeight);
 
-        drawRankText(String(i + 1), rankX, centerY, rankFontSize, textOutlineWidth);
+        drawRankText(String(item.rank || i + 1), rankX, centerY, rankFontSize, textOutlineWidth);
 
         drawAvatar(item.avatarUrl, avatarX, centerY - avatarSize / 2, avatarSize, item.nickname);
-        drawRankText(clipText(item.nickname, 8), nameX, centerY, textFontSize, textOutlineWidth);
-        drawRankText(String(item.rankScore), scoreX, centerY, textFontSize, textOutlineWidth);
+        drawRankText(clipText(item.nickname, 16), nameX, centerY, textFontSize, textOutlineWidth, 'left', rankItemBase.nameWidth * rowScale);
+        drawRankText(currentKey === 'winsk' ? String(item.rankScore) + '连胜' : '第' + String(item.rankScore) + '关', scoreX, centerY, textFontSize, textOutlineWidth, 'right');
     }
+    ctx.restore();
+    drawSelfRankFooter(lastRankData, rowScale);
 }
 
 function requestFriendRank(key) {
+    var requestToken = ++rankRequestToken;
     if (!env || !env.getFriendCloudStorage) {
         drawFallbackOrEmpty();
         return;
@@ -461,9 +518,11 @@ function requestFriendRank(key) {
     env.getFriendCloudStorage({
         keyList: [key],
         success: function(res) {
+            if (!rankViewActive || requestToken !== rankRequestToken) return;
             drawRankList(mergeFallbackSelf(normalizeRankData(res && res.data, key)));
         },
         fail: function() {
+            if (!rankViewActive || requestToken !== rankRequestToken) return;
             drawFallbackOrEmpty();
         },
     });
@@ -473,6 +532,11 @@ function handleMessage(data) {
     if (!data) return;
 
     if (data.type === 'clear') {
+        rankViewActive = false;
+        rankRequestToken++;
+        lastRankData = [];
+        currentSelfRank = null;
+        rankScrollOffset = 0;
         clearCanvas();
         return;
     }
@@ -482,12 +546,24 @@ function handleMessage(data) {
         return;
     }
 
+    if (data.type === 'scrollRank') {
+        if (!rankViewActive) return;
+        var listHeight = Math.max(0, lastRankData.length - 3) * (rankItemBase.height + rankItemBase.gap) - rankItemBase.gap;
+        var viewportHeight = selfRankFooterTop - 8 - rankItemBase.top;
+        rankScrollOffset = Math.max(0, Math.min(Math.max(0, listHeight - viewportHeight), rankScrollOffset + (Number(data.deltaY) || 0)));
+        drawRankList(lastRankData);
+        return;
+    }
+
     if (data.type === 'rankData' || data.type === 'winStreak') {
+        rankViewActive = true;
         currentKey = data.key || (data.type === 'winStreak' ? 'winsk' : 'level');
         currentTitle = data.title || currentTitle;
         currentScoreLabel = data.scoreLabel || currentScoreLabel;
         currentEmptyText = data.emptyText || currentEmptyText;
         currentFallbackSelf = data.fallbackSelf || null;
+        currentSelfRank = null;
+        rankScrollOffset = 0;
         syncRankTierConfig(data);
         requestFriendRank(currentKey);
     }

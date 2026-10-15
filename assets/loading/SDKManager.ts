@@ -86,7 +86,6 @@ export class SDKManager {
     private static readonly jhRankProfileStorageKey: string = 'mahjong_match_rank_profile';
     private static readonly jhFallbackNicknameStorageKey: string = 'mahjong_match_rank_fallback_nickname';
     private static readonly wechatFriendRankOpenedStorageKey: string = 'mahjong_match_wechat_friend_rank_opened';
-    private static readonly jhDefaultAvatarUrl: string = 'https://sziaa-cdn.jinkezhexin.top/mahjong_share/1.jpg';
     private static jhRankNames: { level: string; winStreak: string } = {
         level: "level",
         winStreak: "winsk",
@@ -562,7 +561,7 @@ export class SDKManager {
     }
 
     private getFallbackJhRankUploadProfile(): JHRankUploadProfile {
-        return this.normalizeJhRankUploadProfile(this.getFallbackJhRankNickname(), SDKManager.jhDefaultAvatarUrl, true)!;
+        return this.normalizeJhRankUploadProfile(this.getFallbackJhRankNickname(), '', true)!;
     }
 
     private getFallbackJhRankNickname(): string {
@@ -582,12 +581,12 @@ export class SDKManager {
     private normalizeJhRankUploadProfile(nickname: any, avatarUrl: any, allowFallback: boolean): JHRankUploadProfile | null {
         const name = typeof nickname === 'string' ? nickname.trim().slice(0, 100) : '';
         const avatarRaw = typeof avatarUrl === 'string' ? avatarUrl.trim() : '';
-        const avatar = avatarRaw.length <= 200 ? avatarRaw : '';
+        const avatar = avatarRaw.length <= 200 && !avatarRaw.toLowerCase().includes('1.jpg') ? avatarRaw : '';
         if (!name && !allowFallback) return null;
 
         return {
             nickname: name || this.getFallbackJhRankNickname(),
-            avatarUrl: avatar || SDKManager.jhDefaultAvatarUrl,
+            avatarUrl: avatar,
         };
     }
 
@@ -661,7 +660,7 @@ export class SDKManager {
                         window.dnSDK?.onRegister();
                         sys.localStorage.setItem("mahjong_match_first", "true");
                     } else {
-                        window.dnSDK?.track('RE_ACTIVE', { backFlowDay: 7 });
+                        //window.dnSDK?.track('RE_ACTIVE', { backFlowDay: 7 });
                     }
                     // console.log("***********")
                     // console.log(a)

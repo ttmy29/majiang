@@ -1,5 +1,6 @@
 import { _decorator, Button, Component, director, DirectorEvent, EventTouch, Label, Layout, Node, ProgressBar, ScrollView, Sprite, SpriteFrame, tween, Tween, UIOpacity, UITransform, Vec3, view, Widget } from 'cc';
 import { AudioManager } from './manager/AudioManager';
+import { LayerManager } from './manager/LayerManager';
 import { Constants } from './config/Constants';
 import { ProgressManager } from './manager/ProgressManager';
 import { StorageKey, StorageManager } from './manager/StorageManager';
@@ -678,6 +679,11 @@ export class UIWinStreakLayer extends Component {
         this.pendingAutoClaimRewards = [];
         const claimed = StreakManager.claimRewards(pending);
         if (claimed.length <= 0 || !showFeedback || !this.node?.isValid) return;
+
+        const rewardText = claimed
+            .map((reward) => `${StreakManager.getRewardName(reward.type)} *${reward.amount}`)
+            .join('、');
+        LayerManager.instance.showToast(`获得${rewardText}`);
 
         this.refreshRewardView(false);
         this.scheduleOnce(() => this.positionAndScrollToProgress(this.rewardViewState?.progress ?? 0), 0);
