@@ -1,4 +1,4 @@
-{
+﻿{
   "level_no": 278,
   "level_json": "level_279",
   "index_config": {
@@ -18,32 +18,32 @@
     "task_count": 29,
     "chain_count": 0,
     "rows_per_layer": [
-      17,
-      17,
-      17,
-      17,
-      17
+      18,
+      18,
+      18,
+      18,
+      18
     ],
     "cols_per_row_minmax": [
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ]
     ],
     "tile_counts": {
@@ -63,12 +63,41 @@
       "6003": 6
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
+    "pressure_tuning": "V25_普通_20261016",
     "pressure_peak": 4,
-    "pressure_windows": 5,
-    "pressure_average": 1.49,
+    "pressure_windows": 4,
+    "pressure_average": 1.9455,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 26,
+      "1": 22,
+      "2": 18,
+      "3": 12,
+      "4": 9
+    },
+    "iron_count": 0,
+    "flip_count": 0,
+    "planned_difficulty": "普通",
+    "flow_version": "V30_251_300_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 3,
+    "random_full0_rate_1500": 0.3,
+    "wrong_route_first_full_ratio": 0.24138,
+    "wrong_route_failure_progress_ratio": 0.45402,
+    "failure_point_count": 5,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "constructive_policy": "earlier",
+    "validation_version": "V30_mechanism_safe_20261016",
+    "validation_exceptions": "短有效轨迹沿用V25自适应压力门槛：窗口≥1、均压≥1.20。",
+    "full0_proof_valid": true
   },
   "positions": [
     {
@@ -147,7 +176,7 @@
       "z_layer": 0,
       "x_col": 10,
       "y_row": 7,
-      "tile_id": 2004
+      "tile_id": 1006
     },
     {
       "z_layer": 0,
@@ -243,13 +272,13 @@
       "z_layer": 1,
       "x_col": 4,
       "y_row": 1,
-      "tile_id": 2003
+      "tile_id": 2005
     },
     {
       "z_layer": 1,
       "x_col": 6,
       "y_row": 1,
-      "tile_id": 2005
+      "tile_id": 2003
     },
     {
       "z_layer": 1,
@@ -267,7 +296,7 @@
       "z_layer": 1,
       "x_col": 3,
       "y_row": 6,
-      "tile_id": 1006
+      "tile_id": 2004
     },
     {
       "z_layer": 1,
@@ -721,7 +750,7 @@
           0,
           6001,
           0,
-          2004,
+          1006,
           0,
           0,
           0
@@ -909,9 +938,9 @@
           0,
           0,
           0,
-          2003,
-          0,
           2005,
+          0,
+          2003,
           0,
           2005,
           0,
@@ -988,7 +1017,7 @@
           0,
           6001,
           0,
-          1006,
+          2004,
           0,
           1008,
           0,
@@ -2054,31 +2083,31 @@
         1008,
         6001,
         2004,
-        4005,
+        4004,
         3004,
         5004,
         6003,
         1006,
-        4004,
+        4005,
         1001,
         5002,
         2003,
-        2005,
+        3004,
         1008,
-        1006,
+        2003,
         4004,
-        1001,
+        1006,
         4005,
-        3004,
+        2005,
         3001,
-        5002,
+        6003,
         2003,
         5004,
         2005,
-        6001,
+        5002,
         2004,
-        6003,
-        2003
+        1001,
+        6001
       ]
     ],
     "taskNum": [

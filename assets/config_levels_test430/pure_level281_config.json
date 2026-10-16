@@ -18,32 +18,32 @@
     "task_count": 24,
     "chain_count": 0,
     "rows_per_layer": [
-      13,
-      13,
-      13,
-      13,
-      13
+      14,
+      14,
+      14,
+      14,
+      14
     ],
     "cols_per_row_minmax": [
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ],
       [
-        13,
-        13
+        14,
+        14
       ]
     ],
     "tile_counts": {
@@ -64,12 +64,41 @@
       "6002": 6
     },
     "pressure_curve": "wave",
-    "pressure_tuning": "elevated_experiment",
+    "pressure_tuning": "V25_普通困难_20261016",
     "pressure_peak": 5,
-    "pressure_windows": 4,
-    "pressure_average": 1.74,
+    "pressure_windows": 6,
+    "pressure_average": 2.5455,
     "tile_dispersion_rule": "same_layer_chebyshev_le_2_no_component_ge_3",
-    "tile_dispersion_components": 0
+    "tile_dispersion_components": 0,
+    "layer_counts": {
+      "0": 16,
+      "1": 20,
+      "2": 20,
+      "3": 12,
+      "4": 4
+    },
+    "iron_count": 0,
+    "flip_count": 7,
+    "planned_difficulty": "普通困难",
+    "flow_version": "V30_251_300_V25_continuation",
+    "advanced_hard_profile": null,
+    "advanced_hard_type": null,
+    "fixed_success_count": 3,
+    "random_full0_rate_1500": 0.31133,
+    "wrong_route_first_full_ratio": 0.33333,
+    "wrong_route_failure_progress_ratio": 0.52778,
+    "failure_point_count": 5,
+    "failure_point_bins": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "constructive_policy": "later",
+    "validation_version": "V30_mechanism_safe_20261016",
+    "validation_exceptions": "原骨架开局可点4，不修改坐标；短有效轨迹沿用V25自适应压力门槛：窗口≥2、均压≥1.55。",
+    "full0_proof_valid": true
   },
   "positions": [
     {
@@ -94,7 +123,7 @@
       "z_layer": 0,
       "x_col": 2,
       "y_row": 4,
-      "tile_id": 6001
+      "tile_id": 5004
     },
     {
       "z_layer": 0,
@@ -106,13 +135,13 @@
       "z_layer": 0,
       "x_col": 8,
       "y_row": 4,
-      "tile_id": 4002
+      "tile_id": 2002
     },
     {
       "z_layer": 0,
       "x_col": 10,
       "y_row": 4,
-      "tile_id": 2002
+      "tile_id": 4002
     },
     {
       "z_layer": 0,
@@ -124,7 +153,7 @@
       "z_layer": 0,
       "x_col": 10,
       "y_row": 6,
-      "tile_id": 5004
+      "tile_id": 6002
     },
     {
       "z_layer": 0,
@@ -136,19 +165,19 @@
       "z_layer": 0,
       "x_col": 4,
       "y_row": 8,
-      "tile_id": 2009
+      "tile_id": 5004
     },
     {
       "z_layer": 0,
       "x_col": 8,
       "y_row": 8,
-      "tile_id": 1004
+      "tile_id": 1003
     },
     {
       "z_layer": 0,
       "x_col": 10,
       "y_row": 8,
-      "tile_id": 5004
+      "tile_id": 3003
     },
     {
       "z_layer": 0,
@@ -232,7 +261,7 @@
       "z_layer": 1,
       "x_col": 1,
       "y_row": 7,
-      "tile_id": 6001
+      "tile_id": 3003
     },
     {
       "z_layer": 1,
@@ -250,7 +279,7 @@
       "z_layer": 1,
       "x_col": 3,
       "y_row": 9,
-      "tile_id": 6002
+      "tile_id": 2009
     },
     {
       "z_layer": 1,
@@ -262,13 +291,13 @@
       "z_layer": 1,
       "x_col": 11,
       "y_row": 9,
-      "tile_id": 1003
+      "tile_id": 1004
     },
     {
       "z_layer": 1,
       "x_col": 3,
       "y_row": 11,
-      "tile_id": 5004
+      "tile_id": 3006
     },
     {
       "z_layer": 1,
@@ -322,7 +351,7 @@
       "z_layer": 2,
       "x_col": 2,
       "y_row": 2,
-      "tile_id": 2002
+      "tile_id": 2008
     },
     {
       "z_layer": 2,
@@ -340,7 +369,7 @@
       "z_layer": 2,
       "x_col": 0,
       "y_row": 4,
-      "tile_id": 3003
+      "tile_id": 6001
     },
     {
       "z_layer": 2,
@@ -364,7 +393,7 @@
       "z_layer": 2,
       "x_col": 0,
       "y_row": 10,
-      "tile_id": 2002
+      "tile_id": 1003
     },
     {
       "z_layer": 2,
@@ -388,7 +417,7 @@
       "z_layer": 2,
       "x_col": 2,
       "y_row": 12,
-      "tile_id": 3006
+      "tile_id": 5004
     },
     {
       "z_layer": 2,
@@ -400,7 +429,7 @@
       "z_layer": 2,
       "x_col": 8,
       "y_row": 12,
-      "tile_id": 2008
+      "tile_id": 2002
     },
     {
       "z_layer": 2,
@@ -430,7 +459,7 @@
       "z_layer": 3,
       "x_col": 3,
       "y_row": 3,
-      "tile_id": 3003
+      "tile_id": 6001
     },
     {
       "z_layer": 3,
@@ -448,19 +477,19 @@
       "z_layer": 3,
       "x_col": 1,
       "y_row": 9,
-      "tile_id": 1006
+      "tile_id": 5001
     },
     {
       "z_layer": 3,
       "x_col": 3,
       "y_row": 9,
-      "tile_id": 1003
+      "tile_id": 1004
     },
     {
       "z_layer": 3,
       "x_col": 9,
       "y_row": 9,
-      "tile_id": 1004
+      "tile_id": 2002
     },
     {
       "z_layer": 3,
@@ -496,7 +525,7 @@
       "z_layer": 4,
       "x_col": 2,
       "y_row": 10,
-      "tile_id": 5001
+      "tile_id": 1006
     },
     {
       "z_layer": 4,
@@ -576,15 +605,15 @@
         [
           0,
           0,
-          6001,
+          5004,
           0,
           4002,
           0,
           0,
-          0,
-          4002,
           0,
           2002,
+          0,
+          4002,
           0,
           0,
           0
@@ -616,7 +645,7 @@
           0,
           0,
           0,
-          5004,
+          6002,
           0,
           0,
           0
@@ -642,13 +671,13 @@
           0,
           2009,
           0,
-          2009,
-          0,
-          0,
-          0,
-          1004,
-          0,
           5004,
+          0,
+          0,
+          0,
+          1003,
+          0,
+          3003,
           0,
           0,
           0
@@ -849,7 +878,7 @@
         ],
         [
           0,
-          6001,
+          3003,
           0,
           0,
           0,
@@ -883,7 +912,7 @@
           0,
           3006,
           0,
-          6002,
+          2009,
           0,
           0,
           0,
@@ -891,7 +920,7 @@
           0,
           6001,
           0,
-          1003,
+          1004,
           0,
           0
         ],
@@ -915,7 +944,7 @@
           0,
           0,
           0,
-          5004,
+          3006,
           0,
           3003,
           0,
@@ -996,7 +1025,7 @@
         [
           3004,
           0,
-          2002,
+          2008,
           0,
           0,
           0,
@@ -1026,7 +1055,7 @@
           0
         ],
         [
-          3003,
+          6001,
           0,
           0,
           0,
@@ -1122,7 +1151,7 @@
           0
         ],
         [
-          2002,
+          1003,
           0,
           4002,
           0,
@@ -1156,13 +1185,13 @@
         [
           0,
           0,
-          3006,
+          5004,
           0,
           3006,
           0,
           0,
           0,
-          2008,
+          2002,
           0,
           2002,
           0,
@@ -1239,7 +1268,7 @@
           0,
           3004,
           0,
-          3003,
+          6001,
           0,
           0,
           0,
@@ -1333,15 +1362,15 @@
         ],
         [
           0,
-          1006,
-          0,
-          1003,
-          0,
-          0,
-          0,
-          0,
+          5001,
           0,
           1004,
+          0,
+          0,
+          0,
+          0,
+          0,
+          2002,
           0,
           5004,
           0,
@@ -1576,7 +1605,7 @@
         [
           0,
           0,
-          5001,
+          1006,
           0,
           0,
           0,
@@ -1641,30 +1670,30 @@
     ],
     "task": [
       [
-        3004,
+        5004,
         5001,
         2008,
         3006,
-        5004,
-        1004,
-        6001,
+        3003,
         2002,
+        6001,
+        1004,
         1003,
         6002,
         4002,
-        3003,
-        4004,
+        3004,
+        3006,
         2002,
         1006,
         6001,
         3003,
+        1003,
         6002,
-        2009,
-        3006,
+        5004,
         4002,
         1006,
-        5004,
-        1003
+        4004,
+        2009
       ]
     ],
     "taskNum": [
